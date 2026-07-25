@@ -1,0 +1,752 @@
+{
+  "kind": "sqlite-index-inventory",
+  "inspectionDate": "2026-07-25",
+  "repository": "kitamo-ph/owner-seller-mobile",
+  "branch": "codex/pre-internal-hardening",
+  "commit": "6ed9ace3a92f7435f84c2f75f0084a03070ae2e4",
+  "source": "Fresh replay of ordered migration up strings into an OS-temporary SQLite database.",
+  "recordCount": 41,
+  "recordSemantics": {
+    "idx_app_settings_key": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Lookup and upsert application settings by unique logical key."
+    },
+    "idx_branches_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List and resolve branches within a business."
+    },
+    "idx_fixed_cost_payments_business_id": {
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "likelyQueryPurpose": "Filter payment records for business-scoped reporting."
+    },
+    "idx_fixed_cost_payments_cost_id": {
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "likelyQueryPurpose": "Find payment occurrences for one fixed cost."
+    },
+    "idx_fixed_costs_business_id": {
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "likelyQueryPurpose": "List fixed costs for a business and report period."
+    },
+    "idx_ingredient_lots_business_id": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "Scope ingredient-lot inventory to a business."
+    },
+    "idx_ingredient_lots_ingredient_id": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "List available lots for one ingredient."
+    },
+    "idx_ingredient_lots_status": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "Filter active, depleted, or archived lots."
+    },
+    "idx_ingredient_movements_business_id": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "Read grocery movement history by business."
+    },
+    "idx_ingredient_movements_ingredient_id": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "Read movement history for one ingredient."
+    },
+    "idx_ingredients_business_id": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "List ingredient catalog rows within a business."
+    },
+    "idx_ingredients_name": {
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "likelyQueryPurpose": "Support ingredient-name lookup and ordering."
+    },
+    "idx_inventory_movements_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Read stock movement history by business."
+    },
+    "idx_inventory_movements_product_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Read stock movement history for one product."
+    },
+    "idx_offline_queue_status": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Locate pending or retryable queue items; no active consumer currently exists."
+    },
+    "idx_owner_alerts_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List owner alerts within a business."
+    },
+    "idx_owner_alerts_product_id": {
+      "definingMigration": "src/db/migrations/003_owner_alert_fields.ts",
+      "likelyQueryPurpose": "Find and resolve product-specific low-stock alerts."
+    },
+    "idx_owner_alerts_status": {
+      "definingMigration": "src/db/migrations/003_owner_alert_fields.ts",
+      "likelyQueryPurpose": "Filter active/open versus resolved alerts."
+    },
+    "idx_problem_reports_branch_id": {
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "likelyQueryPurpose": "Filter diagnostics reports by branch context."
+    },
+    "idx_problem_reports_business_id": {
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "likelyQueryPurpose": "Filter diagnostics reports by business context."
+    },
+    "idx_problem_reports_created_at": {
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "likelyQueryPurpose": "List newest diagnostics reports first."
+    },
+    "idx_problem_reports_status": {
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "likelyQueryPurpose": "Filter open versus resolved diagnostics reports."
+    },
+    "idx_product_transfers_business_id": {
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "likelyQueryPurpose": "List transfer history within a business."
+    },
+    "idx_production_batches_branch_id": {
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "likelyQueryPurpose": "List production history for a branch."
+    },
+    "idx_production_batches_business_id": {
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "likelyQueryPurpose": "List and aggregate production history for a business."
+    },
+    "idx_production_usages_batch_id": {
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "likelyQueryPurpose": "Load ingredient usage snapshots for one production batch."
+    },
+    "idx_production_usages_business_id": {
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "likelyQueryPurpose": "Scope production usage history to a business."
+    },
+    "idx_products_branch_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List branch-scoped product inventory."
+    },
+    "idx_products_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List product inventory within a business."
+    },
+    "idx_receipt_records_sale_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Resolve the stored receipt snapshot for a sale."
+    },
+    "idx_recipe_batches_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List legacy cooked-batch history within a business."
+    },
+    "idx_recipe_ingredient_lines_business_id": {
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "likelyQueryPurpose": "Scope recipe ingredient-line queries to a business."
+    },
+    "idx_recipe_ingredient_lines_recipe_id": {
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "likelyQueryPurpose": "Load all ingredient lines for one recipe."
+    },
+    "idx_recipes_business_id": {
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "likelyQueryPurpose": "List recipes within a business."
+    },
+    "idx_recipes_output_product_id": {
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "likelyQueryPurpose": "Resolve a recipe for its output product."
+    },
+    "idx_sale_ingredient_usages_business_id": {
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "likelyQueryPurpose": "Scope cook-upon-order usage history to a business."
+    },
+    "idx_sale_ingredient_usages_sale_id": {
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "likelyQueryPurpose": "Load ingredient usage and shortfall evidence for a sale."
+    },
+    "idx_sale_items_sale_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "Load line items for a sale."
+    },
+    "idx_sales_branch_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List and aggregate sales for a branch."
+    },
+    "idx_sales_business_id": {
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "likelyQueryPurpose": "List and aggregate sales for a business."
+    },
+    "idx_sales_checkout_token": {
+      "definingMigration": "src/db/migrations/009_checkout_idempotency.ts",
+      "likelyQueryPurpose": "Enforce idempotent non-deleted sale creation for a non-null checkout token."
+    }
+  },
+  "semanticsConfidence": "Index definitions are Confirmed. Query purposes are Likely, based on inspected repository and service predicates; SQLite query plans were not profiled.",
+  "records": [
+    {
+      "indexName": "idx_app_settings_key",
+      "tableName": "app_settings",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "key"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_app_settings_key ON app_settings(key)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_branches_business_id",
+      "tableName": "branches",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_branches_business_id ON branches(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_fixed_cost_payments_business_id",
+      "tableName": "fixed_cost_payments",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_fixed_cost_payments_business_id ON fixed_cost_payments(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_fixed_cost_payments_cost_id",
+      "tableName": "fixed_cost_payments",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "fixed_cost_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_fixed_cost_payments_cost_id ON fixed_cost_payments(fixed_cost_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_fixed_costs_business_id",
+      "tableName": "fixed_costs",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_fixed_costs_business_id ON fixed_costs(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredient_lots_business_id",
+      "tableName": "ingredient_lots",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredient_lots_business_id ON ingredient_lots(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredient_lots_ingredient_id",
+      "tableName": "ingredient_lots",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "ingredient_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredient_lots_ingredient_id ON ingredient_lots(ingredient_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredient_lots_status",
+      "tableName": "ingredient_lots",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "status"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredient_lots_status ON ingredient_lots(status)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredient_movements_business_id",
+      "tableName": "ingredient_movements",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredient_movements_business_id ON ingredient_movements(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredient_movements_ingredient_id",
+      "tableName": "ingredient_movements",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "ingredient_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredient_movements_ingredient_id ON ingredient_movements(ingredient_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredients_business_id",
+      "tableName": "ingredients",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredients_business_id ON ingredients(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_ingredients_name",
+      "tableName": "ingredients",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "name"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_ingredients_name ON ingredients(name)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_inventory_movements_business_id",
+      "tableName": "inventory_movements",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_inventory_movements_business_id ON inventory_movements(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_inventory_movements_product_id",
+      "tableName": "inventory_movements",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "product_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_inventory_movements_product_id ON inventory_movements(product_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_offline_queue_status",
+      "tableName": "offline_queue",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "status"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_offline_queue_status ON offline_queue(status)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_owner_alerts_business_id",
+      "tableName": "owner_alerts",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_owner_alerts_business_id ON owner_alerts(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_owner_alerts_product_id",
+      "tableName": "owner_alerts",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "product_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_owner_alerts_product_id ON owner_alerts(product_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_owner_alerts_status",
+      "tableName": "owner_alerts",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "status"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_owner_alerts_status ON owner_alerts(status)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_problem_reports_branch_id",
+      "tableName": "problem_reports",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "branch_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_problem_reports_branch_id ON problem_reports(branch_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_problem_reports_business_id",
+      "tableName": "problem_reports",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_problem_reports_business_id ON problem_reports(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_problem_reports_created_at",
+      "tableName": "problem_reports",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "created_at"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_problem_reports_created_at ON problem_reports(created_at DESC)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_problem_reports_status",
+      "tableName": "problem_reports",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "status"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_problem_reports_status ON problem_reports(status)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_product_transfers_business_id",
+      "tableName": "product_transfers",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_product_transfers_business_id ON product_transfers(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_production_batches_branch_id",
+      "tableName": "production_batches",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "branch_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_production_batches_branch_id ON production_batches(branch_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_production_batches_business_id",
+      "tableName": "production_batches",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_production_batches_business_id ON production_batches(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_production_usages_batch_id",
+      "tableName": "production_ingredient_usages",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "production_batch_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_production_usages_batch_id ON production_ingredient_usages(production_batch_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_production_usages_business_id",
+      "tableName": "production_ingredient_usages",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_production_usages_business_id ON production_ingredient_usages(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_products_branch_id",
+      "tableName": "products",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "branch_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_products_branch_id ON products(branch_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_products_business_id",
+      "tableName": "products",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_products_business_id ON products(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_receipt_records_sale_id",
+      "tableName": "receipt_records",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "sale_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_receipt_records_sale_id ON receipt_records(sale_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_recipe_batches_business_id",
+      "tableName": "recipe_batches",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_recipe_batches_business_id ON recipe_batches(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_recipe_ingredient_lines_business_id",
+      "tableName": "recipe_ingredient_lines",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_recipe_ingredient_lines_business_id ON recipe_ingredient_lines(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_recipe_ingredient_lines_recipe_id",
+      "tableName": "recipe_ingredient_lines",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "recipe_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_recipe_ingredient_lines_recipe_id ON recipe_ingredient_lines(recipe_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_recipes_business_id",
+      "tableName": "recipes",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_recipes_business_id ON recipes(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_recipes_output_product_id",
+      "tableName": "recipes",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "output_product_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_recipes_output_product_id ON recipes(output_product_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sale_ingredient_usages_business_id",
+      "tableName": "sale_ingredient_usages",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_sale_ingredient_usages_business_id ON sale_ingredient_usages(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sale_ingredient_usages_sale_id",
+      "tableName": "sale_ingredient_usages",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "sale_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_sale_ingredient_usages_sale_id ON sale_ingredient_usages(sale_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sale_items_sale_id",
+      "tableName": "sale_items",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "sale_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_sale_items_sale_id ON sale_items(sale_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sales_branch_id",
+      "tableName": "sales",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "branch_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_sales_branch_id ON sales(branch_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sales_business_id",
+      "tableName": "sales",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "business_id"
+        }
+      ],
+      "unique": false,
+      "partial": false,
+      "sql": "CREATE INDEX idx_sales_business_id ON sales(business_id)",
+      "confidence": "Confirmed"
+    },
+    {
+      "indexName": "idx_sales_checkout_token",
+      "tableName": "sales",
+      "columns": [
+        {
+          "sequence": 0,
+          "column": "checkout_token"
+        }
+      ],
+      "unique": true,
+      "partial": true,
+      "sql": "CREATE UNIQUE INDEX idx_sales_checkout_token\n      ON sales(checkout_token)\n      WHERE checkout_token IS NOT NULL AND deleted_at IS NULL",
+      "confidence": "Confirmed"
+    }
+  ]
+}

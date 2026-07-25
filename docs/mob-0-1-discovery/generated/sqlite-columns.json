@@ -1,0 +1,3351 @@
+{
+  "kind": "sqlite-column-inventory",
+  "inspectionDate": "2026-07-25",
+  "repository": "kitamo-ph/owner-seller-mobile",
+  "branch": "codex/pre-internal-hardening",
+  "commit": "6ed9ace3a92f7435f84c2f75f0084a03070ae2e4",
+  "source": "Fresh replay of ordered migration up strings into an OS-temporary SQLite database.",
+  "recordCount": 334,
+  "records": [
+    {
+      "tableName": "app_settings",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "app_settings",
+      "name": "key",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "app_settings",
+      "name": "value",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "app_settings",
+      "name": "value_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'string'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "app_settings",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "app_settings",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "branch_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "location",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "branch_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'stall'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "active",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/002_owner_setup_fields.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "business_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "business_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "owner_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "barangay",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "contact_number",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "preferred_language",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'Taglish'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "currency",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'PHP'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/002_owner_setup_fields.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "fixed_cost_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "due_date",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "paid_date",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "amount",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'paid'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "category",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'other'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "amount",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "frequency",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'monthly'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "due_date",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "start_date",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "end_date",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'active'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "ingredient_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "brand_name",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "source_name",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "purchase_date",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "purchased_quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "remaining_quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "total_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "cost_per_unit",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'active'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "ingredient_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "lot_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "movement_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "unit_cost",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "total_cost",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "reason",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "default_unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "category",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'General'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "low_stock_threshold",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "is_active",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "movement_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "reason",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "linked_sale_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "unit_cost",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "total_cost",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "entity_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "entity_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "operation",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "payload",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pending'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "attempt_count",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "last_error",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pending'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "alert_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "title",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "message",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'open'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "source",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "severity",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'info'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/003_owner_alert_fields.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "name": "product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/003_owner_alert_fields.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "mode",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "category",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "description",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "user_action",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "expected_result",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "actual_result",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "diagnostics_json",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'open'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "from_branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "to_branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "from_product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "to_product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "product_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "unit_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "total_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "recipe_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "output_product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "recipe_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "output_quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "output_unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "batch_multiplier",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "total_batch_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "cost_per_output_unit",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "production_batch_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "ingredient_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "ingredient_lot_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "quantity_used",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "line_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "source_label_snapshot",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "is_custom",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "category",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'General'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "price",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "stock_qty",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "unit_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'piece'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "low_stock_threshold",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "bundle_quantity",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "bundle_price",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "bundle_label",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "active",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "product_type",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'retail item'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "sale_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "transaction_no",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "receipt_text",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "issued_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "recipe_name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "batches",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "expected_servings",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "actual_servings",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "total_batch_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "recipe_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "ingredient_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "ingredient_lot_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "custom_name",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "cost_override",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "cost_per_unit_snapshot",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "line_cost_snapshot",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "source_label_snapshot",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "is_custom",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "output_product_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "output_quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "output_unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "production_mode",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'prepared_before_selling'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "suggested_selling_price",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "is_active",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "1",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "sale_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "sale_item_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "recipe_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "ingredient_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "ingredient_lot_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "quantity_used",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "unit",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'pcs'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "line_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "is_estimated",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "shortfall_quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "source_label_snapshot",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "sale_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "product_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "name",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "quantity",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "unit_price",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "unit_cost",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "line_total",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "bundle_applied",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "discount_amount",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "cogs_total",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "cogs_per_unit",
+      "sqliteType": "REAL",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "cogs_source",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "cogs_is_estimated",
+      "sqliteType": "INTEGER",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "name": "related_recipe_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "business_id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "branch_id",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "transaction_no",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "happened_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "amount",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "discount",
+      "sqliteType": "REAL",
+      "nullable": false,
+      "default": "0",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "payment_method",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'cash'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "payment_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'paid'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "external_reference_number",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "notes",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "created_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "updated_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "sync_status",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": "'local'",
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "deleted_at",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "name": "checkout_token",
+      "sqliteType": "TEXT",
+      "nullable": true,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/009_checkout_idempotency.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "schema_migrations",
+      "name": "id",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 1,
+      "definingMigration": "src/db/migrations/index.ts",
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "schema_migrations",
+      "name": "applied_at",
+      "sqliteType": "TEXT",
+      "nullable": false,
+      "default": null,
+      "primaryKeyPosition": 0,
+      "definingMigration": "src/db/migrations/index.ts",
+      "confidence": "Confirmed"
+    }
+  ]
+}

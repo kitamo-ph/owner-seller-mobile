@@ -1,0 +1,3750 @@
+{
+  "kind": "sqlite-table-inventory",
+  "inspectionDate": "2026-07-25",
+  "repository": "kitamo-ph/owner-seller-mobile",
+  "branch": "codex/pre-internal-hardening",
+  "commit": "6ed9ace3a92f7435f84c2f75f0084a03070ae2e4",
+  "source": "Fresh replay of ordered migration up strings into an OS-temporary SQLite database.",
+  "recordCount": 24,
+  "records": [
+    {
+      "tableName": "app_settings",
+      "businessPurpose": "Local typed key/value application preferences and active-context pointers.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "key",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "value",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "value_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'string'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_app_settings_key",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_app_settings_2",
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_app_settings_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE app_settings (\n      id TEXT PRIMARY KEY NOT NULL,\n      key TEXT NOT NULL UNIQUE,\n      value TEXT NOT NULL,\n      value_type TEXT NOT NULL DEFAULT 'string',\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "branches",
+      "businessPurpose": "Business locations represented in current Android terminology as branches/stalls/kiosks/booths.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "location",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'stall'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "active",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_branches_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_branches_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE branches (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_name TEXT NOT NULL,\n      location TEXT,\n      branch_type TEXT NOT NULL DEFAULT 'stall',\n      active INTEGER NOT NULL DEFAULT 1,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT, notes TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "businesses",
+      "businessPurpose": "Top-level local owner business profiles.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "business_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "owner_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "barangay",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "contact_number",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "preferred_language",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'Taglish'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "currency",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'PHP'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_businesses_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE businesses (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_name TEXT NOT NULL,\n      business_type TEXT NOT NULL,\n      owner_name TEXT NOT NULL,\n      barangay TEXT NOT NULL,\n      contact_number TEXT,\n      preferred_language TEXT NOT NULL DEFAULT 'Taglish',\n      currency TEXT NOT NULL DEFAULT 'PHP',\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT\n    , notes TEXT)",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_cost_payments",
+      "businessPurpose": "Recorded payment events for fixed-cost occurrences.",
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "fixed_cost_id",
+          "referencesTable": "fixed_costs",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "fixed_cost_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "due_date",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "paid_date",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "amount",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'paid'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_fixed_cost_payments_cost_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_fixed_cost_payments_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_fixed_cost_payments_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE fixed_cost_payments (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      fixed_cost_id TEXT NOT NULL,\n      branch_id TEXT,\n      due_date TEXT NOT NULL,\n      paid_date TEXT,\n      amount REAL NOT NULL DEFAULT 0,\n      status TEXT NOT NULL DEFAULT 'paid',\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (fixed_cost_id) REFERENCES fixed_costs(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "fixed_costs",
+      "businessPurpose": "Recurring or one-time fixed-cost definitions.",
+      "definingMigration": "src/db/migrations/008_fixed_costs.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "category",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'other'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "amount",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "frequency",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'monthly'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "due_date",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "start_date",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "end_date",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'active'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_fixed_costs_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_fixed_costs_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE fixed_costs (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      name TEXT NOT NULL,\n      category TEXT NOT NULL DEFAULT 'other',\n      amount REAL NOT NULL DEFAULT 0,\n      frequency TEXT NOT NULL DEFAULT 'monthly',\n      due_date TEXT NOT NULL,\n      start_date TEXT NOT NULL,\n      end_date TEXT,\n      status TEXT NOT NULL DEFAULT 'active',\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_lots",
+      "businessPurpose": "Purchased grocery lots with remaining quantity and acquisition cost.",
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "ingredient_id",
+          "referencesTable": "ingredients",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "brand_name",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_name",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "purchase_date",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "purchased_quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "remaining_quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost_per_unit",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'active'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_ingredient_lots_status",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_ingredient_lots_ingredient_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_ingredient_lots_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_ingredient_lots_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE ingredient_lots (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      ingredient_id TEXT NOT NULL,\n      brand_name TEXT,\n      source_name TEXT,\n      purchase_date TEXT NOT NULL,\n      purchased_quantity REAL NOT NULL DEFAULT 0,\n      remaining_quantity REAL NOT NULL DEFAULT 0,\n      unit TEXT NOT NULL DEFAULT 'pcs',\n      total_cost REAL NOT NULL DEFAULT 0,\n      cost_per_unit REAL NOT NULL DEFAULT 0,\n      notes TEXT,\n      status TEXT NOT NULL DEFAULT 'active',\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredient_movements",
+      "businessPurpose": "Append-style grocery purchase, adjustment, recipe-usage, and spoilage records.",
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "lot_id",
+          "referencesTable": "ingredient_lots",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "ingredient_id",
+          "referencesTable": "ingredients",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "lot_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "movement_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_cost",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_cost",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "reason",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_ingredient_movements_ingredient_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_ingredient_movements_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_ingredient_movements_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE ingredient_movements (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      ingredient_id TEXT NOT NULL,\n      lot_id TEXT,\n      movement_type TEXT NOT NULL,\n      quantity REAL NOT NULL DEFAULT 0,\n      unit TEXT NOT NULL DEFAULT 'pcs',\n      unit_cost REAL,\n      total_cost REAL,\n      reason TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,\n      FOREIGN KEY (lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "ingredients",
+      "businessPurpose": "Business-level grocery ingredient catalog.",
+      "definingMigration": "src/db/migrations/004_grocery_pool.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "default_unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "category",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'General'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "low_stock_threshold",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "is_active",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_ingredients_name",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_ingredients_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_ingredients_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE ingredients (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      name TEXT NOT NULL,\n      default_unit TEXT NOT NULL DEFAULT 'pcs',\n      category TEXT NOT NULL DEFAULT 'General',\n      low_stock_threshold REAL NOT NULL DEFAULT 0,\n      is_active INTEGER NOT NULL DEFAULT 1,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "inventory_movements",
+      "businessPurpose": "Finished-product stock movement history.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "linked_sale_id",
+          "referencesTable": "sales",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "movement_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "reason",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "linked_sale_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_cost",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_cost",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_inventory_movements_product_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_inventory_movements_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_inventory_movements_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE inventory_movements (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      product_id TEXT,\n      movement_type TEXT NOT NULL,\n      quantity REAL NOT NULL DEFAULT 0,\n      reason TEXT NOT NULL,\n      linked_sale_id TEXT,\n      unit_cost REAL,\n      total_cost REAL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,\n      FOREIGN KEY (linked_sale_id) REFERENCES sales(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "offline_queue",
+      "businessPurpose": "Local sale outbox placeholders; no active drain/sync implementation.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "entity_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "entity_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "operation",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "payload",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pending'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "attempt_count",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "last_error",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pending'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_offline_queue_status",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_offline_queue_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE offline_queue (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT,\n      branch_id TEXT,\n      entity_type TEXT NOT NULL,\n      entity_id TEXT NOT NULL,\n      operation TEXT NOT NULL,\n      payload TEXT NOT NULL,\n      status TEXT NOT NULL DEFAULT 'pending',\n      attempt_count INTEGER NOT NULL DEFAULT 0,\n      last_error TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'pending' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "owner_alerts",
+      "businessPurpose": "Local Owner notifications, primarily low-stock alerts.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "alert_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "title",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "message",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'open'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "severity",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'info'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_owner_alerts_product_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_owner_alerts_status",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_owner_alerts_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_owner_alerts_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE owner_alerts (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      alert_type TEXT NOT NULL,\n      title TEXT NOT NULL,\n      message TEXT NOT NULL,\n      status TEXT NOT NULL DEFAULT 'open',\n      source TEXT NOT NULL DEFAULT 'local',\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT, severity TEXT NOT NULL DEFAULT 'info', product_id TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "problem_reports",
+      "businessPurpose": "Sanitized, local-only owner/kiosk problem reports.",
+      "definingMigration": "src/db/migrations/010_problem_reports.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "mode",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "category",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "description",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "user_action",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "expected_result",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "actual_result",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "diagnostics_json",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'open'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_problem_reports_created_at",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_problem_reports_status",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_problem_reports_branch_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_problem_reports_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_problem_reports_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE problem_reports (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT,\n      branch_id TEXT,\n      mode TEXT NOT NULL CHECK (mode IN ('owner', 'kiosk')),\n      category TEXT NOT NULL CHECK (category IN (\n        'app_crashed',\n        'app_slow',\n        'button_not_working',\n        'incorrect_information',\n        'confusing_screen',\n        'pin_problem',\n        'other'\n      )),\n      description TEXT NOT NULL,\n      user_action TEXT NOT NULL,\n      expected_result TEXT NOT NULL,\n      actual_result TEXT NOT NULL,\n      diagnostics_json TEXT NOT NULL,\n      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE SET NULL,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "product_transfers",
+      "businessPurpose": "Value-preserving finished-product transfers between branch/stall product rows.",
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "to_product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "from_product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "to_branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "from_branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "from_branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "to_branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "from_product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "to_product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "product_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_product_transfers_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_product_transfers_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE product_transfers (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      from_branch_id TEXT,\n      to_branch_id TEXT,\n      from_product_id TEXT,\n      to_product_id TEXT,\n      product_name TEXT NOT NULL,\n      quantity REAL NOT NULL DEFAULT 0,\n      unit_cost REAL NOT NULL DEFAULT 0,\n      total_cost REAL NOT NULL DEFAULT 0,\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (from_branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (to_branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (from_product_id) REFERENCES products(id) ON DELETE SET NULL,\n      FOREIGN KEY (to_product_id) REFERENCES products(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_batches",
+      "businessPurpose": "Recipe-based production batches and cost snapshots.",
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "output_product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "recipe_id",
+          "referencesTable": "recipes",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipe_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipe_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "batch_multiplier",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_batch_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost_per_output_unit",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_production_batches_branch_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_production_batches_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_production_batches_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE production_batches (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      recipe_id TEXT,\n      output_product_id TEXT,\n      recipe_name TEXT NOT NULL,\n      output_quantity REAL NOT NULL DEFAULT 0,\n      output_unit TEXT NOT NULL DEFAULT 'pcs',\n      batch_multiplier REAL NOT NULL DEFAULT 1,\n      total_batch_cost REAL NOT NULL DEFAULT 0,\n      cost_per_output_unit REAL NOT NULL DEFAULT 0,\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL,\n      FOREIGN KEY (output_product_id) REFERENCES products(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "production_ingredient_usages",
+      "businessPurpose": "Ingredient usage snapshots per production batch.",
+      "definingMigration": "src/db/migrations/006_production.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "ingredient_lot_id",
+          "referencesTable": "ingredient_lots",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "ingredient_id",
+          "referencesTable": "ingredients",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "production_batch_id",
+          "referencesTable": "production_batches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "production_batch_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_lot_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity_used",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "line_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_label_snapshot",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "is_custom",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_production_usages_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_production_usages_batch_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_production_ingredient_usages_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE production_ingredient_usages (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      production_batch_id TEXT NOT NULL,\n      ingredient_id TEXT,\n      ingredient_lot_id TEXT,\n      quantity_used REAL NOT NULL DEFAULT 0,\n      unit TEXT NOT NULL DEFAULT 'pcs',\n      line_cost REAL NOT NULL DEFAULT 0,\n      source_label_snapshot TEXT,\n      is_custom INTEGER NOT NULL DEFAULT 0,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (production_batch_id) REFERENCES production_batches(id) ON DELETE CASCADE,\n      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL,\n      FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "products",
+      "businessPurpose": "Finished products and aggregate on-hand stock; not a finished-goods lot table.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "category",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'General'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "price",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "stock_qty",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'piece'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "low_stock_threshold",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "bundle_quantity",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "bundle_price",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "bundle_label",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "active",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "product_type",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'retail item'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_products_branch_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_products_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_products_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE products (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      name TEXT NOT NULL,\n      category TEXT NOT NULL DEFAULT 'General',\n      price REAL NOT NULL DEFAULT 0,\n      cost REAL NOT NULL DEFAULT 0,\n      stock_qty REAL NOT NULL DEFAULT 0,\n      unit_type TEXT NOT NULL DEFAULT 'piece',\n      low_stock_threshold REAL NOT NULL DEFAULT 0,\n      bundle_quantity REAL,\n      bundle_price REAL,\n      bundle_label TEXT,\n      active INTEGER NOT NULL DEFAULT 1,\n      product_type TEXT NOT NULL DEFAULT 'retail item',\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "receipt_records",
+      "businessPurpose": "Rendered local receipt snapshots linked to sales.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "sale_id",
+          "referencesTable": "sales",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sale_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "transaction_no",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "receipt_text",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "issued_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_receipt_records_sale_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_receipt_records_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE receipt_records (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      sale_id TEXT,\n      transaction_no TEXT NOT NULL,\n      receipt_text TEXT NOT NULL,\n      issued_at TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_batches",
+      "businessPurpose": "Legacy/simple cooked-batch records created outside recipe-based production.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipe_name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "batches",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "expected_servings",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "actual_servings",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "total_batch_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_recipe_batches_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_recipe_batches_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE recipe_batches (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      recipe_name TEXT NOT NULL,\n      batches REAL NOT NULL DEFAULT 1,\n      expected_servings REAL NOT NULL DEFAULT 0,\n      actual_servings REAL NOT NULL DEFAULT 0,\n      total_batch_cost REAL NOT NULL DEFAULT 0,\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipe_ingredient_lines",
+      "businessPurpose": "Selected-lot or custom-cost recipe inputs and cost snapshots.",
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "ingredient_lot_id",
+          "referencesTable": "ingredient_lots",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "ingredient_id",
+          "referencesTable": "ingredients",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "recipe_id",
+          "referencesTable": "recipes",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipe_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_lot_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "custom_name",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost_override",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost_per_unit_snapshot",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "line_cost_snapshot",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_label_snapshot",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "is_custom",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_recipe_ingredient_lines_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_recipe_ingredient_lines_recipe_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_recipe_ingredient_lines_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE recipe_ingredient_lines (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      recipe_id TEXT NOT NULL,\n      ingredient_id TEXT,\n      ingredient_lot_id TEXT,\n      custom_name TEXT,\n      quantity REAL NOT NULL DEFAULT 0,\n      unit TEXT NOT NULL DEFAULT 'pcs',\n      cost_override REAL,\n      cost_per_unit_snapshot REAL,\n      line_cost_snapshot REAL NOT NULL DEFAULT 0,\n      source_label_snapshot TEXT,\n      is_custom INTEGER NOT NULL DEFAULT 0,\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,\n      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL,\n      FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "recipes",
+      "businessPurpose": "Recipe headers mapping an output product to a production mode and output quantity.",
+      "definingMigration": "src/db/migrations/005_recipes.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "output_product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_product_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "output_unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "production_mode",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'prepared_before_selling'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "suggested_selling_price",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "is_active",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_recipes_output_product_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_recipes_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_recipes_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE recipes (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      output_product_id TEXT NOT NULL,\n      name TEXT NOT NULL,\n      output_quantity REAL NOT NULL DEFAULT 1,\n      output_unit TEXT NOT NULL DEFAULT 'pcs',\n      production_mode TEXT NOT NULL DEFAULT 'prepared_before_selling',\n      suggested_selling_price REAL,\n      notes TEXT,\n      is_active INTEGER NOT NULL DEFAULT 1,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (output_product_id) REFERENCES products(id) ON DELETE CASCADE\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_ingredient_usages",
+      "businessPurpose": "Cook-upon-order ingredient usage, shortfall, and estimated-cost evidence.",
+      "definingMigration": "src/db/migrations/007_selling_cogs.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "ingredient_lot_id",
+          "referencesTable": "ingredient_lots",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "ingredient_id",
+          "referencesTable": "ingredients",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "recipe_id",
+          "referencesTable": "recipes",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "sale_item_id",
+          "referencesTable": "sale_items",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "sale_id",
+          "referencesTable": "sales",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sale_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sale_item_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipe_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ingredient_lot_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity_used",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'pcs'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "line_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "is_estimated",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "shortfall_quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_label_snapshot",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_sale_ingredient_usages_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_sale_ingredient_usages_sale_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_sale_ingredient_usages_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE sale_ingredient_usages (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      sale_id TEXT NOT NULL,\n      sale_item_id TEXT NOT NULL,\n      recipe_id TEXT,\n      ingredient_id TEXT,\n      ingredient_lot_id TEXT,\n      quantity_used REAL NOT NULL DEFAULT 0,\n      unit TEXT NOT NULL DEFAULT 'pcs',\n      line_cost REAL NOT NULL DEFAULT 0,\n      is_estimated INTEGER NOT NULL DEFAULT 0,\n      shortfall_quantity REAL NOT NULL DEFAULT 0,\n      source_label_snapshot TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,\n      FOREIGN KEY (sale_item_id) REFERENCES sale_items(id) ON DELETE CASCADE,\n      FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL,\n      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL,\n      FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sale_items",
+      "businessPurpose": "Sale line snapshots, bundle results, and COGS attribution.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "product_id",
+          "referencesTable": "products",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        },
+        {
+          "column": "sale_id",
+          "referencesTable": "sales",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "sale_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "product_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "quantity",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_price",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "unit_cost",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "line_total",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "bundle_applied",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "discount_amount",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cogs_total",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cogs_per_unit",
+          "sqliteType": "REAL",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cogs_source",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cogs_is_estimated",
+          "sqliteType": "INTEGER",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "related_recipe_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_sale_items_sale_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_sale_items_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE sale_items (\n      id TEXT PRIMARY KEY NOT NULL,\n      sale_id TEXT NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      product_id TEXT,\n      name TEXT NOT NULL,\n      quantity REAL NOT NULL DEFAULT 0,\n      unit_price REAL NOT NULL DEFAULT 0,\n      unit_cost REAL NOT NULL DEFAULT 0,\n      line_total REAL NOT NULL DEFAULT 0,\n      bundle_applied INTEGER NOT NULL DEFAULT 0,\n      discount_amount REAL NOT NULL DEFAULT 0,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT, cogs_total REAL, cogs_per_unit REAL, cogs_source TEXT, cogs_is_estimated INTEGER NOT NULL DEFAULT 0, related_recipe_id TEXT,\n      FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL,\n      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "sales",
+      "businessPurpose": "Sale headers, payment facts, timestamps, and checkout idempotency token.",
+      "definingMigration": "src/db/migrations/001_initial_schema.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "branch_id",
+          "referencesTable": "branches",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "SET NULL",
+          "match": "NONE"
+        },
+        {
+          "column": "business_id",
+          "referencesTable": "businesses",
+          "referencesColumn": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "CASCADE",
+          "match": "NONE"
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "business_id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "branch_id",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "transaction_no",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "happened_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "amount",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "discount",
+          "sqliteType": "REAL",
+          "nullable": false,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "payment_method",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'cash'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "payment_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'paid'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "external_reference_number",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "notes",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "sync_status",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": "'local'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "deleted_at",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "checkout_token",
+          "sqliteType": "TEXT",
+          "nullable": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_sales_checkout_token",
+          "unique": true,
+          "origin": "c",
+          "partial": true
+        },
+        {
+          "name": "idx_sales_branch_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_sales_business_id",
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "sqlite_autoindex_sales_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE sales (\n      id TEXT PRIMARY KEY NOT NULL,\n      business_id TEXT NOT NULL,\n      branch_id TEXT,\n      transaction_no TEXT NOT NULL,\n      happened_at TEXT NOT NULL,\n      amount REAL NOT NULL DEFAULT 0,\n      discount REAL NOT NULL DEFAULT 0,\n      payment_method TEXT NOT NULL DEFAULT 'cash',\n      payment_status TEXT NOT NULL DEFAULT 'paid',\n      external_reference_number TEXT,\n      notes TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')),\n      deleted_at TEXT, checkout_token TEXT,\n      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,\n      FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL\n    )",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    },
+    {
+      "tableName": "schema_migrations",
+      "businessPurpose": "Applied migration identifiers and timestamps.",
+      "definingMigration": "src/db/migrations/index.ts",
+      "primaryKey": [
+        {
+          "column": "id",
+          "type": "TEXT",
+          "generation": "Application-supplied"
+        }
+      ],
+      "foreignKeys": [],
+      "columns": [
+        {
+          "name": "id",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "applied_at",
+          "sqliteType": "TEXT",
+          "nullable": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "indexes": [
+        {
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ],
+      "createSql": "CREATE TABLE schema_migrations(id TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL)",
+      "triggers": [],
+      "views": [],
+      "confidence": "Confirmed"
+    }
+  ]
+}
