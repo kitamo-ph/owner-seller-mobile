@@ -1,8 +1,22 @@
-export const schemaVersion = 10;
+export const schemaVersion = 14;
 
 export const syncStatusValues = ["local", "pending", "synced", "failed"] as const;
 
 export const resettableTables = [
+  "sale_supply_lot_usages",
+  "sale_supply_usages",
+  "supply_usage_rules",
+  "sale_product_lot_usages",
+  "stock_adjustment_allocations",
+  "stock_adjustments",
+  "production_input_allocations",
+  "production_plan_allocations",
+  "production_plan_requirements",
+  "production_plan_stages",
+  "production_plans",
+  "recipe_draft_lines",
+  "recipe_drafts",
+  "catalog_item_recipe_roles",
   "problem_reports",
   "offline_queue",
   "receipt_records",
@@ -12,12 +26,20 @@ export const resettableTables = [
   "fixed_cost_payments",
   "fixed_costs",
   "production_ingredient_usages",
+  "product_stock_lots",
   "production_batches",
+  "recipe_version_lines",
+  "recipe_versions",
   "recipe_batches",
   "recipe_ingredient_lines",
   "recipes",
   "ingredient_movements",
   "ingredient_lots",
+  "purchase_receipts",
+  "suppliers",
+  "item_unit_conversions",
+  "legacy_item_bindings",
+  "catalog_items",
   "ingredients",
   "inventory_movements",
   "sale_items",
@@ -30,6 +52,10 @@ export const resettableTables = [
 
 export const countableTables = [
   "problem_reports",
+  "catalog_items",
+  "recipe_drafts",
+  "production_plans",
+  "stock_adjustments",
   "businesses",
   "branches",
   "products",
