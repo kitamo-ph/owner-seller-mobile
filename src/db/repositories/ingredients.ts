@@ -78,27 +78,75 @@ export async function createIngredient(input: CreateIngredientInput, db?: Reposi
     deletedAt: null,
   };
 
-  await database.runAsync(
-    `
-      INSERT INTO ingredients (
-        id, business_id, name, default_unit, category, low_stock_threshold,
-        is_active, created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      ingredient.id,
-      ingredient.businessId,
-      ingredient.name,
-      ingredient.defaultUnit,
-      ingredient.category,
-      ingredient.lowStockThreshold,
-      toInteger(ingredient.isActive),
-      ingredient.createdAt,
-      ingredient.updatedAt,
-      ingredient.syncStatus,
-      ingredient.deletedAt,
-    ],
-  );
+  const insert = async (txn: RepositoryDatabase) => {
+    await txn.runAsync(
+      `
+        INSERT INTO ingredients (
+          id, business_id, name, default_unit, category, low_stock_threshold,
+          is_active, created_at, updated_at, sync_status, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        ingredient.id,
+        ingredient.businessId,
+        ingredient.name,
+        ingredient.defaultUnit,
+        ingredient.category,
+        ingredient.lowStockThreshold,
+        toInteger(ingredient.isActive),
+        ingredient.createdAt,
+        ingredient.updatedAt,
+        ingredient.syncStatus,
+        ingredient.deletedAt,
+      ],
+    );
+    const catalogItemId = `legacy:ingredient:${ingredient.id}`;
+    await txn.runAsync(
+      `
+        INSERT INTO catalog_items (
+          id, business_id, branch_id, name, normalized_name, source_type,
+          classification, lifecycle_status, readiness_state,
+          classification_review_required, sellable, kiosk_enabled,
+          purchase_cost_state, selling_price_state, stock_policy, archived_at,
+          created_at, updated_at, sync_status, deleted_at
+        ) VALUES (?, ?, NULL, ?, ?, 'legacy_ingredient', 'legacy_unclassified', 'draft', 'legacy_review', 1, 0, 0, 'legacy_zero_unresolved', 'not_applicable', 'ingredient_lots', NULL, ?, ?, 'local', NULL)
+      `,
+      [
+        catalogItemId,
+        ingredient.businessId,
+        ingredient.name,
+        ingredient.name.toLocaleLowerCase().trim(),
+        ingredient.createdAt,
+        ingredient.updatedAt,
+      ],
+    );
+    await txn.runAsync(
+      `
+        INSERT INTO legacy_item_bindings (
+          id, business_id, catalog_item_id, entity_kind, legacy_entity_id,
+          projection_role, binding_status, compatibility_mode,
+          review_required, legacy_active_snapshot,
+          legacy_deleted_at_snapshot, migration_provenance, reviewed_at,
+          native_activated_at, created_at, updated_at, sync_status, deleted_at
+        ) VALUES (?, ?, ?, 'ingredient', ?, 'legacy_ingredient', 'active', 'legacy_unclassified', 1, ?, NULL, 'migration_011', NULL, NULL, ?, ?, 'local', NULL)
+      `,
+      [
+        `binding:ingredient:${ingredient.id}`,
+        ingredient.businessId,
+        catalogItemId,
+        ingredient.id,
+        toInteger(ingredient.isActive),
+        ingredient.createdAt,
+        ingredient.updatedAt,
+      ],
+    );
+  };
+
+  if (db) {
+    await insert(database);
+  } else {
+    await database.withExclusiveTransactionAsync(insert);
+  }
 
   return ingredient;
 }
@@ -163,7 +211,8 @@ export async function updateIngredient(id: string, input: UpdateIngredientInput,
     syncStatus: "local",
   };
 
-  await database.runAsync(
+  const applyUpdate = async (txn: RepositoryDatabase) => {
+    await txn.runAsync(
     `
       UPDATE ingredients
       SET name = ?, default_unit = ?, category = ?, low_stock_threshold = ?,
@@ -181,6 +230,41 @@ export async function updateIngredient(id: string, input: UpdateIngredientInput,
       ingredient.id,
     ],
   );
+    await txn.runAsync(
+    `
+      UPDATE catalog_items
+      SET name = ?, normalized_name = ?, updated_at = ?, sync_status = 'local'
+      WHERE id = (
+        SELECT catalog_item_id
+        FROM legacy_item_bindings
+        WHERE entity_kind = 'ingredient' AND legacy_entity_id = ?
+          AND deleted_at IS NULL
+      )
+        AND deleted_at IS NULL
+    `,
+    [
+      ingredient.name,
+      ingredient.name.toLocaleLowerCase().trim(),
+      ingredient.updatedAt,
+      ingredient.id,
+    ],
+  );
+    await txn.runAsync(
+    `
+      UPDATE legacy_item_bindings
+      SET legacy_active_snapshot = ?, updated_at = ?, sync_status = 'local'
+      WHERE entity_kind = 'ingredient' AND legacy_entity_id = ?
+        AND deleted_at IS NULL
+    `,
+    [toInteger(ingredient.isActive), ingredient.updatedAt, ingredient.id],
+    );
+  };
+
+  if (db) {
+    await applyUpdate(database);
+  } else {
+    await database.withExclusiveTransactionAsync(applyUpdate);
+  }
 
   return ingredient;
 }

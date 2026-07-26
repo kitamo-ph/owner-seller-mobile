@@ -22,6 +22,10 @@ const createIngredientLotSchema = z.object({
   purchasedQuantity: z.number().positive(),
   unit: z.enum(["g", "kg", "ml", "L", "pcs", "pack"]),
   totalCost: z.number().positive(),
+  expiryDate: z.string().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
+  purchaseReceiptId: z.string().nullable().optional(),
+  sourceMetadataJson: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
 });
 
@@ -135,8 +139,11 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
       INSERT INTO ingredient_lots (
         id, business_id, ingredient_id, brand_name, source_name, purchase_date,
         purchased_quantity, remaining_quantity, unit, total_cost, cost_per_unit,
-        notes, status, created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        notes, status, created_at, updated_at, sync_status, deleted_at,
+        expiry_date, supplier_id, purchase_receipt_id, provenance_state,
+        cost_state, recorded_total_cost, recorded_cost_per_unit,
+        source_metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'purchase_recorded', 'known', ?, ?, ?)
     `,
     [
       lot.id,
@@ -156,6 +163,12 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
       lot.updatedAt,
       lot.syncStatus,
       lot.deletedAt,
+      parsed.expiryDate ?? null,
+      parsed.supplierId ?? null,
+      parsed.purchaseReceiptId ?? null,
+      lot.totalCost,
+      lot.costPerUnit,
+      parsed.sourceMetadataJson ?? null,
     ],
   );
 

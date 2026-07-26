@@ -146,7 +146,12 @@ export type IngredientLot = LocalEntity & {
   status: IngredientLotStatus;
 };
 
-export type IngredientMovementType = "purchase" | "adjustment" | "recipe_usage" | "spoilage";
+export type IngredientMovementType =
+  | "purchase"
+  | "adjustment"
+  | "recipe_usage"
+  | "sale_supply_usage"
+  | "spoilage";
 
 export type IngredientMovement = LocalEntity & {
   businessId: string;

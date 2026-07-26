@@ -116,36 +116,89 @@ export async function createProduct(input: CreateProductInput, db?: RepositoryDa
     deletedAt: null,
   };
 
-  await database.runAsync(
-    `
-      INSERT INTO products (
-        id, business_id, branch_id, name, category, price, cost, stock_qty,
-        unit_type, low_stock_threshold, bundle_quantity, bundle_price,
-        bundle_label, active, product_type, created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      product.id,
-      product.businessId,
-      product.branchId,
-      product.name,
-      product.category,
-      product.price,
-      product.cost,
-      product.stockQty,
-      product.unitType,
-      product.lowStockThreshold,
-      product.bundleQuantity,
-      product.bundlePrice,
-      product.bundleLabel,
-      toInteger(product.active),
-      product.productType,
-      product.createdAt,
-      product.updatedAt,
-      product.syncStatus,
-      product.deletedAt,
-    ],
-  );
+  const insert = async (txn: RepositoryDatabase) => {
+    await txn.runAsync(
+      `
+        INSERT INTO products (
+          id, business_id, branch_id, name, category, price, cost, stock_qty,
+          unit_type, low_stock_threshold, bundle_quantity, bundle_price,
+          bundle_label, active, product_type, created_at, updated_at,
+          sync_status, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        product.id,
+        product.businessId,
+        product.branchId,
+        product.name,
+        product.category,
+        product.price,
+        product.cost,
+        product.stockQty,
+        product.unitType,
+        product.lowStockThreshold,
+        product.bundleQuantity,
+        product.bundlePrice,
+        product.bundleLabel,
+        toInteger(product.active),
+        product.productType,
+        product.createdAt,
+        product.updatedAt,
+        product.syncStatus,
+        product.deletedAt,
+      ],
+    );
+
+    const catalogItemId = `legacy:product:${product.id}`;
+    await txn.runAsync(
+      `
+        INSERT INTO catalog_items (
+          id, business_id, branch_id, name, normalized_name, source_type,
+          classification, lifecycle_status, readiness_state,
+          classification_review_required, sellable, kiosk_enabled,
+          purchase_cost_state, selling_price_state, stock_policy, archived_at,
+          created_at, updated_at, sync_status, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, 'legacy_product', 'legacy_unclassified', 'draft', 'legacy_review', 1, 0, 0, ?, ?, 'product_scalar', NULL, ?, ?, 'local', NULL)
+      `,
+      [
+        catalogItemId,
+        product.businessId,
+        product.branchId,
+        product.name,
+        product.name.toLocaleLowerCase().trim(),
+        product.cost > 0 ? "known" : "legacy_zero_unresolved",
+        product.price > 0 ? "known" : "legacy_zero_unresolved",
+        product.createdAt,
+        product.updatedAt,
+      ],
+    );
+    await txn.runAsync(
+      `
+        INSERT INTO legacy_item_bindings (
+          id, business_id, catalog_item_id, entity_kind, legacy_entity_id,
+          projection_role, binding_status, compatibility_mode,
+          review_required, legacy_active_snapshot,
+          legacy_deleted_at_snapshot, migration_provenance, reviewed_at,
+          native_activated_at, created_at, updated_at, sync_status, deleted_at
+        ) VALUES (?, ?, ?, 'product', ?, 'legacy_product', 'active', 'legacy_unclassified', 1, ?, NULL, 'migration_011', NULL, NULL, ?, ?, 'local', NULL)
+      `,
+      [
+        `binding:product:${product.id}`,
+        product.businessId,
+        catalogItemId,
+        product.id,
+        toInteger(product.active),
+        product.createdAt,
+        product.updatedAt,
+      ],
+    );
+  };
+
+  if (db) {
+    await insert(database);
+  } else {
+    await database.withExclusiveTransactionAsync(insert);
+  }
 
   return product;
 }
@@ -163,6 +216,28 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
 
   const parsed = updateProductSchema.parse(input);
   const database = getRepositoryDatabase(db);
+  if (parsed.stockQty !== undefined) {
+    const lotTracked = await database.getFirstAsync<{ id: string }>(
+      `
+        SELECT item.id
+        FROM legacy_item_bindings binding
+        INNER JOIN catalog_items item ON item.id = binding.catalog_item_id
+        WHERE binding.entity_kind = 'product'
+          AND binding.legacy_entity_id = ?
+          AND binding.compatibility_mode IN ('reviewed_legacy', 'native')
+          AND binding.review_required = 0
+          AND binding.deleted_at IS NULL
+          AND item.stock_policy = 'product_lots'
+          AND item.deleted_at IS NULL
+      `,
+      [id],
+    );
+    if (lotTracked) {
+      throw new Error(
+        "Lot-tracked Product stock must use an atomic lot-backed stock operation.",
+      );
+    }
+  }
   const updatedAt = nowIso();
   const product: Product = {
     ...existing,
@@ -183,7 +258,8 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
     syncStatus: "local",
   };
 
-  await database.runAsync(
+  const applyUpdate = async (txn: RepositoryDatabase) => {
+    await txn.runAsync(
     `
       UPDATE products
       SET branch_id = ?, name = ?, category = ?, price = ?, cost = ?, stock_qty = ?,
@@ -210,6 +286,43 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
       product.id,
     ],
   );
+    await txn.runAsync(
+    `
+      UPDATE catalog_items
+      SET branch_id = ?, name = ?, normalized_name = ?,
+        updated_at = ?, sync_status = 'local'
+      WHERE id = (
+        SELECT catalog_item_id
+        FROM legacy_item_bindings
+        WHERE entity_kind = 'product' AND legacy_entity_id = ?
+          AND deleted_at IS NULL
+      )
+        AND deleted_at IS NULL
+    `,
+    [
+      product.branchId,
+      product.name,
+      product.name.toLocaleLowerCase().trim(),
+      product.updatedAt,
+      product.id,
+    ],
+  );
+    await txn.runAsync(
+    `
+      UPDATE legacy_item_bindings
+      SET legacy_active_snapshot = ?, updated_at = ?, sync_status = 'local'
+      WHERE entity_kind = 'product' AND legacy_entity_id = ?
+        AND deleted_at IS NULL
+    `,
+    [toInteger(product.active), product.updatedAt, product.id],
+    );
+  };
+
+  if (db) {
+    await applyUpdate(database);
+  } else {
+    await database.withExclusiveTransactionAsync(applyUpdate);
+  }
 
   return product;
 }
