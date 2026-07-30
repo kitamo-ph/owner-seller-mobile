@@ -1,26 +1,31 @@
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { AppTopBar, Card, EmptyState, formatPeso, formatQuantity, InlineNotice, LoadingState, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { GabiPrimaryButton, GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiHeroCard, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { KitaTabs } from "@/components/owner/KitaTabs";
+import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { loadFixedCostsOverview } from "@/services/fixedCosts";
 import { loadProfitReport, reportRanges, type ProfitReport, type ReportRange } from "@/services/profitReports";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
+import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 export default function OwnerReportsScreen() {
   const { stallId } = useLocalSearchParams<{ stallId?: string }>();
   const highlightedStallId = typeof stallId === "string" ? stallId : undefined;
+  const router = useRouter();
+  const { palette, extended } = useGabiTheme();
   const [report, setReport] = useState<ProfitReport | null>(null);
   const [overdueCount, setOverdueCount] = useState(0);
   const [range, setRange] = useState<ReportRange>("today");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
 
   const refresh = useCallback(async (nextRange: ReportRange) => {
     setLoading(true);
@@ -40,7 +45,7 @@ export default function OwnerReportsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refresh(range);
+      void refresh(range);
     }, [range, refresh]),
   );
 
@@ -50,345 +55,273 @@ export default function OwnerReportsScreen() {
 
   return (
     <ScreenScroll bottomNav>
-      <AppTopBar subtitle="Benta, puhunan, bayarin, at tubo — per stall at buong negosyo." title="Kita Report" />
+      <AppTopBar showBrand subtitle="Benta, puhunan, bayarin, at tubo." title="Kita" />
 
-      {error ? <InlineNotice message={error} tone="danger" /> : null}
-
-      {highlightedStall ? (
-        <View style={[styles.focusBanner, { backgroundColor: palette.softPrimary, borderColor: palette.primary }]}>
-          <Text style={[styles.focusBannerText, { color: palette.primary }]}>
-            Tinitingnan: {highlightedStall.branchName}
-          </Text>
-        </View>
-      ) : null}
+      <KitaTabs />
 
       <View style={styles.rangeRow}>
         {reportRanges.map((entry) => {
-          const isSelected = entry.id === range;
+          const selected = entry.id === range;
           return (
             <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected, disabled: loading }}
               disabled={loading}
               key={entry.id}
               onPress={() => setRange(entry.id)}
               style={[
-                styles.rangeButton,
+                styles.rangeChip,
                 {
-                  backgroundColor: isSelected ? palette.primary : palette.surface,
-                  borderColor: isSelected ? palette.primary : palette.border,
-                  opacity: loading && !isSelected ? 0.6 : 1,
+                  backgroundColor: selected ? palette.primary : loading ? extended.disabledBg : palette.surface,
+                  borderColor: selected ? palette.primary : loading ? extended.disabledBg : palette.border,
                 },
               ]}
             >
-              <Text style={[styles.rangeText, { color: isSelected ? palette.kioskHeaderText : palette.text }]}>{entry.label}</Text>
+              <GabiText style={{ color: selected ? palette.kioskHeaderText : loading ? extended.disabledText : palette.text }} variant="buttonSm">
+                {entry.label}
+              </GabiText>
             </Pressable>
           );
         })}
       </View>
 
-      {loading ? (
-        <LoadingState label="Reading local sales, costs, spoilage, and fixed costs..." />
+      {error ? (
+        <GabiCard>
+          <GabiNotice message={error} title="Hindi mabuksan ang report" tone="danger" />
+          <GabiSoftButton icon="refresh" label="Subukan ulit" onPress={() => void refresh(range)} />
+        </GabiCard>
       ) : null}
 
+      {loading ? <ReportSkeleton /> : null}
+
       {!loading && report && !report.hasBusiness ? (
-        <Card>
-          <Text style={[styles.body, { color: palette.warning }]}>Create your business profile in Settings first.</Text>
-        </Card>
+        <GabiCard>
+          <GabiEmptyState
+            actionLabel="Buksan ang Settings"
+            icon="business-outline"
+            message="Gumawa muna ng business profile bago magbasa ng financial report."
+            onAction={() => router.push("/owner/settings")}
+            title="Wala pang business"
+          />
+        </GabiCard>
       ) : null}
 
       {!loading && report?.hasBusiness && !hasActivity ? (
-        <Card>
-          <EmptyState description="Mag-fill up ang report pag may benta at bayarin na." title="Wala pang laman ang report na ito." />
-        </Card>
+        <GabiCard>
+          <GabiEmptyState
+            icon="bar-chart-outline"
+            message="Lalabas dito ang report kapag may benta o bayarin na sa napiling panahon."
+            title="Wala pang report data"
+          />
+        </GabiCard>
       ) : null}
 
       {!loading && consolidated && hasActivity ? (
         <>
-          <Card>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Buong negosyo</Text>
-              {consolidated.bestStallName ? <Pill label={`Malakas: ${consolidated.bestStallName}`} tone="accent" /> : null}
+          {highlightedStall ? (
+            <GabiNotice message={`Naka-focus ang report sa ${highlightedStall.branchName}. Kasama pa rin sa taas ang buong negosyo.`} tone="owner" />
+          ) : null}
+
+          <GabiHeroCard>
+            <View style={styles.heroHeader}>
+              <View style={styles.flexCopy}>
+                <GabiText tone="inverse" variant="caption">Net profit</GabiText>
+                <GabiText money style={styles.heroAmount} tone="inverse" variant="heroPeso">
+                  {formatPeso(consolidated.netProfit)}
+                </GabiText>
+              </View>
+              <GabiChip
+                icon={consolidated.netProfit >= 0 ? "trending-up" : "trending-down"}
+                label={consolidated.netProfit >= 0 ? "Positive" : "Negative"}
+                tone={consolidated.netProfit >= 0 ? "success" : "danger"}
+              />
             </View>
-
-            <ReportRow label="Benta" value={formatPeso(consolidated.revenue)} />
-            <ReportRow label="Puhunan / Cost" value={`- ${formatPeso(consolidated.soldCogs)}`} />
-            <ReportRow label="Bayarin" value={`- ${formatPeso(consolidated.fixedCosts)}`} />
-            <ReportRow label="Nasayang" value={`- ${formatPeso(consolidated.spoilageLoss)}`} />
-            <ReportRow
-              strong
-              label="Tubo"
-              value={formatPeso(consolidated.netProfit)}
-              valueColor={consolidated.netProfit >= 0 ? palette.success : palette.danger}
-            />
-
-            <View style={[styles.formulaBlock, { borderColor: palette.border, backgroundColor: palette.background }]}>
-              <Text style={[styles.formulaText, { color: palette.text }]}>
-                Net Profit = Revenue − Sold COGS − Fixed Costs − Spoilage
-              </Text>
+            <View style={styles.heroFormula}>
+              <GabiText style={{ color: palette.kioskHeaderText }} variant="buttonSm">Revenue</GabiText>
+              <GabiText style={{ color: extended.textOnPrimaryMuted }} variant="caption">
+                − Sold COGS − Fixed Costs − Spoilage
+              </GabiText>
+              <GabiText style={{ color: palette.kioskHeaderText }} variant="buttonSm">= Net Profit</GabiText>
             </View>
+          </GabiHeroCard>
 
-            <View style={[styles.infoBlock, { borderColor: palette.border }]}>
-              <Text style={[styles.advancedLabel, { color: palette.mutedText }]}>Advanced details</Text>
-              <ReportRow compact label="Sold COGS" value={formatPeso(consolidated.soldCogs)} />
-              <ReportRow compact label="Natirang paninda" value={formatPeso(consolidated.unsoldGoodsValue)} />
-              <ReportRow compact label="Grocery value" value={formatPeso(consolidated.groceryRemainingValue)} />
-              {consolidated.transferCount > 0 ? (
-                <ReportRow
-                  compact
-                  label="Lipat"
-                  value={`${consolidated.transferCount} (${formatPeso(consolidated.transferValue)})`}
-                />
-              ) : null}
-              {consolidated.estimatedCogsCount > 0 ? (
-                <ReportRow compact label="Estimated cost" value={`${consolidated.estimatedCogsCount} benta`} />
-              ) : null}
-              {consolidated.businessWideFixedCosts > 0 ? (
-                <Text style={[styles.helper, { color: palette.mutedText }]}>
-                  Kasama sa bayarin ang {formatPeso(consolidated.businessWideFixedCosts)} para sa buong negosyo.
-                </Text>
-              ) : null}
-            </View>
-          </Card>
+          <View style={styles.metricGrid}>
+            <FinancialMetric icon="cash-outline" label="Benta" tone="success" value={consolidated.revenue} />
+            <FinancialMetric icon="basket-outline" label="Sold COGS" tone="accent" value={consolidated.soldCogs} />
+            <FinancialMetric icon="receipt-outline" label="Fixed Costs" tone="warning" value={consolidated.fixedCosts} />
+            <FinancialMetric icon="trash-bin-outline" label="Spoilage" tone="danger" value={consolidated.spoilageLoss} />
+          </View>
 
+          {consolidated.estimatedCogsCount > 0 ? (
+            <GabiCard>
+              <GabiNotice
+                message={`${consolidated.estimatedCogsCount} benta ang gumamit ng recent-price estimate dahil kulang ang exact cost data.`}
+                title="May estimated COGS"
+                tone="warning"
+              />
+              <GabiSoftButton icon="basket-outline" label="Suriin ang Grocery Stock" onPress={() => router.push("/owner/grocery")} />
+            </GabiCard>
+          ) : null}
+
+          <GabiCard>
+            <GabiSectionHeader title="Buong negosyo" />
+            <ReportLine label="Transactions" value={String(consolidated.transactionCount)} />
+            <ReportLine label="Gross profit" value={formatPeso(consolidated.grossProfit)} />
+            <ReportLine label="Natirang paninda" value={formatPeso(consolidated.unsoldGoodsValue)} />
+            <ReportLine label="Grocery value" value={formatPeso(consolidated.groceryRemainingValue)} />
+            {consolidated.transferCount > 0 ? (
+              <ReportLine label="Lipat" value={`${consolidated.transferCount} · ${formatPeso(consolidated.transferValue)}`} />
+            ) : null}
+            {consolidated.businessWideFixedCosts > 0 ? (
+              <GabiText tone="faint" variant="caption">
+                Kasama ang {formatPeso(consolidated.businessWideFixedCosts)} na business-wide fixed costs.
+              </GabiText>
+            ) : null}
+          </GabiCard>
+
+          {report.topProducts.length > 0 ? (
+            <GabiCard>
+              <GabiSectionHeader title="Top paninda" />
+              {report.topProducts.map((product, index) => (
+                <View key={product.name} style={[styles.rankedRow, index > 0 ? { borderTopColor: palette.border, borderTopWidth: 1 } : null]}>
+                  <View style={[styles.rank, { backgroundColor: palette.softAccent }]}>
+                    <GabiText tone="accent" variant="buttonSm">{index + 1}</GabiText>
+                  </View>
+                  <View style={styles.flexCopy}>
+                    <GabiText variant="cardTitle">{product.name}</GabiText>
+                    <GabiText tone="muted" variant="caption">{formatQuantity(product.quantity)} sold</GabiText>
+                  </View>
+                  <GabiText money tone="success" variant="buttonSm">{formatPeso(product.salesAmount)}</GabiText>
+                </View>
+              ))}
+            </GabiCard>
+          ) : null}
+
+          <GabiSectionHeader title="Per stall" />
           {report.stalls.map((stall) => {
-            const isHighlighted = stall.branchId === highlightedStallId;
+            const highlighted = stall.branchId === highlightedStallId;
             return (
-              <Card
-                key={stall.branchId}
-                style={
-                  isHighlighted
-                    ? {
-                        borderColor: palette.primary,
-                        borderWidth: 2,
-                      }
-                    : undefined
-                }
-              >
+              <GabiCard key={stall.branchId} style={highlighted ? { borderColor: palette.primary, borderWidth: 2 } : undefined}>
                 <View style={styles.cardHeader}>
-                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{stall.branchName}</Text>
-                  <Text style={[styles.helper, { color: palette.mutedText }]}>
-                    {stall.transactionCount} benta
-                  </Text>
+                  <View style={styles.flexCopy}>
+                    <GabiText variant="cardTitle">{stall.branchName}</GabiText>
+                    <GabiText tone="muted" variant="caption">{stall.transactionCount} transactions</GabiText>
+                  </View>
+                  <GabiChip label={formatPeso(stall.netProfit)} tone={stall.netProfit >= 0 ? "success" : "danger"} />
                 </View>
-
-                <ReportRow label="Benta" value={formatPeso(stall.revenue)} />
-                <ReportRow label="Puhunan / Cost" value={`- ${formatPeso(stall.soldCogs)}`} />
-                <ReportRow label="Bayarin" value={`- ${formatPeso(stall.fixedCosts)}`} />
-                <ReportRow label="Nasayang" value={`- ${formatPeso(stall.spoilageLoss)}`} />
-                <ReportRow
-                  strong
-                  label="Tubo"
-                  value={formatPeso(stall.netProfit)}
-                  valueColor={stall.netProfit >= 0 ? palette.success : palette.danger}
-                />
-
-                <View style={[styles.infoBlock, { borderColor: palette.border }]}>
-                  <Text style={[styles.advancedLabel, { color: palette.mutedText }]}>Advanced details</Text>
-                  <ReportRow compact label="Sold COGS" value={formatPeso(stall.soldCogs)} />
-                  <ReportRow compact label="Natirang paninda" value={formatPeso(stall.unsoldGoodsValue)} />
-                  {stall.productionCogs > 0 ? (
-                    <ReportRow compact label="Niluto spend" value={formatPeso(stall.productionCogs)} />
-                  ) : null}
-                  {stall.transferInValue > 0 || stall.transferOutValue > 0 ? (
-                    <ReportRow
-                      compact
-                      label="Lipat"
-                      value={`in ${formatPeso(stall.transferInValue)} / out ${formatPeso(stall.transferOutValue)}`}
-                    />
-                  ) : null}
-                  {stall.estimatedCogsCount > 0 ? (
-                    <Pill label={`${stall.estimatedCogsCount} estimated cost`} tone="warning" />
-                  ) : null}
-                </View>
-
+                <ReportLine label="Benta" value={formatPeso(stall.revenue)} />
+                <ReportLine label="Sold COGS" value={formatPeso(stall.soldCogs)} />
+                <ReportLine label="Fixed costs" value={formatPeso(stall.fixedCosts)} />
+                <ReportLine label="Spoilage" value={formatPeso(stall.spoilageLoss)} />
                 {stall.bestSellerName ? (
-                  <Text style={[styles.helper, { color: palette.mutedText }]}>
-                    Best paninda: {stall.bestSellerName} ({formatQuantity(stall.bestSellerQuantity)} sold)
-                  </Text>
+                  <GabiText tone="faint" variant="caption">
+                    Best paninda: {stall.bestSellerName} · {formatQuantity(stall.bestSellerQuantity)} sold
+                  </GabiText>
                 ) : null}
-              </Card>
+                {stall.estimatedCogsCount > 0 ? <GabiChip label={`${stall.estimatedCogsCount} estimated cost`} tone="warning" /> : null}
+              </GabiCard>
             );
           })}
 
-          {report.topProducts.length > 0 ? (
-            <Card>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Top paninda</Text>
-              {report.topProducts.map((product, index) => (
-                <View key={product.name} style={styles.topProductRow}>
-                  <Text style={[styles.body, { color: palette.text }]}>
-                    {index + 1}. {product.name}
-                  </Text>
-                  <Text style={[styles.helper, { color: palette.mutedText }]}>
-                    {formatQuantity(product.quantity)} sold · {formatPeso(product.salesAmount)}
-                  </Text>
-                </View>
-              ))}
-            </Card>
-          ) : null}
-
-          {consolidated.estimatedCogsCount > 0 || consolidated.lowStockIngredientCount > 0 || overdueCount > 0 ? (
-            <Card>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Paalala</Text>
-              {consolidated.estimatedCogsCount > 0 ? (
-                <Text style={[styles.body, { color: palette.mutedText }]}>
-                  May benta na estimated ang cost — {consolidated.estimatedCogsCount} benta. Low stock kaya recent price ang ginamit.
-                </Text>
-              ) : null}
+          {consolidated.lowStockIngredientCount > 0 || overdueCount > 0 ? (
+            <GabiCard>
+              <GabiSectionHeader title="Paalala" />
               {consolidated.lowStockIngredientCount > 0 ? (
-                <Text style={[styles.body, { color: palette.mutedText }]}>
-                  Low stock ang ilang grocery — {consolidated.lowStockIngredientCount} ingredient
-                  {consolidated.lowStockIngredientCount === 1 ? "" : "s"}. Check Grocery Stock.
-                </Text>
+                <AlertRow
+                  icon="alert-circle-outline"
+                  label={`${consolidated.lowStockIngredientCount} grocery ingredient ang low stock`}
+                  onPress={() => router.push("/owner/grocery")}
+                  tone="warning"
+                />
               ) : null}
               {overdueCount > 0 ? (
-                <Text style={[styles.body, { color: palette.mutedText }]}>
-                  May bayarin na due — {overdueCount} overdue. Check Bayarin.
-                </Text>
+                <AlertRow
+                  icon="calendar-outline"
+                  label={`${overdueCount} bayarin ang overdue`}
+                  onPress={() => router.push("/owner/fixed-costs")}
+                  tone="danger"
+                />
               ) : null}
-            </Card>
+            </GabiCard>
           ) : null}
+
+          <GabiPrimaryButton icon="receipt-outline" label="Buksan ang Bayarin" onPress={() => router.push("/owner/fixed-costs")} />
         </>
       ) : null}
-
-      <SecondaryButton href="/owner/fixed-costs" label="Open Bayarin" />
     </ScreenScroll>
   );
 }
 
-type ReportRowProps = {
-  label: string;
-  value: string;
-  strong?: boolean;
-  compact?: boolean;
-  valueColor?: string;
-};
-
-function ReportRow({ label, value, strong = false, compact = false, valueColor }: ReportRowProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function ReportSkeleton() {
   return (
-    <View style={[styles.reportRow, compact ? styles.reportRowCompact : null]}>
-      <Text
-        style={[
-          strong ? styles.reportLabelStrong : compact ? styles.reportLabelCompact : styles.reportLabel,
-          { color: strong ? palette.text : palette.mutedText },
-        ]}
-      >
-        {label}
-      </Text>
-      <Text style={[strong ? styles.reportValueStrong : compact ? styles.reportValueCompact : styles.reportValue, { color: valueColor ?? palette.text }]}>
-        {value}
-      </Text>
+    <>
+      <GabiCard>
+        <GabiSkeleton height={16} width="34%" />
+        <GabiSkeleton height={46} width="64%" />
+        <GabiSkeleton height={48} />
+      </GabiCard>
+      <View style={styles.metricGrid}>
+        {[0, 1, 2, 3].map((item) => (
+          <GabiCard key={item} style={styles.metricCard}>
+            <GabiSkeleton height={18} width="56%" />
+            <GabiSkeleton height={26} width="78%" />
+          </GabiCard>
+        ))}
+      </View>
+    </>
+  );
+}
+
+function FinancialMetric({ icon, label, value, tone }: { icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; value: number; tone: "success" | "accent" | "warning" | "danger" }) {
+  const { palette } = useGabiTheme();
+  const foreground = tone === "success" ? palette.success : tone === "accent" ? palette.accent : tone === "warning" ? palette.warning : palette.danger;
+  const background = tone === "success" ? palette.softSuccess : tone === "accent" ? palette.softAccent : tone === "warning" ? palette.softWarning : palette.softDanger;
+  return (
+    <GabiCard style={styles.metricCard}>
+      <View style={[styles.metricIcon, { backgroundColor: background }]}>
+        <Ionicons color={foreground} name={icon} size={20} />
+      </View>
+      <GabiText tone="muted" variant="caption">{label}</GabiText>
+      <GabiText money style={{ color: foreground }} variant="metricValue">{formatPeso(value)}</GabiText>
+    </GabiCard>
+  );
+}
+
+function ReportLine({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.reportLine}>
+      <GabiText tone="muted" variant="body">{label}</GabiText>
+      <GabiText money variant="buttonSm">{value}</GabiText>
     </View>
   );
 }
 
+function AlertRow({ icon, label, onPress, tone }: { icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; onPress: () => void; tone: "warning" | "danger" }) {
+  const { palette } = useGabiTheme();
+  const foreground = tone === "warning" ? palette.warning : palette.danger;
+  const background = tone === "warning" ? palette.softWarning : palette.softDanger;
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.alertRow, { backgroundColor: pressed ? palette.softPrimary : background }]}>
+      <Ionicons color={foreground} name={icon} size={22} />
+      <GabiText style={[styles.flexCopy, { color: foreground }]} variant="buttonSm">{label}</GabiText>
+      <Ionicons color={foreground} name="chevron-forward" size={18} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  body: {
-    ...typography.body,
-  },
-  helper: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  sectionTitle: {
-    ...typography.heading,
-  },
-  focusBanner: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  focusBannerText: {
-    ...typography.button,
-  },
-  rangeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  rangeButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  rangeText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  cardHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-    justifyContent: "space-between",
-  },
-  reportRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-  },
-  reportRowCompact: {
-    marginTop: 2,
-  },
-  reportLabel: {
-    ...typography.body,
-    flex: 1,
-  },
-  reportLabelCompact: {
-    fontSize: 12,
-    fontWeight: "700",
-    flex: 1,
-    lineHeight: 16,
-  },
-  reportLabelStrong: {
-    ...typography.button,
-    flex: 1,
-  },
-  reportValue: {
-    ...typography.body,
-  },
-  reportValueCompact: {
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-  },
-  reportValueStrong: {
-    fontSize: 17,
-    fontWeight: "900",
-    lineHeight: 22,
-  },
-  formulaBlock: {
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: spacing.sm,
-    padding: 10,
-  },
-  formulaText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-    textAlign: "center",
-  },
-  infoBlock: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    padding: 10,
-  },
-  advancedLabel: {
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 0.4,
-    lineHeight: 14,
-    textTransform: "uppercase",
-  },
-  topProductRow: {
-    gap: 2,
-  },
+  flexCopy: { flex: 1 },
+  rangeRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  rangeChip: { borderRadius: radius.pill, borderWidth: 1, minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  heroHeader: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  heroAmount: { fontSize: 36, lineHeight: 43 },
+  heroFormula: { gap: 2 },
+  metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  metricCard: { flexBasis: "47%", flexGrow: 1, minWidth: 138 },
+  metricIcon: { alignItems: "center", borderRadius: 12, height: 38, justifyContent: "center", width: 38 },
+  reportLine: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  rankedRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 58, paddingVertical: spacing.sm },
+  rank: { alignItems: "center", borderRadius: radius.pill, height: 32, justifyContent: "center", width: 32 },
+  cardHeader: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  alertRow: { alignItems: "center", borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, minHeight: 52, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
 });

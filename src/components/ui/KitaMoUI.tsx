@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Link, type Href, usePathname, useRouter } from "expo-router";
-import type { ComponentProps, PropsWithChildren, ReactNode } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import { type Href, usePathname, useRouter } from "expo-router";
+import { Children, type ComponentProps, type PropsWithChildren, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -14,12 +15,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { OwnerContextBar, OWNER_CONTEXT_BAR_HEIGHT } from "@/components/owner/OwnerContextBar";
+import { OwnerContextBar } from "@/components/owner/OwnerContextBar";
+import { GabiText } from "@/components/gabi/GabiText";
 import { useThemeStore } from "@/state/themeStore";
 import { themePalettes, type ThemePalette } from "@/theme/colors";
 import { radius } from "@/theme/radius";
 import { shadows } from "@/theme/shadows";
 import { spacing } from "@/theme/spacing";
+import { extendedThemePalettes, gabiGradients } from "@/theme/tokens";
 import { typography } from "@/theme/typography";
 
 type Tone = "primary" | "accent" | "success" | "warning" | "danger" | "neutral";
@@ -29,8 +32,8 @@ const toneStyles = {
   primary: (palette: ThemePalette) => ({ backgroundColor: palette.softPrimary, color: palette.primary, borderColor: palette.border }),
   accent: (palette: ThemePalette) => ({ backgroundColor: palette.softAccent, color: palette.accent, borderColor: palette.border }),
   success: (palette: ThemePalette) => ({ backgroundColor: palette.softSuccess, color: palette.success, borderColor: palette.border }),
-  warning: (palette: ThemePalette) => ({ backgroundColor: palette.softWarning, color: palette.warning, borderColor: "#F0D8A7" }),
-  danger: (palette: ThemePalette) => ({ backgroundColor: palette.softDanger, color: palette.danger, borderColor: "#F2C8BD" }),
+  warning: (palette: ThemePalette) => ({ backgroundColor: palette.softWarning, color: palette.warning, borderColor: palette.border }),
+  danger: (palette: ThemePalette) => ({ backgroundColor: palette.softDanger, color: palette.danger, borderColor: palette.border }),
   neutral: (palette: ThemePalette) => ({ backgroundColor: palette.surface, color: palette.mutedText, borderColor: palette.border }),
 };
 
@@ -53,20 +56,25 @@ export function formatQuantity(value: number) {
 }
 
 // Visual height of the bottom navigation before the safe-area inset is added.
-const BOTTOM_NAV_BASE_HEIGHT = 66;
+const BOTTOM_NAV_BASE_HEIGHT = 76;
 
 export function ScreenScroll({
   children,
   bottomNav = false,
   kioskNav = false,
-}: PropsWithChildren<{ bottomNav?: boolean; kioskNav?: boolean }>) {
+  floatingFooter,
+}: PropsWithChildren<{ bottomNav?: boolean; kioskNav?: boolean; floatingFooter?: ReactNode }>) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, 10);
   const hasNav = bottomNav || kioskNav;
+  const floatingFooterHeight = floatingFooter ? 72 : 0;
   const bottomPadding = hasNav
-    ? BOTTOM_NAV_BASE_HEIGHT + OWNER_CONTEXT_BAR_HEIGHT + bottomInset + spacing.lg
-    : bottomInset + spacing.lg;
+    ? BOTTOM_NAV_BASE_HEIGHT + floatingFooterHeight + bottomInset + spacing.lg
+    : floatingFooterHeight + bottomInset + spacing.lg;
+  const content = Children.toArray(children);
+  const contextHeader = hasNav ? content[0] : null;
+  const screenContent = hasNav ? content.slice(1) : content;
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
@@ -74,8 +82,25 @@ export function ScreenScroll({
         contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + spacing.sm, paddingBottom: bottomPadding }]}
         keyboardShouldPersistTaps="handled"
       >
-        {children}
+        {contextHeader}
+        {bottomNav ? <OwnerContextBar mode="owner" /> : null}
+        {kioskNav ? <OwnerContextBar mode="kiosk" /> : null}
+        {screenContent}
       </ScrollView>
+      <View
+        pointerEvents="none"
+        style={[styles.statusBarMask, { backgroundColor: palette.background, height: insets.top }]}
+      />
+      {floatingFooter ? (
+        <View
+          style={[
+            styles.floatingFooter,
+            { bottom: hasNav ? BOTTOM_NAV_BASE_HEIGHT + bottomInset + spacing.xs : bottomInset + spacing.xs },
+          ]}
+        >
+          {floatingFooter}
+        </View>
+      ) : null}
       {bottomNav ? <OwnerBottomNav /> : null}
       {kioskNav ? <KioskBottomNav /> : null}
     </View>
@@ -99,21 +124,37 @@ type AppTopBarProps = {
   eyebrow?: string;
   right?: ReactNode;
   centeredBrand?: boolean;
+  backHref?: Href;
+  showBrand?: boolean;
 };
 
-export function AppTopBar({ title, subtitle, eyebrow, right, centeredBrand = false }: AppTopBarProps) {
+export function AppTopBar({ title, subtitle, eyebrow, right, centeredBrand = false, backHref, showBrand = false }: AppTopBarProps) {
   const palette = usePalette();
-  const titleStyle = title.length > 11 ? styles.pageTitleCompact : styles.pageTitle;
+  const router = useRouter();
 
   return (
     <View style={styles.topBar}>
+      {backHref ? (
+        <Pressable
+          accessibilityLabel="Bumalik"
+          accessibilityRole="button"
+          hitSlop={4}
+          onPress={() => router.replace(backHref)}
+          style={({ pressed }) => [
+            styles.topBackButton,
+            { backgroundColor: pressed ? palette.softPrimary : palette.surface, borderColor: palette.border },
+          ]}
+        >
+          <Ionicons color={palette.primary} name="arrow-back" size={21} />
+        </Pressable>
+      ) : null}
       <View style={styles.topText}>
-        <KitaMoBrand centered={centeredBrand} />
-        {eyebrow ? <Text style={[styles.eyebrow, { color: palette.accent }]}>{eyebrow}</Text> : null}
-        <Text maxFontSizeMultiplier={1.3} numberOfLines={2} style={[titleStyle, { color: palette.text }]}>
+        {showBrand ? <KitaMoBrand centered={centeredBrand} /> : null}
+        {eyebrow ? <GabiText tone="primary" variant="eyebrow">{eyebrow}</GabiText> : null}
+        <GabiText maxFontSizeMultiplier={1.3} numberOfLines={2} variant="h1">
           {title}
-        </Text>
-        {subtitle ? <Text style={[styles.subtitle, { color: palette.mutedText }]}>{subtitle}</Text> : null}
+        </GabiText>
+        {subtitle ? <GabiText tone="muted" variant="caption">{subtitle}</GabiText> : null}
       </View>
       {right ? <View style={styles.topRight}>{right}</View> : null}
     </View>
@@ -234,36 +275,42 @@ type ButtonProps = {
 // an explicit onPress instead.
 export function PrimaryButton({ label, onPress, href, disabled = false }: ButtonProps) {
   const palette = usePalette();
+  const themeMode = useThemeStore((state) => state.themeMode);
+  const extended = extendedThemePalettes[themeMode];
   const router = useRouter();
   const handlePress = href ? () => router.push(href) : onPress;
   return (
     <Pressable
       disabled={disabled}
       onPress={handlePress}
-      style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: disabled ? 0.6 : 1 }]}
+      style={[styles.primaryButton, { backgroundColor: disabled ? extended.disabledBg : palette.primary }]}
     >
-      <Text style={[styles.primaryButtonText, { color: palette.kioskHeaderText }]}>{label}</Text>
+      <Text style={[styles.primaryButtonText, { color: disabled ? extended.disabledText : palette.kioskHeaderText }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function SecondaryButton({ label, onPress, href, disabled = false }: ButtonProps) {
   const palette = usePalette();
+  const themeMode = useThemeStore((state) => state.themeMode);
+  const extended = extendedThemePalettes[themeMode];
   const router = useRouter();
   const handlePress = href ? () => router.push(href) : onPress;
   return (
     <Pressable
       disabled={disabled}
       onPress={handlePress}
-      style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border, opacity: disabled ? 0.58 : 1 }]}
+      style={[styles.secondaryButton, { backgroundColor: disabled ? extended.disabledBg : palette.surface, borderColor: disabled ? extended.disabledBg : palette.border }]}
     >
-      <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>{label}</Text>
+      <Text style={[styles.secondaryButtonText, { color: disabled ? extended.disabledText : palette.primary }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function FormInput({ label, style, ...inputProps }: TextInputProps & { label: string }) {
   const palette = usePalette();
+  const themeMode = useThemeStore((state) => state.themeMode);
+  const extended = extendedThemePalettes[themeMode];
   const editable = inputProps.editable !== false;
 
   return (
@@ -275,10 +322,9 @@ export function FormInput({ label, style, ...inputProps }: TextInputProps & { la
         style={[
           styles.input,
           {
-            backgroundColor: editable ? palette.surface : palette.softPrimary,
-            borderColor: palette.border,
-            color: palette.text,
-            opacity: editable ? 1 : 0.7,
+            backgroundColor: editable ? palette.surface : extended.disabledBg,
+            borderColor: editable ? palette.border : extended.disabledBg,
+            color: editable ? palette.text : extended.disabledText,
           },
           style,
         ]}
@@ -367,80 +413,166 @@ export function InlineNotice({
 function OwnerBottomNav() {
   const pathname = usePathname();
   const palette = usePalette();
+  const themeMode = useThemeStore((state) => state.themeMode);
+  const extended = extendedThemePalettes[themeMode === "dark" ? "dark" : "light"];
+  const gradients = gabiGradients[themeMode === "dark" ? "dark" : "light"];
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const tabs: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }[] = [
     { href: "/owner", label: "Home", icon: "home-outline", activeIcon: "home", active: pathname === "/owner" },
-    { href: "/owner/ask", label: "Helper", icon: "chatbubble-ellipses-outline", activeIcon: "chatbubble-ellipses", active: pathname.includes("/owner/ask") },
-    { href: "/owner/records", label: "Logbook", icon: "document-text-outline", activeIcon: "document-text", active: pathname.includes("/owner/records") },
-    { href: "/owner/inventory", label: "Inventory", icon: "cube-outline", activeIcon: "cube", active: pathname.includes("/owner/inventory") },
-    { href: "/owner/insights", label: "Insights", icon: "bar-chart-outline", activeIcon: "bar-chart", active: pathname.includes("/owner/insights") },
+    {
+      href: "/owner/inventory",
+      label: "Tindahan",
+      icon: "cube-outline",
+      activeIcon: "cube",
+      active: ["/owner/inventory", "/owner/grocery", "/owner/recipes", "/owner/production", "/owner/transfers"].some((path) => pathname.includes(path)),
+    },
+    {
+      href: "/owner/reports",
+      label: "Kita",
+      icon: "receipt-outline",
+      activeIcon: "receipt",
+      active: ["/owner/reports", "/owner/records", "/owner/fixed-costs"].some((path) => pathname.includes(path)),
+    },
+    {
+      href: "/owner/settings",
+      label: "Ako",
+      icon: "person-outline",
+      activeIcon: "person",
+      active: ["/owner/settings", "/owner/about", "/owner/business-settings", "/owner/context", "/owner/notifications", "/owner/pilot-guide", "/owner/report-problem", "/owner/problem-reports"].some((path) => pathname.includes(path)),
+    },
   ];
 
   return (
     <View
       style={[
-        styles.bottomNav,
-        { backgroundColor: palette.surface, borderColor: palette.border, paddingBottom: Math.max(insets.bottom, 10) },
+        styles.ownerBottomNav,
+        {
+          backgroundColor: themeMode === "dark" ? extended.raised : palette.surface,
+          borderColor: palette.border,
+          bottom: Math.max(insets.bottom, 8),
+        },
+        themeMode === "dark" ? null : shadows.raised,
       ]}
     >
-      <OwnerContextBar mode="owner" />
-      <View style={styles.bottomNavTabs}>
-        {tabs.map((tab) => (
-          <Link key={tab.label} href={tab.href} asChild>
-            <Pressable style={styles.bottomNavItem}>
-              <View style={[styles.bottomNavIconWrap, tab.active ? { backgroundColor: palette.softPrimary } : null]}>
-                <Ionicons color={tab.active ? palette.primary : palette.mutedText} name={tab.active ? tab.activeIcon : tab.icon} size={19} />
-              </View>
-              <Text style={[styles.bottomNavText, { color: tab.active ? palette.primary : palette.mutedText, fontWeight: tab.active ? "800" : "600" }]}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          </Link>
-        ))}
+      <View style={styles.ownerBottomNavTabs}>
+        {tabs.slice(0, 2).map((tab) => <OwnerNavItem key={tab.label} {...tab} />)}
+        <Pressable
+          accessibilityHint="Pumili at kumpirmahin muna ang stall"
+          accessibilityLabel="BENTA"
+          accessibilityRole="button"
+          onPress={() => router.push("/kiosk")}
+          style={styles.bentaNavItem}
+        >
+          <LinearGradient colors={gradients.primaryButton} style={[styles.bentaOrb, { borderColor: palette.background }]}>
+            <Ionicons color={palette.kioskHeaderText} name="storefront" size={23} />
+          </LinearGradient>
+          <GabiText tone="primary" variant="caption">BENTA</GabiText>
+        </Pressable>
+        {tabs.slice(2).map((tab) => <OwnerNavItem key={tab.label} {...tab} />)}
       </View>
     </View>
+  );
+}
+
+function OwnerNavItem({ href, label, icon, activeIcon, active }: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }) {
+  const palette = usePalette();
+  const router = useRouter();
+  return (
+    <Pressable accessibilityLabel={label} accessibilityRole="button" onPress={() => router.push(href)} style={styles.bottomNavItem}>
+      <View style={[styles.bottomNavIconWrap, active ? { backgroundColor: palette.softPrimary } : null]}>
+        <Ionicons color={active ? palette.primary : palette.mutedText} name={active ? activeIcon : icon} size={20} />
+      </View>
+      <GabiText tone={active ? "primary" : "muted"} variant="caption">{label}</GabiText>
+    </Pressable>
   );
 }
 
 function KioskBottomNav() {
   const pathname = usePathname();
   const palette = usePalette();
+  const themeMode = useThemeStore((state) => state.themeMode);
+  const extended = extendedThemePalettes[themeMode === "dark" ? "dark" : "light"];
+  const gradients = gabiGradients[themeMode === "dark" ? "dark" : "light"];
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tabs: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }[] = [
-    { href: "/kiosk/sell", label: "Sell", icon: "cart-outline", activeIcon: "cart", active: pathname.includes("/kiosk/sell") || pathname.includes("/kiosk/checkout") },
+  const leftTabs: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }[] = [
     { href: "/kiosk/orders", label: "Orders", icon: "receipt-outline", activeIcon: "receipt", active: pathname.includes("/kiosk/orders") },
     { href: "/kiosk/stock", label: "Stock", icon: "cube-outline", activeIcon: "cube", active: pathname.includes("/kiosk/stock") },
-    { href: "/kiosk/shift", label: "Shift", icon: "time-outline", activeIcon: "time", active: pathname.includes("/kiosk/shift") },
   ];
+  const rightTabs: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }[] = [
+    { href: "/kiosk/shift", label: "Shift", icon: "time-outline", activeIcon: "time", active: pathname.includes("/kiosk/shift") },
+    { href: "/kiosk", label: "Isara", icon: "lock-closed-outline", activeIcon: "lock-closed", active: false },
+  ];
+  const bentaActive = pathname.includes("/kiosk/sell") || pathname.includes("/kiosk/checkout");
 
   return (
     <View
       style={[
-        styles.bottomNav,
-        { backgroundColor: palette.surface, borderColor: palette.border, paddingBottom: Math.max(insets.bottom, 10) },
+        styles.kioskBottomNav,
+        {
+          backgroundColor: themeMode === "dark" ? extended.raised : palette.surface,
+          borderColor: palette.border,
+          bottom: Math.max(insets.bottom, 8),
+        },
+        themeMode === "dark" ? null : shadows.raised,
       ]}
     >
-      <OwnerContextBar mode="kiosk" />
-      <View style={styles.bottomNavTabs}>
-        {tabs.map((tab) => (
-          <Pressable key={tab.label} onPress={() => router.replace(tab.href)} style={styles.bottomNavItem}>
-            <View style={[styles.bottomNavIconWrap, tab.active ? { backgroundColor: palette.softPrimary } : null]}>
-              <Ionicons color={tab.active ? palette.primary : palette.mutedText} name={tab.active ? tab.activeIcon : tab.icon} size={19} />
-            </View>
-            <Text style={[styles.bottomNavText, { color: tab.active ? palette.primary : palette.mutedText, fontWeight: tab.active ? "800" : "600" }]}>
-              {tab.label}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={styles.ownerBottomNavTabs}>
+        {leftTabs.map((tab) => <KioskNavItem key={tab.label} {...tab} />)}
+        <Pressable
+          accessibilityLabel="BENTA"
+          accessibilityRole="button"
+          onPress={() => router.replace("/kiosk/sell")}
+          style={styles.bentaNavItem}
+        >
+          <LinearGradient
+            colors={gradients.primaryButton}
+            style={[
+              styles.bentaOrb,
+              { borderColor: palette.background },
+              bentaActive ? { shadowColor: palette.primary, shadowOpacity: 0.34, shadowRadius: 10 } : null,
+            ]}
+          >
+            <Ionicons color={palette.kioskHeaderText} name="storefront" size={23} />
+          </LinearGradient>
+          <GabiText tone="primary" variant="caption">BENTA</GabiText>
+        </Pressable>
+        {rightTabs.map((tab) => <KioskNavItem key={tab.label} {...tab} />)}
       </View>
     </View>
+  );
+}
+
+function KioskNavItem({ href, label, icon, activeIcon, active }: { href: Href; label: string; icon: IoniconName; activeIcon: IoniconName; active: boolean }) {
+  const palette = usePalette();
+  const router = useRouter();
+  return (
+    <Pressable accessibilityLabel={label} accessibilityRole="button" onPress={() => router.replace(href)} style={styles.bottomNavItem}>
+      <View style={[styles.bottomNavIconWrap, active ? { backgroundColor: palette.softPrimary } : null]}>
+        <Ionicons color={active ? palette.primary : palette.mutedText} name={active ? activeIcon : icon} size={20} />
+      </View>
+      <GabiText tone={active ? "primary" : "muted"} variant="caption">{label}</GabiText>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+  },
+  statusBarMask: {
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 3,
+  },
+  floatingFooter: {
+    left: spacing.md,
+    position: "absolute",
+    right: spacing.md,
+    zIndex: 4,
   },
   scrollContent: {
     flexGrow: 1,
@@ -453,10 +585,11 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   topBar: {
-    alignItems: "flex-start",
+    alignItems: "center",
     flexDirection: "row",
     gap: 12,
     justifyContent: "space-between",
+    minHeight: 48,
     paddingBottom: spacing.xs,
   },
   topText: {
@@ -465,7 +598,14 @@ const styles = StyleSheet.create({
   },
   topRight: {
     alignItems: "flex-end",
-    paddingTop: spacing.xs,
+  },
+  topBackButton: {
+    alignItems: "center",
+    borderRadius: 13,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
   },
   eyebrow: {
     ...typography.label,
@@ -679,6 +819,29 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
   },
+  kioskBottomNav: {
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    left: 10,
+    minHeight: 66,
+    paddingHorizontal: 6,
+    position: "absolute",
+    right: 10,
+  },
+  ownerBottomNav: {
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    left: 10,
+    minHeight: 66,
+    paddingHorizontal: 6,
+    position: "absolute",
+    right: 10,
+  },
+  ownerBottomNavTabs: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    minHeight: 64,
+  },
   bottomNavTabs: {
     flexDirection: "row",
     paddingHorizontal: spacing.sm,
@@ -688,7 +851,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flex: 1,
     gap: 2,
-    minHeight: 50,
+    justifyContent: "center",
+    minHeight: 58,
   },
   bottomNavIconWrap: {
     alignItems: "center",
@@ -700,5 +864,21 @@ const styles = StyleSheet.create({
   bottomNavText: {
     fontSize: 10.5,
     lineHeight: 14,
+  },
+  bentaNavItem: {
+    alignItems: "center",
+    flex: 1.12,
+    gap: 2,
+    justifyContent: "flex-end",
+    minHeight: 72,
+    paddingBottom: 6,
+  },
+  bentaOrb: {
+    alignItems: "center",
+    borderRadius: 28,
+    borderWidth: 3,
+    height: 54,
+    justifyContent: "center",
+    width: 54,
   },
 });

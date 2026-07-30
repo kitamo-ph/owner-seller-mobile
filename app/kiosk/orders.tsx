@@ -1,20 +1,19 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { AppTopBar, Card, EmptyState, formatPeso, ListRow, ScreenScroll } from "@/components/ui/KitaMoUI";
+import { GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton, GabiSnackbar } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, ScreenScroll, formatPeso } from "@/components/ui/KitaMoUI";
 import type { PaymentMethod } from "@/domain/types";
 import { listRecentKioskOrders, type KioskOrderSummary } from "@/services/kioskSales";
 import { copyReceiptText, shareReceiptText } from "@/services/shareReceipt";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
-
-function formatMoney(value: number) {
-  return formatPeso(value);
-}
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString("en-PH", {
@@ -24,7 +23,11 @@ function formatDateTime(value: string) {
 }
 
 function paymentLabel(method: PaymentMethod) {
-  return method === "bank transfer" ? "Bank transfer" : method === "cash" || method === "other" ? method.charAt(0).toUpperCase() + method.slice(1) : method;
+  return method === "bank transfer"
+    ? "Bank transfer"
+    : method === "cash" || method === "other"
+      ? method.charAt(0).toUpperCase() + method.slice(1)
+      : method;
 }
 
 export default function KioskOrdersScreen() {
@@ -32,14 +35,16 @@ export default function KioskOrdersScreen() {
   const [selectedOrder, setSelectedOrder] = useState<KioskOrderSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const [messageIsError, setMessageIsError] = useState(false);
+  const { palette } = useGabiTheme();
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const nextOrders = await listRecentKioskOrders();
       setOrders(nextOrders);
+      setMessage(null);
+      setMessageIsError(false);
     } finally {
       setLoading(false);
     }
@@ -52,6 +57,7 @@ export default function KioskOrdersScreen() {
         logDevError("KioskOrders.refresh", error);
         if (active) {
           setMessage(getFriendlyErrorMessage("Could not load orders."));
+          setMessageIsError(true);
         }
       });
 
@@ -62,155 +68,181 @@ export default function KioskOrdersScreen() {
   );
 
   async function copyReceipt() {
-    if (!selectedOrder?.receiptText) {
-      return;
-    }
-
+    if (!selectedOrder?.receiptText) return;
     await copyReceiptText(selectedOrder.receiptText);
-    setMessage("Receipt copied to clipboard.");
+    setMessage("Nakopya ang resibo.");
+    setMessageIsError(false);
   }
 
   async function shareReceipt() {
-    if (!selectedOrder?.receiptText) {
-      return;
-    }
-
+    if (!selectedOrder?.receiptText) return;
     const shared = await shareReceiptText(selectedOrder.receiptText);
-    setMessage(shared ? "Share options opened." : "Sharing is not available on this device.");
+    setMessage(shared ? "Bukas na ang share options." : "Hindi available ang sharing sa device na ito.");
+    setMessageIsError(!shared);
   }
 
   return (
     <ScreenScroll kioskNav>
-      <AppTopBar subtitle="Recent sales and receipts." title="Orders" />
+      <AppTopBar eyebrow="KIOSK" subtitle="Mga lokal na benta at resibo sa stall na ito" title="Orders" />
 
-      {message ? <Text style={[styles.body, { color: palette.text }]}>{message}</Text> : null}
+      {messageIsError && message ? <GabiNotice message={message} title="Hindi ma-load o ma-share" tone="danger" /> : null}
 
-      <Card>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Orders</Text>
-        {loading ? <EmptyState description="Reading local sales." title="Loading orders" /> : null}
-        {!loading && orders.length === 0 ? (
-          <EmptyState description="Kiosk sales will appear here after checkout." title="No local sales yet" />
-        ) : null}
+      {loading ? (
+        <GabiCard>
+          <GabiSkeleton height={18} showImmediately width="35%" />
+          <GabiSkeleton height={82} showImmediately />
+          <GabiSkeleton height={82} showImmediately />
+        </GabiCard>
+      ) : null}
 
-        {orders.map((order) => (
-          <ListRow
-            amount={formatMoney(order.amount)}
-            badge={paymentLabel(order.paymentMethod)}
-            badgeTone="success"
-            icon="B"
-            key={order.id}
-            onPress={() => setSelectedOrder(order)}
-            subtitle={`${formatDateTime(order.happenedAt)} · ${order.itemCount} item(s)${
-              order.externalReferenceNumber ? ` · Ref ${order.externalReferenceNumber}` : ""
-            }`}
-            title={order.transactionNo}
+      {!loading && orders.length === 0 ? (
+        <GabiCard>
+          <GabiEmptyState
+            icon="receipt-outline"
+            message="Lalabas dito ang mga benta matapos ang unang checkout sa stall na ito."
+            title="Wala pang local sale"
           />
-        ))}
-      </Card>
+        </GabiCard>
+      ) : null}
+
+      {!loading && orders.length > 0 ? (
+        <GabiCard>
+          <GabiSectionHeader action={<GabiChip label={`${orders.length} recent`} tone="neutral" />} title="Mga order" />
+          <View style={styles.orderList}>
+            {orders.map((order) => {
+              const selected = selectedOrder?.id === order.id;
+              return (
+                <Pressable
+                  accessibilityLabel={`${order.transactionNo}, ${formatPeso(order.amount)}`}
+                  accessibilityRole="button"
+                  key={order.id}
+                  onPress={() => setSelectedOrder(order)}
+                  style={[
+                    styles.orderCard,
+                    {
+                      backgroundColor: selected ? palette.softPrimary : palette.surface,
+                      borderColor: selected ? palette.primary : palette.border,
+                    },
+                  ]}
+                >
+                  <View style={[styles.orderIcon, { backgroundColor: palette.softSuccess }]}>
+                    <Ionicons color={palette.success} name="receipt-outline" size={20} />
+                  </View>
+                  <View style={styles.orderCopy}>
+                    <GabiText numberOfLines={1} variant="buttonSm">{order.transactionNo}</GabiText>
+                    <GabiText tone="muted" variant="caption">{formatDateTime(order.happenedAt)} · {order.itemCount} item(s)</GabiText>
+                    <View style={styles.orderMeta}>
+                      <GabiChip label={paymentLabel(order.paymentMethod)} tone="success" />
+                      {order.externalReferenceNumber ? <GabiChip label={`Ref ${order.externalReferenceNumber}`} tone="neutral" /> : null}
+                    </View>
+                  </View>
+                  <View style={styles.orderAmount}>
+                    <GabiText money numberOfLines={1} tone="success" variant="metricValue">{formatPeso(order.amount)}</GabiText>
+                    <Ionicons color={palette.primary} name="chevron-forward" size={18} />
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </GabiCard>
+      ) : null}
 
       {selectedOrder ? (
-        <Card>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Receipt Details</Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>{selectedOrder.transactionNo}</Text>
+        <GabiCard raised>
+          <GabiSectionHeader action={<GabiChip label={paymentLabel(selectedOrder.paymentMethod)} tone="success" />} title="Resibo" />
+          <View style={[styles.receiptTotal, { backgroundColor: palette.softPrimary }]}>
+            <View style={styles.receiptTotalCopy}>
+              <GabiText tone="muted" variant="caption">{selectedOrder.transactionNo}</GabiText>
+              <GabiText tone="muted" variant="caption">{formatDateTime(selectedOrder.happenedAt)}</GabiText>
+            </View>
+            <GabiText money tone="primary" variant="heroPeso">{formatPeso(selectedOrder.amount)}</GabiText>
+          </View>
           {selectedOrder.receiptText ? (
             <>
-              <Text style={[styles.receiptText, { color: palette.text }]}>{selectedOrder.receiptText}</Text>
-              <View style={styles.inlineActions}>
-                <SmallButton label="Copy receipt" onPress={copyReceipt} />
-                <SmallButton label="Share receipt" onPress={shareReceipt} />
+              <View style={[styles.receiptTextCard, { backgroundColor: palette.background, borderColor: palette.border }]}>
+                <GabiText style={styles.receiptText}>{selectedOrder.receiptText}</GabiText>
+              </View>
+              <View style={styles.receiptActions}>
+                <View style={styles.receiptActionCell}>
+                  <GabiSoftButton icon="copy-outline" label="Copy" onPress={copyReceipt} />
+                </View>
+                <View style={styles.receiptActionCell}>
+                  <GabiSoftButton icon="share-social-outline" label="Share" onPress={shareReceipt} />
+                </View>
               </View>
             </>
           ) : (
-            <Text style={[styles.body, { color: palette.mutedText }]}>No receipt text saved for this order.</Text>
+            <GabiNotice message="Walang receipt text na naka-save para sa order na ito." tone="warning" />
           )}
-        </Card>
+        </GabiCard>
       ) : null}
+
+      {!messageIsError && message ? <GabiSnackbar message={message} onDismiss={() => setMessage(null)} /> : null}
     </ScreenScroll>
   );
 }
 
-type SmallButtonProps = {
-  label: string;
-  onPress: () => void;
-};
-
-function SmallButton({ label, onPress }: SmallButtonProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
-  return (
-    <Pressable onPress={onPress} style={[styles.smallButton, { borderColor: palette.border }]}>
-      <Text style={[styles.smallButtonText, { color: palette.primary }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
-  },
-  header: {
+  orderList: {
     gap: spacing.sm,
   },
-  eyebrow: {
-    ...typography.label,
-  },
-  title: {
-    ...typography.title,
-  },
-  body: {
-    ...typography.body,
-  },
-  card: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  sectionTitle: {
-    ...typography.heading,
-  },
-  orderRow: {
+  orderCard: {
     alignItems: "center",
-    borderTopWidth: 1,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 92,
+    padding: spacing.sm,
+  },
+  orderIcon: {
+    alignItems: "center",
+    borderRadius: 14,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  orderCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  orderMeta: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  orderAmount: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  receiptTotal: {
+    alignItems: "center",
+    borderRadius: 16,
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
-    paddingTop: spacing.md,
+    padding: spacing.md,
   },
-  orderText: {
+  receiptTotalCopy: {
     flex: 1,
-    gap: spacing.xs,
+    gap: 3,
   },
-  orderTitle: {
-    ...typography.button,
-  },
-  orderAmount: {
-    ...typography.button,
+  receiptTextCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: spacing.md,
   },
   receiptText: {
     fontFamily: "monospace",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 17,
   },
-  inlineActions: {
+  receiptActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing.sm,
   },
-  smallButton: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  smallButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
+  receiptActionCell: {
+    flex: 1,
   },
 });

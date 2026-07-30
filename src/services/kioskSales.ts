@@ -3,7 +3,6 @@ import { runMigrations } from "@/db/migrations";
 import type { LocalDataCounts } from "@/db/schema";
 import {
   getAverageProducedCostByProduct,
-  getLocalDataCounts,
   listIngredientLotsForBusiness,
   listRecipeLinesForRecipe,
   type RepositoryDatabase,
@@ -78,20 +77,6 @@ export type KioskShiftSummary = {
   pendingQueueCount: number;
 };
 
-export type SaleIntegrityCheckResult = {
-  saleId: string | null;
-  transactionNo: string | null;
-  ok: boolean;
-  itemCount: number;
-  receiptCount: number;
-  movementCount: number;
-  queueCount: number;
-  stockOutQuantity: number;
-  itemQuantity: number;
-  stockNonnegative: boolean;
-  messages: string[];
-};
-
 type PendingQueueCountRow = {
   count: number;
 };
@@ -116,21 +101,6 @@ type ShiftSummaryRow = {
   maya_total: number | null;
   bank_transfer_total: number | null;
   other_total: number | null;
-};
-
-type LatestSaleRow = {
-  id: string;
-  transaction_no: string;
-};
-
-type SaleIntegrityRow = {
-  item_count: number;
-  receipt_count: number;
-  movement_count: number;
-  queue_count: number;
-  stock_out_quantity: number | null;
-  item_quantity: number | null;
-  negative_stock_count: number;
 };
 
 type CompletedCheckoutRow = {
@@ -732,117 +702,5 @@ export async function getKioskShiftSummary(db: RepositoryDatabase = openKitamoDa
     bankTransferTotal: row?.bank_transfer_total ?? 0,
     otherTotal: row?.other_total ?? 0,
     pendingQueueCount,
-  };
-}
-
-export async function getKioskCounts(db: RepositoryDatabase = openKitamoDatabase()) {
-  await runMigrations(db);
-  return getLocalDataCounts(db);
-}
-
-export async function verifySaleIntegrity(
-  saleId?: string,
-  db: RepositoryDatabase = openKitamoDatabase(),
-): Promise<SaleIntegrityCheckResult> {
-  await runMigrations(db);
-
-  const sale =
-    saleId
-      ? await db.getFirstAsync<LatestSaleRow>(
-          "SELECT id, transaction_no FROM sales WHERE id = ? AND deleted_at IS NULL",
-          [saleId],
-        )
-      : await db.getFirstAsync<LatestSaleRow>(
-          "SELECT id, transaction_no FROM sales WHERE deleted_at IS NULL ORDER BY happened_at DESC LIMIT 1",
-        );
-
-  if (!sale) {
-    return {
-      saleId: null,
-      transactionNo: null,
-      ok: true,
-      itemCount: 0,
-      receiptCount: 0,
-      movementCount: 0,
-      queueCount: 0,
-      stockOutQuantity: 0,
-      itemQuantity: 0,
-      stockNonnegative: true,
-      messages: ["No local sale to verify."],
-    };
-  }
-
-  const row = await db.getFirstAsync<SaleIntegrityRow>(
-    `
-      SELECT
-        COUNT(DISTINCT si.id) AS item_count,
-        COUNT(DISTINCT rr.id) AS receipt_count,
-        COUNT(DISTINCT im.id) AS movement_count,
-        COUNT(DISTINCT oq.id) AS queue_count,
-        COALESCE((SELECT SUM(quantity) FROM inventory_movements WHERE linked_sale_id = ? AND movement_type = 'stock_out_sale' AND deleted_at IS NULL), 0) AS stock_out_quantity,
-        COALESCE((SELECT SUM(quantity) FROM sale_items WHERE sale_id = ? AND deleted_at IS NULL), 0) AS item_quantity,
-        COALESCE((
-          SELECT COUNT(*)
-          FROM sale_items item
-          JOIN products product ON product.id = item.product_id
-          WHERE item.sale_id = ? AND item.deleted_at IS NULL AND product.stock_qty < 0
-        ), 0) AS negative_stock_count
-      FROM sales s
-      LEFT JOIN sale_items si ON si.sale_id = s.id AND si.deleted_at IS NULL
-      LEFT JOIN receipt_records rr ON rr.sale_id = s.id AND rr.deleted_at IS NULL
-      LEFT JOIN inventory_movements im ON im.linked_sale_id = s.id AND im.deleted_at IS NULL
-      LEFT JOIN offline_queue oq ON oq.entity_type = 'sale' AND oq.entity_id = s.id AND oq.deleted_at IS NULL
-      WHERE s.id = ? AND s.deleted_at IS NULL
-    `,
-    [sale.id, sale.id, sale.id, sale.id],
-  );
-
-  const itemCount = row?.item_count ?? 0;
-  const receiptCount = row?.receipt_count ?? 0;
-  const movementCount = row?.movement_count ?? 0;
-  const queueCount = row?.queue_count ?? 0;
-  const stockOutQuantity = row?.stock_out_quantity ?? 0;
-  const itemQuantity = row?.item_quantity ?? 0;
-  const stockNonnegative = (row?.negative_stock_count ?? 0) === 0;
-  const messages: string[] = [];
-
-  if (itemCount === 0) {
-    messages.push("Sale has no sale_items.");
-  }
-
-  if (receiptCount === 0) {
-    messages.push("Sale has no receipt record.");
-  }
-
-  if (movementCount === 0) {
-    messages.push("Sale has no stock-out inventory movement.");
-  }
-
-  if (queueCount === 0) {
-    messages.push("Sale has no pending offline queue row.");
-  }
-
-  if (stockOutQuantity !== itemQuantity) {
-    messages.push("Stock-out movement quantity does not match sale item quantity.");
-  }
-
-  if (!stockNonnegative) {
-    messages.push("A product has negative stock after the sale.");
-  }
-
-  const ok = messages.length === 0;
-
-  return {
-    saleId: sale.id,
-    transactionNo: sale.transaction_no,
-    ok,
-    itemCount,
-    receiptCount,
-    movementCount,
-    queueCount,
-    stockOutQuantity,
-    itemQuantity,
-    stockNonnegative,
-    messages: ok ? ["Latest sale integrity looks good."] : messages,
   };
 }

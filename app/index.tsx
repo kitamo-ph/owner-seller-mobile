@@ -8,6 +8,7 @@ import { useAppStore } from "@/state/appStore";
 import { useThemeStore } from "@/state/themeStore";
 import { themePalettes } from "@/theme/colors";
 import { spacing } from "@/theme/spacing";
+import { extendedThemePalettes } from "@/theme/tokens";
 import { typography } from "@/theme/typography";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
@@ -164,15 +165,22 @@ type ModeTileProps = {
 function ModeTile({ label, description, toneColor, disabled, onPress }: ModeTileProps) {
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
 
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      style={[styles.modeTile, { backgroundColor: palette.surface, borderColor: palette.border, opacity: disabled ? 0.68 : 1 }]}
+      style={[
+        styles.modeTile,
+        {
+          backgroundColor: disabled ? extended.disabledBg : palette.surface,
+          borderColor: disabled ? extended.disabledBg : palette.border,
+        },
+      ]}
     >
-      <Text style={[styles.modeLabel, { color: toneColor }]}>{label}</Text>
-      <Text style={[styles.modeDescription, { color: palette.mutedText }]}>{description}</Text>
+      <Text style={[styles.modeLabel, { color: disabled ? extended.disabledText : toneColor }]}>{label}</Text>
+      <Text style={[styles.modeDescription, { color: disabled ? extended.disabledText : palette.mutedText }]}>{description}</Text>
     </Pressable>
   );
 }

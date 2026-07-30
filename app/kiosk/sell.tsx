@@ -1,31 +1,24 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 
 import { NetworkStatusBadge } from "@/components/common/NetworkStatusBadge";
-import { AppTopBar, Card, EmptyState, formatPeso, Pill, PrimaryButton, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, ScreenScroll, formatPeso } from "@/components/ui/KitaMoUI";
 import { isLowStock } from "@/domain/inventory";
 import { bundleLabelFor, calculateCartSubtotal, calculateLineTotal, hasBundlePricing } from "@/domain/pricing";
 import type { Product } from "@/domain/types";
-import {
-  loadKioskPreferences,
-  recordRecentProduct,
-  saveFavoriteProductIds,
-} from "@/services/kioskPreferences";
+import { loadKioskPreferences, recordRecentProduct, saveFavoriteProductIds } from "@/services/kioskPreferences";
 import { loadKioskContext, type KioskContext } from "@/services/kioskSales";
 import { useKioskStore } from "@/state/kioskStore";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
-import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
-
-function formatMoney(value: number) {
-  return formatPeso(value);
-}
 
 export default function KioskSellScreen() {
   const [context, setContext] = useState<KioskContext | null>(null);
@@ -41,8 +34,8 @@ export default function KioskSellScreen() {
   const decrementCartItem = useKioskStore((state) => state.decrementCartItem);
   const removeCartItem = useKioskStore((state) => state.removeCartItem);
   const clearCart = useKioskStore((state) => state.clearCart);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended, isDark } = useGabiTheme();
+  const router = useRouter();
 
   const refresh = useCallback(async () => {
     const nextContext = await loadKioskContext();
@@ -120,9 +113,9 @@ export default function KioskSellScreen() {
   }
 
   function confirmClearCart() {
-    Alert.alert("Clear cart?", "All items in this sale will be removed.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Clear", style: "destructive", onPress: clearCart },
+    Alert.alert("Alisin ang cart?", "Mawawala ang lahat ng item sa kasalukuyang benta.", [
+      { text: "Hindi", style: "cancel" },
+      { text: "Alisin", style: "destructive", onPress: clearCart },
     ]);
   }
 
@@ -155,144 +148,179 @@ export default function KioskSellScreen() {
     return products;
   }, [context?.products, favoriteProductIds, recentProductIds, searchQuery, selectedFilter]);
 
+  const cartBar = cartItems.length > 0 ? (
+    <View style={[styles.cartBar, { backgroundColor: palette.kioskHeader, borderColor: isDark ? palette.border : palette.kioskHeader }]}>
+      <View style={styles.cartBarCopy}>
+        <GabiText style={{ color: extended.textOnPrimaryMuted }} variant="caption">
+          {cartQuantity} item{cartQuantity === 1 ? "" : "s"} sa cart
+        </GabiText>
+        <GabiText money numberOfLines={1} tone="inverse" variant="heroPeso">{formatPeso(total)}</GabiText>
+      </View>
+      <Pressable
+        accessibilityLabel="Bayad"
+        accessibilityRole="button"
+        onPress={() => router.push("/kiosk/checkout")}
+        style={({ pressed }) => [
+          styles.payButton,
+          { backgroundColor: pressed ? palette.warning : palette.accent },
+        ]}
+      >
+        <GabiText style={{ color: extended.accentTextOn }} variant="buttonLg">Bayad</GabiText>
+        <Ionicons color={extended.accentTextOn} name="arrow-forward" size={18} />
+      </Pressable>
+    </View>
+  ) : null;
+
   return (
-    <ScreenScroll kioskNav>
-      <AppTopBar subtitle="Tap a product to add it to the cart." title={context?.activeBranch?.branchName ?? "Sell"} />
+    <ScreenScroll floatingFooter={cartBar} kioskNav>
+      <AppTopBar
+        eyebrow="BENTA"
+        right={<GabiIconButton accessibilityLabel="Kiosk help at problem reports" icon="help-circle-outline" onPress={() => router.push("/kiosk/help" as Href)} />}
+        subtitle="Tap paninda para idagdag sa cart"
+        title={context?.activeBranch?.branchName ?? "Benta"}
+      />
+
+      {message ? (
+        <GabiNotice
+          message={message}
+          title={messageIsError ? "Hindi naidagdag" : "Naka-save"}
+          tone={messageIsError ? "danger" : "success"}
+        />
+      ) : null}
+
+      {!context ? (
+        <GabiCard>
+          <GabiSkeleton height={46} showImmediately />
+          <View style={styles.productGrid}>
+            <GabiSkeleton height={184} showImmediately width="48%" />
+            <GabiSkeleton height={184} showImmediately width="48%" />
+          </View>
+        </GabiCard>
+      ) : null}
 
       {context?.setupMessage ? (
-        <Card>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Setup needed</Text>
-          <Text style={[styles.body, { color: palette.warning }]}>{context.setupMessage}</Text>
-          {context.setupMessage === "Add products in Owner Inventory first." ? (
-            <SecondaryButton href="/owner/inventory" label="Open Owner Inventory" />
-          ) : null}
-        </Card>
+        <GabiNotice message={context.setupMessage} title="Kailangan ng setup" tone="warning" />
       ) : null}
 
-      {message ? <Text style={[styles.message, { color: messageIsError ? palette.danger : palette.text }]}>{message}</Text> : null}
+      <View style={styles.statusRow}>
+        <NetworkStatusBadge compact pendingQueueCount={context?.pendingQueueCount ?? 0} />
+        {context ? <GabiChip label={`${context.products.length} paninda`} tone="neutral" /> : null}
+      </View>
 
-      <NetworkStatusBadge compact pendingQueueCount={context?.pendingQueueCount ?? 0} />
+      {context ? (
+        <GabiCard style={styles.productsCard}>
+          <GabiSectionHeader
+            action={<GabiText tone="faint" variant="caption">{visibleProducts.length} shown</GabiText>}
+            title="Paninda"
+          />
+
+          <View style={[styles.searchBox, { backgroundColor: extended.field, borderColor: palette.border }]}>
+            <Ionicons color={extended.textFaint} name="search-outline" size={20} />
+            <TextInput
+              accessibilityLabel="Search paninda"
+              onChangeText={setSearchQuery}
+              placeholder="Search paninda"
+              placeholderTextColor={extended.textFaint}
+              style={[styles.searchInput, { color: palette.text }]}
+              value={searchQuery}
+            />
+            {searchQuery ? (
+              <Pressable accessibilityLabel="Clear search" hitSlop={8} onPress={() => setSearchQuery("")}>
+                <Ionicons color={extended.textFaint} name="close-circle" size={20} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView horizontal contentContainerStyle={styles.filterRow} showsHorizontalScrollIndicator={false}>
+            <FilterChip active={selectedFilter === "all"} label="Lahat" onPress={() => setSelectedFilter("all")} />
+            <FilterChip active={selectedFilter === "favorites"} icon="star" label="Paborito" onPress={() => setSelectedFilter("favorites")} />
+            <FilterChip active={selectedFilter === "recent"} icon="time" label="Kamakailan" onPress={() => setSelectedFilter("recent")} />
+            {categories.map((category) => (
+              <FilterChip active={selectedFilter === category} key={category} label={category} onPress={() => setSelectedFilter(category)} />
+            ))}
+          </ScrollView>
+
+          {context.products.length === 0 ? (
+            <GabiEmptyState
+              actionLabel="Buksan ang Inventory"
+              icon="cube-outline"
+              message="Magdagdag muna ng paninda sa Owner Inventory."
+              onAction={() => router.push("/owner/inventory")}
+              title="Wala pang paninda"
+            />
+          ) : null}
+
+          {context.products.length > 0 && visibleProducts.length === 0 ? (
+            <GabiEmptyState
+              icon={selectedFilter === "favorites" ? "star-outline" : selectedFilter === "recent" ? "time-outline" : "search-outline"}
+              message={
+                selectedFilter === "favorites"
+                  ? "Tap ang star sa tile para manatili rito."
+                  : selectedFilter === "recent"
+                    ? "Lalabas dito ang huling mga piniling paninda."
+                    : "Subukan ang ibang category o search term."
+              }
+              title={selectedFilter === "favorites" ? "Wala pang paborito" : selectedFilter === "recent" ? "Wala pang recent" : "Walang tugma"}
+            />
+          ) : null}
+
+          <View style={styles.productGrid}>
+            {visibleProducts.map((product) => (
+              <ProductTile
+                cartQuantity={cartItems.find((item) => item.productId === product.id)?.quantity ?? 0}
+                cookedToOrder={Boolean(context.cookUponOrderRecipeByProductId[product.id])}
+                favorite={favoriteProductIds.includes(product.id)}
+                key={product.id}
+                onAdd={() => addToCart(product)}
+                onDecrement={() => decrease(product.id)}
+                onIncrement={() => increase(product.id)}
+                onToggleFavorite={() => toggleFavorite(product.id)}
+                product={product}
+              />
+            ))}
+          </View>
+        </GabiCard>
+      ) : null}
 
       {cartItems.length > 0 ? (
-        <View style={[styles.fastCheckout, { backgroundColor: palette.primary }]}>
-          <View style={styles.fastCheckoutCopy}>
-            <Text style={[styles.fastCheckoutCount, { color: palette.softAccent }]}>
-              {cartQuantity} item{cartQuantity === 1 ? "" : "s"} in cart
-            </Text>
-            <Text style={[styles.fastCheckoutTotal, { color: palette.kioskHeaderText }]}>{formatMoney(total)}</Text>
-          </View>
-          <PrimaryButton href="/kiosk/checkout" label="Checkout" />
-        </View>
-      ) : null}
-
-      <Card>
-        <View style={styles.productsHeader}>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Products</Text>
-          <Text style={[styles.resultCount, { color: palette.mutedText }]}>{visibleProducts.length} shown</Text>
-        </View>
-        <View style={[styles.searchBox, { backgroundColor: palette.background, borderColor: palette.border }]}>
-          <Ionicons color={palette.mutedText} name="search-outline" size={20} />
-          <TextInput
-            onChangeText={setSearchQuery}
-            placeholder="Search paninda"
-            placeholderTextColor={palette.mutedText}
-            style={[styles.searchInput, { color: palette.text }]}
-            value={searchQuery}
+        <GabiCard>
+          <GabiSectionHeader
+            action={<GabiSoftButton compact icon="trash-outline" label="Alisin lahat" onPress={confirmClearCart} />}
+            title="Cart"
           />
-          {searchQuery ? (
-            <Pressable hitSlop={8} onPress={() => setSearchQuery("")}>
-              <Ionicons color={palette.mutedText} name="close-circle" size={20} />
-            </Pressable>
-          ) : null}
-        </View>
-        <ScrollView horizontal contentContainerStyle={styles.filterRow} showsHorizontalScrollIndicator={false}>
-          <FilterChip active={selectedFilter === "all"} label="All" onPress={() => setSelectedFilter("all")} />
-          <FilterChip active={selectedFilter === "favorites"} icon="star" label="Favorites" onPress={() => setSelectedFilter("favorites")} />
-          <FilterChip active={selectedFilter === "recent"} icon="time" label="Recent" onPress={() => setSelectedFilter("recent")} />
-          {categories.map((category) => (
-            <FilterChip active={selectedFilter === category} key={category} label={category} onPress={() => setSelectedFilter(category)} />
-          ))}
-        </ScrollView>
-        {context && context.products.length === 0 ? (
-          <EmptyState description="Add products in Owner Inventory first." title="No paninda yet" />
-        ) : null}
-
-        {context && context.products.length > 0 && visibleProducts.length === 0 ? (
-          <EmptyState
-            description={selectedFilter === "favorites" ? "Tap the star on a product to keep it here." : "Try another category or search term."}
-            title={selectedFilter === "favorites" ? "No favorites yet" : selectedFilter === "recent" ? "No recent products yet" : "No matching products"}
-          />
-        ) : null}
-
-        <View style={styles.productGrid}>
-          {visibleProducts.map((product) => (
-            <ProductTile
-              cartQuantity={cartItems.find((item) => item.productId === product.id)?.quantity ?? 0}
-              cookedToOrder={Boolean(context?.cookUponOrderRecipeByProductId[product.id])}
-              favorite={favoriteProductIds.includes(product.id)}
-              key={product.id}
-              product={product}
-              onAdd={() => addToCart(product)}
-              onDecrement={() => decrease(product.id)}
-              onIncrement={() => increase(product.id)}
-              onToggleFavorite={() => toggleFavorite(product.id)}
-            />
-          ))}
-        </View>
-      </Card>
-
-      <Card>
-        <View style={styles.cartHeader}>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Cart</Text>
-          {cartItems.length > 0 ? (
-            <Pressable onPress={confirmClearCart}>
-              <Text style={[styles.clearText, { color: palette.danger }]}>Clear</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        {cartItems.length === 0 ? <EmptyState description="Tap a product above to start a sale." title="Cart is empty" /> : null}
-
-        {cartItems.map((item) => {
-          const pricing = calculateLineTotal(item);
-          return (
-            <View key={item.productId} style={[styles.cartItem, { backgroundColor: palette.background, borderColor: palette.border }]}>
-              <View style={styles.cartItemHeader}>
-                <View style={styles.cartText}>
-                  <Text style={[styles.itemTitle, { color: palette.text }]}>{item.name}</Text>
-                  <Text style={[styles.body, { color: palette.mutedText }]}>
-                    {formatMoney(item.unitPrice)} x {item.quantity} = {formatMoney(pricing.lineTotal)}
-                  </Text>
-                  {pricing.bundleApplied && pricing.displayLabel ? (
-                    <Text style={[styles.bundleApplied, { color: palette.warning }]}>Bundle applied: {pricing.displayLabel}</Text>
-                  ) : null}
+          <View style={styles.cartList}>
+            {cartItems.map((item) => {
+              const pricing = calculateLineTotal(item);
+              return (
+                <View key={item.productId} style={[styles.cartRow, { borderColor: palette.border }]}>
+                  <View style={styles.cartRowCopy}>
+                    <GabiText numberOfLines={1} variant="buttonSm">{item.name}</GabiText>
+                    <View style={styles.cartMetaRow}>
+                      <GabiText tone="muted" variant="caption">
+                        {formatPeso(item.unitPrice)} x {item.quantity}
+                      </GabiText>
+                      {pricing.bundleApplied && pricing.displayLabel ? <GabiChip label={pricing.displayLabel} tone="primary" /> : null}
+                    </View>
+                  </View>
+                  <GabiText money numberOfLines={1} variant="metricValue">{formatPeso(pricing.lineTotal)}</GabiText>
+                  <View style={[styles.cartStepper, { backgroundColor: palette.softPrimary }]}>
+                    <Pressable accessibilityLabel={`Bawasan ang ${item.name}`} onPress={() => decrease(item.productId)} style={styles.stepperButton}>
+                      <Ionicons color={palette.primary} name="remove" size={18} />
+                    </Pressable>
+                    <GabiText tone="primary" variant="buttonSm">{item.quantity}</GabiText>
+                    <Pressable accessibilityLabel={`Dagdagan ang ${item.name}`} onPress={() => increase(item.productId)} style={styles.stepperButton}>
+                      <Ionicons color={palette.primary} name="add" size={18} />
+                    </Pressable>
+                  </View>
+                  <Pressable accessibilityLabel={`Alisin ang ${item.name}`} hitSlop={6} onPress={() => removeCartItem(item.productId)} style={styles.removeButton}>
+                    <Ionicons color={palette.danger} name="close" size={19} />
+                  </Pressable>
                 </View>
-                <Pressable onPress={() => removeCartItem(item.productId)}>
-                  <Text style={[styles.clearText, { color: palette.danger }]}>Remove</Text>
-                </Pressable>
-              </View>
-              <View style={styles.quantityRow}>
-                <Pressable style={[styles.quantityButton, { borderColor: palette.border }]} onPress={() => decrementCartItem(item.productId)}>
-                  <Text style={[styles.quantityText, { color: palette.text }]}>-</Text>
-                </Pressable>
-                <Text style={[styles.quantityValue, { color: palette.text }]}>{item.quantity}</Text>
-                <Pressable style={[styles.quantityButton, { borderColor: palette.border }]} onPress={() => increase(item.productId)}>
-                  <Text style={[styles.quantityText, { color: palette.text }]}>+</Text>
-                </Pressable>
-              </View>
-            </View>
-          );
-        })}
-
-        <View style={styles.totalRow}>
-          <Text style={[styles.totalLabel, { color: palette.text }]}>Total</Text>
-          <Text style={[styles.totalValue, { color: palette.text }]}>{formatMoney(total)}</Text>
-        </View>
-
-        {cartItems.length > 0 ? (
-          <PrimaryButton href="/kiosk/checkout" label="Checkout" />
-        ) : null}
-      </Card>
+              );
+            })}
+          </View>
+        </GabiCard>
+      ) : null}
     </ScreenScroll>
   );
 }
@@ -318,69 +346,94 @@ function ProductTile({
   onIncrement,
   onToggleFavorite,
 }: ProductTileProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended, isDark } = useGabiTheme();
   const lowStock = isLowStock(product.stockQty, product.lowStockThreshold);
   const outOfStock = product.stockQty <= 0 && !cookedToOrder;
-  const bundleLabel = hasBundlePricing(product) ? bundleLabelFor(product.bundleQuantity, product.bundlePrice, product.bundleLabel) : null;
+  const bundleLabel = hasBundlePricing(product)
+    ? bundleLabelFor(product.bundleQuantity, product.bundlePrice, product.bundleLabel)
+    : null;
+  const backgroundColor = outOfStock
+    ? extended.disabledBg
+    : cartQuantity > 0
+      ? palette.softPrimary
+      : isDark
+        ? extended.raised
+        : palette.surface;
 
   return (
     <View
       style={[
         styles.productTile,
         {
-          backgroundColor: palette.background,
-          borderColor: palette.border,
-          opacity: outOfStock ? 0.55 : 1,
+          backgroundColor,
+          borderColor: cartQuantity > 0 ? palette.primary : palette.border,
         },
       ]}
     >
       <View style={styles.tileTop}>
-        <Pressable disabled={outOfStock} onPress={onAdd} style={styles.tileNameWrap}>
-          <Text numberOfLines={2} style={[styles.tileName, { color: palette.text }]}>
+        <View style={styles.tileTitleWrap}>
+          <GabiText
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={2}
+            style={outOfStock ? { color: extended.disabledText } : undefined}
+            variant="cardTitle"
+          >
             {product.name}
-          </Text>
-          <Text numberOfLines={1} style={[styles.tileCategory, { color: palette.mutedText }]}>{product.category}</Text>
-        </Pressable>
-        <Pressable hitSlop={8} onPress={onToggleFavorite} style={styles.favoriteButton}>
-          <Ionicons color={favorite ? palette.accent : palette.mutedText} name={favorite ? "star" : "star-outline"} size={21} />
+          </GabiText>
+          <GabiText numberOfLines={1} style={outOfStock ? { color: extended.disabledText } : undefined} tone="faint" variant="caption">
+            {product.category}
+          </GabiText>
+        </View>
+        <Pressable accessibilityLabel={favorite ? `Alisin sa paborito ang ${product.name}` : `Paborito ang ${product.name}`} onPress={onToggleFavorite} style={styles.favoriteButton}>
+          <Ionicons color={favorite ? palette.accent : outOfStock ? extended.disabledText : palette.mutedText} name={favorite ? "star" : "star-outline"} size={20} />
         </Pressable>
       </View>
-      <Pressable disabled={outOfStock} onPress={onAdd} style={styles.tileBody}>
-        <Text style={[styles.tilePrice, { color: palette.primary }]}>{formatMoney(product.price)}</Text>
-        <Text numberOfLines={1} style={[styles.tileMeta, { color: palette.mutedText }]}>
-          {cookedToOrder ? "Luto kapag may order" : `${product.stockQty} ${product.unitType}`}
-        </Text>
-        {bundleLabel ? (
-          <Text numberOfLines={1} style={[styles.bundleOffer, { color: palette.warning }]}>
-            {bundleLabel}
-          </Text>
-        ) : null}
-      </Pressable>
-      <View style={styles.tileFooter}>
-        <View style={styles.tileBadges}>
-          {cookedToOrder ? <Pill label="Made to order" tone="accent" /> : null}
-          {outOfStock ? <Pill label="Out" tone="danger" /> : null}
-          {!outOfStock && !cookedToOrder && lowStock ? <Pill label="Low" tone="warning" /> : null}
+
+      <Pressable accessibilityRole="button" disabled={outOfStock} onPress={onAdd} style={styles.tileBody}>
+        <View style={styles.tileChips}>
+          {cookedToOrder ? <GabiChip icon="flame-outline" label="Made to order" tone="accent" /> : null}
+          {outOfStock ? <GabiChip label="Ubos na" tone="danger" /> : null}
+          {!outOfStock && !cookedToOrder && lowStock ? <GabiChip label={`${product.stockQty} na lang`} tone="warning" /> : null}
+          {bundleLabel ? <GabiChip icon="pricetag-outline" label={bundleLabel} tone="primary" /> : null}
         </View>
+        <GabiText
+          money
+          numberOfLines={1}
+          style={outOfStock ? { color: extended.disabledText } : isDark ? { color: extended.primaryStrongText } : undefined}
+          tone="primary"
+          variant="displayPeso"
+        >
+          {formatPeso(product.price)}
+        </GabiText>
+        <GabiText numberOfLines={1} style={outOfStock ? { color: extended.disabledText } : undefined} tone="muted" variant="caption">
+          {cookedToOrder ? "Luto kapag may order" : `${product.stockQty} ${product.unitType}`}
+        </GabiText>
+      </Pressable>
+
+      <View style={styles.tileFooter}>
         {cartQuantity > 0 ? (
-          <View style={[styles.tileQuantity, { backgroundColor: palette.softPrimary }]}>
-            <Pressable hitSlop={4} onPress={onDecrement} style={styles.tileQuantityButton}>
-              <Ionicons color={palette.primary} name="remove" size={19} />
+          <View style={[styles.tileStepper, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+            <Pressable accessibilityLabel={`Bawasan ang ${product.name}`} onPress={onDecrement} style={styles.stepperButton}>
+              <Ionicons color={palette.primary} name="remove" size={18} />
             </Pressable>
-            <Text style={[styles.tileQuantityValue, { color: palette.primary }]}>{cartQuantity}</Text>
-            <Pressable disabled={outOfStock} hitSlop={4} onPress={onIncrement} style={styles.tileQuantityButton}>
-              <Ionicons color={palette.primary} name="add" size={19} />
+            <GabiText tone="primary" variant="buttonSm">{cartQuantity}</GabiText>
+            <Pressable accessibilityLabel={`Dagdagan ang ${product.name}`} disabled={outOfStock} onPress={onIncrement} style={styles.stepperButton}>
+              <Ionicons color={palette.primary} name="add" size={18} />
             </Pressable>
           </View>
         ) : (
           <Pressable
+            accessibilityLabel={`Idagdag ang ${product.name}`}
+            accessibilityRole="button"
             disabled={outOfStock}
             onPress={onAdd}
-            style={[styles.tileAddButton, { backgroundColor: palette.primary, opacity: outOfStock ? 0.5 : 1 }]}
+            style={[
+              styles.addButton,
+              { backgroundColor: outOfStock ? extended.disabledBg : palette.primary },
+            ]}
           >
-            <Ionicons color={palette.kioskHeaderText} name="add" size={20} />
-            <Text style={[styles.tileAddText, { color: palette.kioskHeaderText }]}>Add</Text>
+            <Ionicons color={outOfStock ? extended.disabledText : palette.kioskHeaderText} name="add" size={22} />
           </Pressable>
         )}
       </View>
@@ -389,113 +442,52 @@ function ProductTile({
 }
 
 function FilterChip({ active, label, onPress, icon }: { active: boolean; label: string; onPress: () => void; icon?: "star" | "time" }) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette } = useGabiTheme();
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       onPress={onPress}
       style={[
         styles.filterChip,
         {
-          backgroundColor: active ? palette.primary : palette.background,
-          borderColor: active ? palette.primary : palette.border,
+          backgroundColor: active ? palette.kioskHeader : palette.surface,
+          borderColor: active ? palette.kioskHeader : palette.border,
         },
       ]}
     >
-      {icon ? <Ionicons color={active ? palette.kioskHeaderText : palette.primary} name={icon} size={14} /> : null}
-      <Text style={[styles.filterChipText, { color: active ? palette.kioskHeaderText : palette.text }]}>{label}</Text>
+      {icon ? <Ionicons color={active ? palette.accent : palette.primary} name={icon} size={14} /> : null}
+      <GabiText style={active ? { color: palette.kioskHeaderText } : undefined} variant="caption">{label}</GabiText>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  header: {
-    gap: spacing.xs,
-    paddingTop: spacing.sm,
-  },
-  eyebrow: {
-    ...typography.label,
-  },
-  title: {
-    ...typography.title,
-  },
-  body: {
-    ...typography.body,
-  },
-  bundleOffer: {
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-  },
-  bundleApplied: {
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-  },
-  message: {
-    ...typography.body,
-  },
-  fastCheckout: {
+  statusRow: {
     alignItems: "center",
-    borderRadius: radius.lg,
     flexDirection: "row",
-    gap: spacing.md,
-    padding: spacing.sm,
-    paddingLeft: spacing.md,
-  },
-  fastCheckoutCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  fastCheckoutCount: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  fastCheckoutTotal: {
-    fontSize: 22,
-    fontWeight: "900",
-    lineHeight: 27,
-  },
-  card: {
-    borderRadius: 8,
-    borderWidth: 1,
-    elevation: 1,
+    flexWrap: "wrap",
     gap: spacing.sm,
-    padding: spacing.md,
-  },
-  sectionTitle: {
-    ...typography.heading,
-  },
-  productsHeader: {
-    alignItems: "center",
-    flexDirection: "row",
     justifyContent: "space-between",
   },
-  resultCount: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
+  productsCard: {
+    paddingHorizontal: 14,
   },
   searchBox: {
     alignItems: "center",
-    borderRadius: radius.md,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     gap: spacing.sm,
-    minHeight: 46,
+    minHeight: 48,
     paddingHorizontal: spacing.sm,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    minHeight: 44,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 19,
+    minHeight: 46,
     paddingVertical: spacing.sm,
   },
   filterRow: {
@@ -504,17 +496,12 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     alignItems: "center",
-    borderRadius: radius.pill,
+    borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
     gap: 4,
-    minHeight: 36,
-    paddingHorizontal: 12,
-  },
-  filterChipText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
+    minHeight: 38,
+    paddingHorizontal: 13,
   },
   productGrid: {
     flexDirection: "row",
@@ -522,187 +509,125 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   productTile: {
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 1.5,
     flexBasis: "47%",
     flexGrow: 1,
     gap: spacing.sm,
     justifyContent: "space-between",
-    minHeight: 174,
-    padding: spacing.sm + 2,
+    minHeight: 190,
+    minWidth: 0,
+    padding: 12,
   },
   tileTop: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: spacing.xs,
-    justifyContent: "space-between",
+    minHeight: 42,
   },
-  tileNameWrap: {
+  tileTitleWrap: {
     flex: 1,
     gap: 2,
-  },
-  tileName: {
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 20,
-  },
-  tileCategory: {
-    fontSize: 11,
-    fontWeight: "600",
-    lineHeight: 15,
-  },
-  favoriteButton: {
-    alignItems: "center",
-    height: 32,
-    justifyContent: "center",
-    width: 32,
+    minWidth: 0,
   },
   tileBody: {
     flex: 1,
-    gap: 2,
+    gap: 5,
   },
-  tilePrice: {
-    fontSize: 18,
-    fontWeight: "900",
-    lineHeight: 22,
-  },
-  tileMeta: {
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 16,
+  tileChips: {
+    alignItems: "flex-start",
+    gap: 4,
   },
   tileFooter: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.xs,
-    justifyContent: "space-between",
-    minHeight: 38,
+    justifyContent: "flex-end",
+    minHeight: 44,
   },
-  tileBadges: {
-    flex: 1,
-    gap: 2,
-  },
-  tileAddButton: {
+  favoriteButton: {
     alignItems: "center",
-    borderRadius: radius.md,
-    flexDirection: "row",
-    gap: 2,
-    minHeight: 38,
-    paddingHorizontal: 10,
-  },
-  tileAddText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  tileQuantity: {
-    alignItems: "center",
-    borderRadius: radius.md,
-    flexDirection: "row",
-    minHeight: 38,
-  },
-  tileQuantityButton: {
-    alignItems: "center",
-    height: 38,
-    justifyContent: "center",
-    width: 32,
-  },
-  tileQuantityValue: {
-    fontSize: 14,
-    fontWeight: "900",
-    lineHeight: 18,
-    minWidth: 22,
-    textAlign: "center",
-  },
-  itemTitle: {
-    ...typography.button,
-  },
-  cartHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  clearText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  cartItem: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.sm,
-    padding: 12,
-  },
-  cartItemHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-  },
-  cartText: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  quantityRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  quantityButton: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 36,
+    borderRadius: 14,
+    height: 44,
     justifyContent: "center",
     width: 44,
   },
-  quantityText: {
-    fontSize: 20,
-    fontWeight: "800",
-    lineHeight: 24,
+  addButton: {
+    alignItems: "center",
+    borderRadius: 14,
+    height: 44,
+    justifyContent: "center",
+    width: 48,
   },
-  quantityValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    lineHeight: 24,
-    minWidth: 36,
-    textAlign: "center",
+  tileStepper: {
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    minHeight: 44,
   },
-  totalRow: {
+  stepperButton: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 38,
+  },
+  cartBar: {
+    alignItems: "center",
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 66,
+    padding: 8,
+    paddingLeft: spacing.md,
+  },
+  cartBarCopy: {
+    flex: 1,
+    gap: 1,
+    minWidth: 0,
+  },
+  payButton: {
+    alignItems: "center",
+    borderRadius: 14,
+    flexDirection: "row",
+    gap: 5,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+  },
+  cartList: {
+    gap: spacing.sm,
+  },
+  cartRow: {
+    alignItems: "center",
+    borderTopWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+  },
+  cartRowCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 112,
+  },
+  cartMetaRow: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
-  totalLabel: {
-    ...typography.heading,
-  },
-  totalValue: {
-    fontSize: 20,
-    fontWeight: "900",
-    lineHeight: 25,
-  },
-  primaryAction: {
+  cartStepper: {
     alignItems: "center",
-    borderRadius: 8,
-    minHeight: 48,
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  primaryActionText: {
-    ...typography.button,
-  },
-  secondaryAction: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: spacing.sm,
+    borderRadius: 14,
+    flexDirection: "row",
     minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
   },
-  secondaryActionText: {
-    ...typography.button,
+  removeButton: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 32,
   },
 });

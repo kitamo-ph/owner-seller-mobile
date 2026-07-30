@@ -1,23 +1,14 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import { NetworkStatusBadge } from "@/components/common/NetworkStatusBadge";
-import {
-  AppTopBar,
-  Card,
-  EmptyState,
-  formatPeso,
-  HeroCard,
-  IconBadge,
-  ListRow,
-  MetricCard,
-  Pill,
-  ScreenScroll,
-  SectionHeader,
-  SecondaryButton,
-} from "@/components/ui/KitaMoUI";
+import { GabiPrimaryButton, GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiHeroCard, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, ScreenScroll, formatPeso } from "@/components/ui/KitaMoUI";
 import { listActiveOwnerAlerts, resolveOwnerAlert } from "@/db/repositories";
 import type { OwnerAlert, OwnerAlertSeverity } from "@/domain/types";
 import { loadFixedCostsOverview } from "@/services/fixedCosts";
@@ -28,11 +19,8 @@ import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSet
 import { loadProfitReport, type ProfitReport, type StallReport } from "@/services/profitReports";
 import { loadRecipesOverview, type RecipesOverview } from "@/services/recipes";
 import { useAppStore } from "@/state/appStore";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
-import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 type AttentionItem = {
@@ -41,12 +29,12 @@ type AttentionItem = {
   tone: "danger" | "warning";
 };
 
-type StallStatus = "good" | "attention" | "loss" | "none";
+type StallStatus = "good" | "attention" | "loss" | "none" | "inactive";
 
 const severityLabels: Record<OwnerAlertSeverity, string> = {
   info: "Info",
-  warning: "Warning",
-  critical: "Critical",
+  warning: "Bantayan",
+  critical: "Urgent",
 };
 
 const severityTones: Record<OwnerAlertSeverity, "neutral" | "warning" | "danger"> = {
@@ -55,14 +43,14 @@ const severityTones: Record<OwnerAlertSeverity, "neutral" | "warning" | "danger"
   critical: "danger",
 };
 
-const quickAddShortcuts: { label: string; href: Href; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { label: "Sell", href: "/kiosk", icon: "cash-outline" },
+const quickActions: { label: string; href: Href; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { label: "Benta", href: "/kiosk", icon: "storefront-outline" },
   { label: "Grocery", href: "/owner/grocery", icon: "basket-outline" },
-  { label: "Product", href: "/owner/inventory", icon: "cube-outline" },
+  { label: "Paninda", href: "/owner/inventory", icon: "cube-outline" },
   { label: "Recipe", href: "/owner/recipes", icon: "restaurant-outline" },
   { label: "Niluto", href: "/owner/production", icon: "flame-outline" },
-  { label: "Bayarin", href: "/owner/fixed-costs", icon: "alert-circle-outline" },
-  { label: "Report", href: "/owner/reports", icon: "stats-chart-outline" },
+  { label: "Bayarin", href: "/owner/fixed-costs", icon: "wallet-outline" },
+  { label: "Reports", href: "/owner/reports", icon: "stats-chart-outline" },
 ];
 
 function formatAlertTime(value: string) {
@@ -72,51 +60,32 @@ function formatAlertTime(value: string) {
   });
 }
 
-function getStallStatus(stall: StallReport): StallStatus {
-  if (stall.transactionCount === 0) {
-    return "none";
-  }
+function greetingForHour(hour: number) {
+  if (hour < 12) return "Magandang umaga";
+  if (hour < 18) return "Magandang hapon";
+  return "Magandang gabi";
+}
 
-  if (stall.netProfit < 0) {
-    return "loss";
-  }
-
-  if (stall.estimatedCogsCount > 0) {
-    return "attention";
-  }
-
+function getStallStatus(stall: StallReport, enabled: boolean): StallStatus {
+  if (!enabled) return "inactive";
+  if (stall.transactionCount === 0) return "none";
+  if (stall.netProfit < 0) return "loss";
+  if (stall.estimatedCogsCount > 0) return "attention";
   return "good";
 }
 
 function stallStatusLabel(status: StallStatus) {
-  if (status === "good") {
-    return "Good today";
-  }
-
-  if (status === "attention") {
-    return "Needs attention";
-  }
-
-  if (status === "loss") {
-    return "Loss today";
-  }
-
-  return "No sales yet";
+  if (status === "good") return "OK ngayon";
+  if (status === "attention") return "Bantayan";
+  if (status === "loss") return "Lugi ngayon";
+  if (status === "inactive") return "Naka-off";
+  return "Wala pang benta";
 }
 
 function stallStatusTone(status: StallStatus): "success" | "warning" | "danger" | "neutral" {
-  if (status === "good") {
-    return "success";
-  }
-
-  if (status === "attention") {
-    return "warning";
-  }
-
-  if (status === "loss") {
-    return "danger";
-  }
-
+  if (status === "good") return "success";
+  if (status === "attention") return "warning";
+  if (status === "loss") return "danger";
   return "neutral";
 }
 
@@ -134,8 +103,8 @@ function buildAttentionItems(input: {
     items.push({
       message:
         input.overdueCount > 0
-          ? `May bayarin na due — ${input.overdueCount} overdue${input.dueSoonCount > 0 ? `, ${input.dueSoonCount} malapit na` : ""}.`
-          : `May bayarin na due — ${input.dueSoonCount} sa susunod na 7 araw.`,
+          ? `May ${input.overdueCount} overdue na bayarin${input.dueSoonCount > 0 ? ` at ${input.dueSoonCount} due soon` : ""}.`
+          : `May ${input.dueSoonCount} bayarin sa susunod na 7 araw.`,
       href: "/owner/fixed-costs",
       tone: input.overdueCount > 0 ? "danger" : "warning",
     });
@@ -143,7 +112,7 @@ function buildAttentionItems(input: {
 
   if (input.groceryLowStockCount > 0) {
     items.push({
-      message: `Low stock ang ilang grocery — ${input.groceryLowStockCount} ingredient${input.groceryLowStockCount === 1 ? "" : "s"}.`,
+      message: `${input.groceryLowStockCount} grocery ingredient${input.groceryLowStockCount === 1 ? "" : "s"} ang low stock.`,
       href: "/owner/grocery",
       tone: "warning",
     });
@@ -151,7 +120,7 @@ function buildAttentionItems(input: {
 
   if (input.productLowStockCount > 0) {
     items.push({
-      message: `Low stock ang ilang paninda — ${input.productLowStockCount} product${input.productLowStockCount === 1 ? "" : "s"}.`,
+      message: `${input.productLowStockCount} paninda ang low stock.`,
       href: "/owner/inventory",
       tone: "warning",
     });
@@ -159,7 +128,7 @@ function buildAttentionItems(input: {
 
   if (input.estimatedCogsCount > 0) {
     items.push({
-      message: `May benta na estimated ang cost — ${input.estimatedCogsCount} sale${input.estimatedCogsCount === 1 ? "" : "s"} today.`,
+      message: `${input.estimatedCogsCount} benta today ang estimated pa ang cost.`,
       href: "/owner/reports",
       tone: "warning",
     });
@@ -167,7 +136,7 @@ function buildAttentionItems(input: {
 
   if (input.lowMakeableCount > 0) {
     items.push({
-      message: `Konti na lang ang kayang lutuin — ${input.lowMakeableCount} recipe${input.lowMakeableCount === 1 ? "" : "s"}.`,
+      message: `${input.lowMakeableCount} recipe ang konti na lang ang kayang lutuin.`,
       href: "/owner/recipes",
       tone: "warning",
     });
@@ -186,14 +155,12 @@ export default function OwnerHomeScreen() {
   const [alerts, setAlerts] = useState<OwnerAlert[]>([]);
   const [productLowStockCount, setProductLowStockCount] = useState(0);
   const [estimatedCogsCount, setEstimatedCogsCount] = useState(0);
-  const [unsoldGoodsValue, setUnsoldGoodsValue] = useState(0);
-  const [fixedCostAttention, setFixedCostAttention] = useState<{ overdue: number; dueSoon: number }>({ overdue: 0, dueSoon: 0 });
+  const [fixedCostAttention, setFixedCostAttention] = useState({ overdue: 0, dueSoon: 0 });
   const [resolvingAlertId, setResolvingAlertId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resolveLock = useRef(false);
   const setOwnerContext = useAppStore((state) => state.setOwnerContext);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
   const router = useRouter();
 
   useFocusEffect(
@@ -204,8 +171,7 @@ export default function OwnerHomeScreen() {
         try {
           const nextStatus = await loadOwnerSetupStatus();
           const businessId = nextStatus.activeBusiness?.id ?? null;
-          // Sequential on purpose: concurrent reads on the shared SQLite handle
-          // have caused native prepared-statement errors on SDK 54.
+          // The shared SQLite handle is intentionally read sequentially on SDK 54.
           const nextToday = await getTodaySalesSummary(businessId);
           const nextReport = await loadProfitReport("today");
           const nextGrocery = await loadGroceryPoolSnapshot();
@@ -215,9 +181,7 @@ export default function OwnerHomeScreen() {
           const fixedOverview = await loadFixedCostsOverview();
           const nextAlerts = businessId ? await listActiveOwnerAlerts(businessId) : [];
 
-          if (!active) {
-            return;
-          }
+          if (!active) return;
 
           setStatus(nextStatus);
           setToday(nextToday);
@@ -228,20 +192,16 @@ export default function OwnerHomeScreen() {
           setAlerts(nextAlerts);
           setProductLowStockCount(nextAnalytics.lowStock.lowStockCount);
           setEstimatedCogsCount(nextAnalytics.lifecycle.estimatedCogsCountToday);
-          setUnsoldGoodsValue(nextAnalytics.lifecycle.unsoldFinishedValue);
           setFixedCostAttention({ overdue: fixedOverview.overdueCount, dueSoon: fixedOverview.dueSoonCount });
           setOwnerContext(nextStatus.activeBusiness, nextStatus.activeBranch);
           setError(null);
         } catch (loadError) {
           logDevError("OwnerHome.loadStatus", loadError);
-          if (active) {
-            setError(getFriendlyErrorMessage("Could not load your local workspace."));
-          }
+          if (active) setError(getFriendlyErrorMessage("Could not load your local workspace."));
         }
       }
 
       loadStatus();
-
       return () => {
         active = false;
       };
@@ -249,9 +209,7 @@ export default function OwnerHomeScreen() {
   );
 
   async function resolveAlert(alert: OwnerAlert) {
-    if (resolveLock.current) {
-      return;
-    }
+    if (resolveLock.current) return;
 
     resolveLock.current = true;
     setResolvingAlertId(alert.id);
@@ -269,14 +227,11 @@ export default function OwnerHomeScreen() {
   }
 
   const setupComplete = Boolean(status?.activeBusiness && status.activeBranch && status.productCount > 0);
-  const activeBusiness = status?.activeBusiness?.businessName ?? (status?.businesses.length ? "Choose a business" : "Set up your business");
-  const activeBranch = status?.activeBranch?.branchName ?? "No active stall yet";
   const salesTotal = today?.salesTotal ?? 0;
   const costTotal = today?.costTotal ?? 0;
   const bayarinToday = todayReport?.consolidated.fixedCosts ?? 0;
   const nasayangToday = todayReport?.consolidated.spoilageLoss ?? 0;
-  const tuboToday = todayReport?.consolidated.netProfit ?? Math.max(0, salesTotal - costTotal);
-  const pendingCount = status?.pendingQueueCount ?? 0;
+  const tuboToday = todayReport?.consolidated.netProfit ?? salesTotal - costTotal;
   const stallReports = todayReport?.stalls ?? [];
 
   const attentionItems = useMemo(
@@ -289,510 +244,370 @@ export default function OwnerHomeScreen() {
         estimatedCogsCount,
         lowMakeableCount: recipesOverview?.lowMakeableCount ?? 0,
       }),
-    [estimatedCogsCount, fixedCostAttention.dueSoon, fixedCostAttention.overdue, grocery?.lowStockIngredients.length, productLowStockCount, recipesOverview?.lowMakeableCount],
+    [estimatedCogsCount, fixedCostAttention, grocery?.lowStockIngredients.length, productLowStockCount, recipesOverview?.lowMakeableCount],
   );
-
-  const nextAction =
-    attentionItems[0] ??
-    (salesTotal === 0
-      ? { message: "Wala pang benta today — simulan ang pagbebenta sa Kiosk.", href: "/kiosk" as Href, tone: "warning" as const }
-      : null);
 
   return (
     <ScreenScroll bottomNav>
       <AppTopBar
+        eyebrow={`OWNER · ${new Date().toLocaleDateString("en-PH", { month: "short", day: "numeric" })}`}
         right={
-          <View style={styles.topRightRow}>
-            <Pressable
+          <View style={styles.topActions}>
+            <GabiIconButton
               accessibilityLabel="Notifications"
-              hitSlop={8}
+              badgeCount={alerts.length}
+              icon="notifications-outline"
               onPress={() => router.push("/owner/notifications")}
-              style={[styles.headerIconButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
-            >
-              <Ionicons color={palette.primary} name="notifications-outline" size={20} />
-              {alerts.length > 0 ? (
-                <View style={[styles.notificationBadge, { backgroundColor: palette.danger }]}>
-                  <Text style={[styles.notificationBadgeText, { color: palette.kioskHeaderText }]}>{Math.min(alerts.length, 9)}</Text>
-                </View>
-              ) : null}
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Settings"
-              hitSlop={8}
-              onPress={() => router.push("/owner/settings")}
-              style={[styles.headerIconButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
-            >
-              <Ionicons color={palette.primary} name="settings-outline" size={20} />
-            </Pressable>
+            />
+            <GabiIconButton accessibilityLabel="Settings" icon="settings-outline" onPress={() => router.push("/owner/settings")} />
           </View>
         }
-        subtitle="Business and stall command center"
-        title="Owner Home"
+        subtitle="Lahat ng negosyo at stall, isang tingin"
+        title={`${greetingForHour(new Date().getHours())}!`}
       />
 
-      {error ? <Text style={[styles.error, { color: palette.danger }]}>{error}</Text> : null}
-
-      <Card>
-        <View style={styles.businessHubHeader}>
-          <IconBadge icon="business-outline" size="lg" tone="primary" />
-          <View style={styles.businessHubCopy}>
-            <Text numberOfLines={1} style={[styles.businessHubTitle, { color: palette.text }]}>{activeBusiness}</Text>
-            <Text style={[styles.body, { color: palette.mutedText }]}>
-              {status?.activeBusiness
-                ? `${status.stallCount} stall${status.stallCount === 1 ? "" : "s"} · Active stall: ${activeBranch}`
-                : status?.businesses.length
-                  ? `${status.businesses.length} saved business${status.businesses.length === 1 ? "" : "es"} · No business selected`
-                  : "Create a local business profile to begin."}
-            </Text>
-          </View>
-          <Pill label={status?.mode === "demo" ? "Demo" : "Fresh"} tone={status?.mode === "demo" ? "accent" : "success"} />
-        </View>
-        <View style={styles.businessHubActions}>
-          <View style={styles.businessHubAction}>
-            <SecondaryButton href="/owner/business-settings" label="Manage business & stalls" />
-          </View>
-          {status?.businesses.length ? (
-            <View style={styles.businessHubAction}>
-              <SecondaryButton href="/owner/context" label="Switch context" />
-            </View>
-          ) : null}
-        </View>
-      </Card>
+      {error ? <GabiNotice message={error} title="Hindi ma-load ang lahat" tone="danger" /> : null}
 
       {!status ? (
-        <Card>
-          <SectionHeader title={error ? "Please try again" : "Loading"} />
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            {error ? "Hindi ma-load ang workspace. Balikan ang Home para subukan ulit." : "Checking your local workspace."}
-          </Text>
-        </Card>
-      ) : !setupComplete ? (
-        <Card>
-          <SectionHeader action={<SecondaryButton href="/owner/business-settings" label="Continue" />} title="Finish setup" />
-          <View style={styles.setupRows}>
-            <SetupRow
-              label="Business selected"
-              ready={Boolean(status.activeBusiness)}
-              value={!status.activeBusiness && status.businesses.length > 0 ? `${status.businesses.length} saved` : undefined}
-            />
-            <SetupRow label="Store or stall" ready={status.stallCount > 0} />
-            <SetupRow label="Paninda" ready={status.productCount > 0} value={`${status.productCount} saved`} />
-          </View>
-        </Card>
-      ) : null}
-
-      <Card>
-        <SectionHeader action={<SecondaryButton href="/owner/business-settings" label="Manage" />} title="Your Stalls" />
-        <Text style={[styles.body, { color: palette.mutedText }]}>Choose a stall before opening its shared-device Kiosk.</Text>
-        {stallReports.length > 0 ? (
-          <View style={styles.stallList}>
-            {stallReports.map((stall) => {
-              const branch = status?.branches.find((item) => item.id === stall.branchId);
-              return (
-                <StallFinanceCard
-                  enabled={branch?.active ?? true}
-                  isSelected={status?.activeBranch?.id === stall.branchId}
-                  key={stall.branchId}
-                  stall={stall}
-                />
-              );
-            })}
-          </View>
-        ) : (
-          <EmptyState
-            description={status?.businesses.length && !status.activeBusiness ? "Choose a business to see and manage its stalls." : "Add a stall in Business & Stalls before opening Kiosk."}
-            title={status?.businesses.length && !status.activeBusiness ? "No business selected" : "No stalls yet"}
-          />
-        )}
-      </Card>
-
-      {alerts.length > 0 ? (
-        <Card>
-          <SectionHeader action={<SecondaryButton href="/owner/notifications" label="View all" />} title="Local Alerts" />
-          <Text style={[styles.body, { color: palette.mutedText }]}>{alerts.length} active alert{alerts.length === 1 ? "" : "s"} on this phone.</Text>
-          <View style={styles.alertList}>
-            {alerts.slice(0, 2).map((alert) => (
-              <View key={alert.id} style={[styles.alertRow, { backgroundColor: palette.background, borderColor: palette.border }]}>
-                <View style={styles.alertHeader}>
-                  <Text style={[styles.alertTitle, { color: palette.text }]}>{alert.title}</Text>
-                  <Pill label={severityLabels[alert.severity]} tone={severityTones[alert.severity]} />
-                </View>
-                <Text style={[styles.body, { color: palette.mutedText }]}>{alert.message}</Text>
-                <View style={styles.alertFooter}>
-                  <Text style={[styles.alertTime, { color: palette.mutedText }]}>{formatAlertTime(alert.createdAt)}</Text>
-                  <Pressable
-                    disabled={resolvingAlertId !== null}
-                    onPress={() => resolveAlert(alert)}
-                    style={[styles.resolveButton, { borderColor: palette.border, opacity: resolvingAlertId !== null ? 0.55 : 1 }]}
-                  >
-                    <Text style={[styles.resolveButtonText, { color: palette.primary }]}>
-                      {resolvingAlertId === alert.id ? "Resolving..." : "Resolve"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
-        </Card>
-      ) : null}
-
-      <HeroCard>
-        <View style={styles.heroTop}>
-          <View style={styles.heroCopy}>
-            <Text style={[styles.heroLabel, { color: palette.kioskHeaderText }]}>Tubo today</Text>
-            <Text style={[styles.heroValue, { color: palette.kioskHeaderText }]}>{formatPeso(tuboToday)}</Text>
-            <Text style={[styles.heroSubcopy, { color: palette.softAccent }]}>
-              {salesTotal > 0
-                ? `${formatPeso(salesTotal)} benta · ${today?.transactionCount ?? 0} transaction${today?.transactionCount === 1 ? "" : "s"}`
-                : "Wala pang benta today"}
-            </Text>
-          </View>
-          <View style={[styles.heroBadge, { backgroundColor: palette.softAccent }]}>
-            <Text style={[styles.heroBadgeText, { color: palette.primary }]}>₱</Text>
-          </View>
-        </View>
-        <View style={[styles.profitFormula, { backgroundColor: palette.softAccent }]}>
-          <Text style={[styles.profitFormulaText, { color: palette.primary }]}>Benta {formatPeso(salesTotal)}</Text>
-          <Text style={[styles.profitFormulaOperator, { color: palette.mutedText }]}>−</Text>
-          <Text style={[styles.profitFormulaText, { color: palette.text }]}>Sold COGS {formatPeso(costTotal)}</Text>
-          <Text style={[styles.profitFormulaOperator, { color: palette.mutedText }]}>−</Text>
-          <Text style={[styles.profitFormulaText, { color: palette.text }]}>Bayarin {formatPeso(bayarinToday)}</Text>
-          <Text style={[styles.profitFormulaOperator, { color: palette.mutedText }]}>−</Text>
-          <Text style={[styles.profitFormulaText, { color: palette.text }]}>Nasayang {formatPeso(nasayangToday)}</Text>
-        </View>
-        <NetworkStatusBadge compact pendingQueueCount={pendingCount} />
-      </HeroCard>
-
-      <View style={styles.metricGrid}>
-        <MetricCard detail={`${today?.transactionCount ?? 0} benta today`} iconName="cash-outline" label="Benta" tone="primary" value={formatPeso(salesTotal)} />
-        <MetricCard detail="Puhunan ng nabenta today" iconName="wallet-outline" label="Puhunan / Cost" tone="danger" value={formatPeso(costTotal)} />
-        <MetricCard detail="Benta − puhunan − bayarin − nasayang" iconName="trending-up" label="Tubo" tone="success" value={formatPeso(tuboToday)} />
-        <MetricCard
-          detail={
-            fixedCostAttention.overdue > 0
-              ? `${fixedCostAttention.overdue} overdue`
-              : fixedCostAttention.dueSoon > 0
-                ? `${fixedCostAttention.dueSoon} due soon`
-                : bayarinToday > 0
-                  ? `${formatPeso(bayarinToday)} today`
-                  : "Walang due na bayarin"
-          }
-          iconName="alert-circle-outline"
-          label="Bayarin"
-          tone={fixedCostAttention.overdue > 0 ? "danger" : fixedCostAttention.dueSoon > 0 ? "warning" : "neutral"}
-          value={fixedCostAttention.overdue + fixedCostAttention.dueSoon > 0 ? String(fixedCostAttention.overdue + fixedCostAttention.dueSoon) : formatPeso(bayarinToday)}
+        <GabiCard>
+          <GabiSkeleton height={18} showImmediately width="42%" />
+          <GabiSkeleton height={46} showImmediately />
+          <GabiSkeleton height={86} showImmediately />
+        </GabiCard>
+      ) : !status.activeBusiness ? (
+        <GabiEmptyState
+          actionLabel="Pumili o gumawa"
+          message={status.businesses.length ? "Pumili ng negosyo para makita ang stalls at reports nito." : "Gumawa ng local business profile para makapagsimula."}
+          icon="business-outline"
+          onAction={() => router.push(status.businesses.length ? "/owner/context" : "/owner/business-settings")}
+          title={status.businesses.length ? "Walang napiling negosyo" : "I-set up ang negosyo"}
         />
-        <MetricCard
-          detail={`${grocery?.lowStockIngredients.length ?? 0} low stock`}
-          iconName="basket-outline"
-          label="Grocery value"
-          tone="accent"
-          value={formatPeso(grocery?.totalRemainingValue ?? 0)}
-        />
-        <MetricCard detail="Natitirang paninda sa stock" iconName="cube-outline" label="Natirang paninda" tone="neutral" value={formatPeso(unsoldGoodsValue)} />
-      </View>
-
-      {nasayangToday > 0 ? (
-        <Text style={[styles.inlineNote, { color: palette.mutedText }]}>Nasayang today: {formatPeso(nasayangToday)}</Text>
-      ) : null}
-
-      <Card>
-        <SectionHeader title="Quick Actions" />
-        <View style={styles.quickAddGrid}>
-          {quickAddShortcuts.map((shortcut) => (
-            <Pressable key={shortcut.label} onPress={() => router.push(shortcut.href)} style={styles.quickAddCell}>
-              <View style={[styles.quickAddIcon, { backgroundColor: palette.softPrimary }]}>
-                <Ionicons color={palette.primary} name={shortcut.icon} size={20} />
-              </View>
-              <Text numberOfLines={1} style={[styles.quickAddLabel, { color: palette.mutedText }]}>
-                {shortcut.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </Card>
-
-      {nextAction ? (
-        <Card>
-          <SectionHeader title="Next action" />
-          <Pressable
-            onPress={() => router.push(nextAction.href)}
-            style={[styles.nextActionRow, { backgroundColor: palette.background, borderColor: palette.border }]}
-          >
-            <IconBadge icon="arrow-forward" size="sm" tone={nextAction.tone} />
-            <Text style={[styles.nextActionText, { color: nextAction.tone === "danger" ? palette.danger : palette.text }]}>
-              {nextAction.message}
-            </Text>
-          </Pressable>
-        </Card>
-      ) : null}
-
-      {attentionItems.length > 0 ? (
-        <Card>
-          <SectionHeader action={<Pill label={`${attentionItems.length} item${attentionItems.length === 1 ? "" : "s"}`} tone="warning" />} title="Needs Attention" />
-          <View style={styles.attentionList}>
-            {attentionItems.map((item) => (
-              <Pressable
-                key={item.message}
-                onPress={() => router.push(item.href)}
-                style={[styles.attentionRow, { backgroundColor: palette.background, borderColor: palette.border }]}
-              >
-                <Pill label={item.tone === "danger" ? "Due" : "Check"} tone={item.tone} />
-                <Text style={[styles.attentionText, { color: palette.text }]}>{item.message}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </Card>
       ) : (
-        <Card>
-          <SectionHeader action={<Pill label="All clear" tone="success" />} title="Needs Attention" />
-          <Text style={[styles.body, { color: palette.mutedText }]}>Walang urgent na kailangan ng action today. Good job!</Text>
-        </Card>
-      )}
+        <>
+          <GabiHeroCard>
+            <View style={styles.heroHeader}>
+              <View style={styles.heroCopy}>
+                <GabiText style={{ color: palette.kioskHeaderText }} variant="eyebrow">NET PROFIT TODAY</GabiText>
+                <GabiText
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                  money
+                  numberOfLines={1}
+                  style={[styles.heroAmount, { color: palette.kioskHeaderText }]}
+                  variant="heroPeso"
+                >
+                  {formatPeso(tuboToday)}
+                </GabiText>
+                <GabiText style={{ color: extended.textOnPrimaryMuted }} variant="caption">
+                  Revenue − Sold COGS − Fixed Costs − Spoilage
+                </GabiText>
+              </View>
+              <View style={[styles.heroIcon, { backgroundColor: palette.softAccent }]}>
+                <Ionicons color={extended.accentTextOn} name="trending-up" size={25} />
+              </View>
+            </View>
+            <View style={styles.heroMetrics}>
+              <HeroMetric label="Benta" value={formatPeso(salesTotal)} />
+              <HeroMetric label="Puhunan" value={formatPeso(costTotal)} />
+              <HeroMetric label="Bayarin" value={formatPeso(bayarinToday)} />
+              <HeroMetric label="Nasayang" value={formatPeso(nasayangToday)} />
+            </View>
+            <View style={styles.heroFooter}>
+              <GabiText style={{ color: extended.textOnPrimaryMuted }} variant="caption">
+                {today?.transactionCount ?? 0} benta · {status.stallCount} stall{status.stallCount === 1 ? "" : "s"}
+              </GabiText>
+              <NetworkStatusBadge compact pendingQueueCount={status.pendingQueueCount} />
+            </View>
+          </GabiHeroCard>
 
-      <Card>
-        <SectionHeader action={<SecondaryButton href="/owner/records" label="Logbook" />} title="Recent benta" />
-        {recentOrders.length === 0 ? (
-          <EmptyState description={`Sales from ${activeBranch} will appear here after checkout.`} title="Wala pang benta today. Start selling sa Kiosk." />
-        ) : (
-          <View style={styles.recentList}>
-            {recentOrders.map((order) => (
-              <ListRow
-                amount={formatPeso(order.amount)}
-                badge={order.paymentMethod === "cash" ? "Paid" : order.paymentMethod}
-                badgeTone="success"
-                icon="B"
-                key={order.id}
-                subtitle={`${order.transactionNo} · ${order.itemCount} item(s)`}
-                title="Benta"
-              />
-            ))}
+          {!setupComplete ? (
+            <GabiNotice
+              message="Kailangan ng active stall at paninda bago makapagbenta. Walang awtomatikong gagawing stall."
+              title="Tapusin ang setup"
+              tone="warning"
+            />
+          ) : null}
+
+          <View style={styles.sectionGap}>
+            <GabiSectionHeader
+              action={
+                <Pressable accessibilityRole="button" onPress={() => router.push("/owner/business-settings")}>
+                  <GabiText tone="primary" variant="buttonSm">Pamahalaan</GabiText>
+                </Pressable>
+              }
+              title="Mga stall"
+            />
+            <GabiText tone="muted" variant="caption">Piliin at kumpirmahin ang stall bago buksan ang Kiosk.</GabiText>
           </View>
-        )}
-      </Card>
+
+          {stallReports.length > 0 ? (
+            <View style={styles.stallList}>
+              {stallReports.map((stall) => {
+                const branch = status.branches.find((item) => item.id === stall.branchId);
+                return (
+                  <StallFinanceCard
+                    enabled={branch?.active ?? false}
+                    isSelected={status.activeBranch?.id === stall.branchId}
+                    key={stall.branchId}
+                    stall={stall}
+                  />
+                );
+              })}
+            </View>
+          ) : (
+            <GabiEmptyState
+              actionLabel="Magdagdag ng stall"
+              message="Kailangan ng stall bago buksan ang shared-device Kiosk."
+              icon="storefront-outline"
+              onAction={() => router.push("/owner/business-settings")}
+              title="Wala pang stall"
+            />
+          )}
+
+          {alerts.length > 0 ? (
+            <View style={styles.sectionGap}>
+              <GabiSectionHeader
+                action={
+                  <Pressable accessibilityRole="button" onPress={() => router.push("/owner/notifications")}>
+                    <GabiText tone="primary" variant="buttonSm">Lahat</GabiText>
+                  </Pressable>
+                }
+                title="Mga abiso"
+              />
+              {alerts.slice(0, 2).map((alert) => (
+                <GabiCard key={alert.id} style={styles.alertCard}>
+                  <View style={styles.alertHeader}>
+                    <View style={styles.alertCopy}>
+                      <GabiText variant="buttonSm">{alert.title}</GabiText>
+                      <GabiText tone="muted" variant="caption">{formatAlertTime(alert.createdAt)}</GabiText>
+                    </View>
+                    <GabiChip label={severityLabels[alert.severity]} tone={severityTones[alert.severity]} />
+                  </View>
+                  <GabiText tone="muted" variant="body">{alert.message}</GabiText>
+                  <View style={styles.alertAction}>
+                    <GabiSoftButton
+                      compact
+                      disabled={resolvingAlertId !== null}
+                      icon="checkmark-circle-outline"
+                      label={resolvingAlertId === alert.id ? "Inaayos..." : "Ayos na"}
+                      loading={resolvingAlertId === alert.id}
+                      onPress={() => resolveAlert(alert)}
+                    />
+                  </View>
+                </GabiCard>
+              ))}
+            </View>
+          ) : null}
+
+          <GabiCard>
+            <GabiSectionHeader title="Mabilis na gawain" />
+            <View style={styles.quickGrid}>
+              {quickActions.map((action) => (
+                <Pressable
+                  accessibilityLabel={action.label}
+                  accessibilityRole="button"
+                  key={action.label}
+                  onPress={() => router.push(action.href)}
+                  style={({ pressed }) => [styles.quickAction, { backgroundColor: pressed ? palette.softPrimary : palette.background }]}
+                >
+                  <View style={[styles.quickIcon, { backgroundColor: palette.softPrimary }]}>
+                    <Ionicons color={palette.primary} name={action.icon} size={20} />
+                  </View>
+                  <GabiText numberOfLines={1} tone="muted" variant="caption">{action.label}</GabiText>
+                </Pressable>
+              ))}
+            </View>
+          </GabiCard>
+
+          {attentionItems.length > 0 ? (
+            <GabiCard>
+              <GabiSectionHeader action={<GabiChip label={`${attentionItems.length}`} tone="warning" />} title="Bantayan" />
+              {attentionItems.slice(0, 3).map((item) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={item.message}
+                  onPress={() => router.push(item.href)}
+                  style={[styles.attentionRow, { backgroundColor: item.tone === "danger" ? palette.softDanger : palette.softWarning }]}
+                >
+                  <Ionicons color={item.tone === "danger" ? palette.danger : palette.warning} name="warning-outline" size={20} />
+                  <GabiText style={styles.attentionCopy} variant="body">{item.message}</GabiText>
+                  <Ionicons color={extended.textFaint} name="chevron-forward" size={18} />
+                </Pressable>
+              ))}
+            </GabiCard>
+          ) : null}
+
+          <GabiCard>
+            <GabiSectionHeader
+              action={
+                <Pressable accessibilityRole="button" onPress={() => router.push("/owner/records")}>
+                  <GabiText tone="primary" variant="buttonSm">Logbook</GabiText>
+                </Pressable>
+              }
+              title="Huling benta"
+            />
+            {recentOrders.length === 0 ? (
+              <GabiEmptyState
+                message="Lalabas dito ang mga lokal na checkout matapos ang unang benta."
+                icon="receipt-outline"
+                title="Wala pang benta today"
+              />
+            ) : (
+              <View style={styles.recentList}>
+                {recentOrders.map((order) => (
+                  <View key={order.id} style={[styles.recentRow, { borderColor: palette.border }]}>
+                    <View style={[styles.recentIcon, { backgroundColor: palette.softSuccess }]}>
+                      <Ionicons color={palette.success} name="receipt-outline" size={19} />
+                    </View>
+                    <View style={styles.recentCopy}>
+                      <GabiText numberOfLines={1} variant="buttonSm">{order.transactionNo}</GabiText>
+                      <GabiText tone="muted" variant="caption">{order.itemCount} item(s) · {order.paymentMethod}</GabiText>
+                    </View>
+                    <GabiText money numberOfLines={1} tone="success" variant="metricValue">{formatPeso(order.amount)}</GabiText>
+                  </View>
+                ))}
+              </View>
+            )}
+          </GabiCard>
+        </>
+      )}
     </ScreenScroll>
   );
 }
 
-function StallFinanceCard({ stall, enabled, isSelected }: { stall: StallReport; enabled: boolean; isSelected: boolean }) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-  const stallStatus = getStallStatus(stall);
-  const router = useRouter();
-
+function HeroMetric({ label, value }: { label: string; value: string }) {
+  const { palette, extended } = useGabiTheme();
   return (
-    <View style={[styles.stallCard, { backgroundColor: palette.background, borderColor: isSelected ? palette.primary : palette.border }]}>
-        <View style={styles.stallCardHeader}>
-          <View style={styles.stallTitleWrap}>
-            <Text style={[styles.stallName, { color: palette.text }]}>{stall.branchName}</Text>
-            {isSelected ? <Text style={[styles.selectedStallLabel, { color: palette.primary }]}>Owner context</Text> : null}
-          </View>
-          <Pill label={enabled ? stallStatusLabel(stallStatus) : "Inactive"} tone={enabled ? stallStatusTone(stallStatus) : "neutral"} />
-        </View>
-        <View style={styles.stallMetrics}>
-          <View style={styles.stallMetric}>
-            <Text style={[styles.stallMetricLabel, { color: palette.mutedText }]}>Benta</Text>
-            <Text style={[styles.stallMetricValue, { color: palette.text }]}>{formatPeso(stall.revenue)}</Text>
-          </View>
-          <View style={styles.stallMetric}>
-            <Text style={[styles.stallMetricLabel, { color: palette.mutedText }]}>Puhunan</Text>
-            <Text style={[styles.stallMetricValue, { color: palette.text }]}>{formatPeso(stall.soldCogs)}</Text>
-          </View>
-          <View style={styles.stallMetric}>
-            <Text style={[styles.stallMetricLabel, { color: palette.mutedText }]}>Tubo</Text>
-            <Text style={[styles.stallMetricValue, { color: stall.netProfit >= 0 ? palette.success : palette.danger }]}>
-              {formatPeso(stall.netProfit)}
-            </Text>
-          </View>
-        </View>
-        <Text style={[styles.stallMeta, { color: palette.mutedText }]}>
-          {stall.transactionCount} benta today
-          {stall.bestSellerName ? ` · Best: ${stall.bestSellerName}` : ""}
-        </Text>
-        <View style={styles.stallActions}>
-          <Pressable
-            onPress={() => router.push(`/owner/reports?stallId=${stall.branchId}` as Href)}
-            style={[styles.stallSecondaryAction, { backgroundColor: palette.surface, borderColor: palette.border }]}
-          >
-            <Ionicons color={palette.primary} name="stats-chart-outline" size={17} />
-            <Text style={[styles.stallActionText, { color: palette.primary }]}>View report</Text>
-          </Pressable>
-          <Pressable
-            disabled={!enabled}
-            onPress={() => router.push({ pathname: "/kiosk", params: { branchId: stall.branchId } })}
-            style={[styles.stallPrimaryAction, { backgroundColor: palette.primary, opacity: enabled ? 1 : 0.5 }]}
-          >
-            <Ionicons color={palette.kioskHeaderText} name="storefront-outline" size={17} />
-            <Text style={[styles.stallActionText, { color: palette.kioskHeaderText }]}>{enabled ? "Open Kiosk" : "Inactive"}</Text>
-          </Pressable>
-        </View>
-      </View>
+    <View style={[styles.heroMetric, { borderColor: extended.textOnPrimaryMuted }]}>
+      <GabiText style={{ color: extended.textOnPrimaryMuted }} variant="caption">{label}</GabiText>
+      <GabiText adjustsFontSizeToFit minimumFontScale={0.7} money numberOfLines={1} style={{ color: palette.kioskHeaderText }} variant="metricValue">
+        {value}
+      </GabiText>
+    </View>
   );
 }
 
-type SetupRowProps = {
-  label: string;
-  ready: boolean;
-  value?: string;
-};
-
-function SetupRow({ label, ready, value }: SetupRowProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+function StallFinanceCard({ stall, enabled, isSelected }: { stall: StallReport; enabled: boolean; isSelected: boolean }) {
+  const { palette, extended } = useGabiTheme();
+  const status = getStallStatus(stall, enabled);
+  const router = useRouter();
 
   return (
-    <View style={styles.setupRow}>
-      <View style={styles.setupLabelWrap}>
-        <IconBadge label={ready ? "OK" : "!"} size="sm" tone={ready ? "success" : "warning"} />
-        <Text style={[styles.setupLabel, { color: palette.text }]}>{label}</Text>
+    <GabiCard raised={isSelected} style={[styles.stallCard, isSelected ? { borderColor: palette.primary } : undefined]}>
+      <View style={styles.stallHeader}>
+        <View style={styles.stallTitle}>
+          <GabiText numberOfLines={1} variant="cardTitle">{stall.branchName}</GabiText>
+          {isSelected ? <GabiText tone="primary" variant="caption">Aktibong Owner context</GabiText> : null}
+        </View>
+        <GabiChip label={stallStatusLabel(status)} tone={stallStatusTone(status)} />
       </View>
-      <Text style={[styles.setupValue, { color: ready ? palette.success : palette.warning }]}>
-        {value ?? (ready ? "Ready" : "Needed")}
-      </Text>
+      <View style={styles.stallMetrics}>
+        <StallMetric label="Benta" value={formatPeso(stall.revenue)} />
+        <StallMetric label="Puhunan" value={formatPeso(stall.soldCogs)} />
+        <StallMetric label="Tubo" tone={stall.netProfit >= 0 ? "success" : "danger"} value={formatPeso(stall.netProfit)} />
+      </View>
+      <GabiText tone="muted" variant="caption">
+        {stall.transactionCount} benta today{stall.bestSellerName ? ` · Top: ${stall.bestSellerName}` : ""}
+      </GabiText>
+      <View style={styles.stallActions}>
+        <View style={styles.stallActionCell}>
+          <GabiSoftButton
+            compact
+            icon="stats-chart-outline"
+            label="Report"
+            onPress={() => router.push(`/owner/reports?stallId=${stall.branchId}` as Href)}
+          />
+        </View>
+        <View style={styles.stallActionCell}>
+          <GabiPrimaryButton
+            accessibilityHint={enabled ? "Dadaan sa pagpili at kumpirmasyon ng stall" : "Inactive ang stall"}
+            compact
+            disabled={!enabled}
+            icon="storefront-outline"
+            label={enabled ? "Buksan Kiosk" : "Naka-off"}
+            onPress={() => router.push({ pathname: "/kiosk", params: { branchId: stall.branchId } })}
+          />
+        </View>
+      </View>
+      {!enabled ? (
+        <GabiText style={{ color: extended.disabledText }} variant="caption">I-activate muna ang stall sa Business & Stalls.</GabiText>
+      ) : null}
+    </GabiCard>
+  );
+}
+
+function StallMetric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "success" | "danger" }) {
+  return (
+    <View style={styles.stallMetric}>
+      <GabiText tone="muted" variant="caption">{label}</GabiText>
+      <GabiText adjustsFontSizeToFit minimumFontScale={0.7} money numberOfLines={1} tone={tone} variant="metricValue">{value}</GabiText>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  error: {
-    ...typography.body,
+  topActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
   },
-  heroTop: {
+  heroHeader: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
-    justifyContent: "space-between",
   },
   heroCopy: {
     flex: 1,
-    gap: spacing.xs,
+    gap: 3,
   },
-  heroLabel: {
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 20,
+  heroAmount: {
+    fontSize: 34,
+    lineHeight: 40,
   },
-  heroValue: {
-    fontSize: 30,
-    fontWeight: "900",
-    lineHeight: 36,
-  },
-  heroSubcopy: {
-    ...typography.button,
-  },
-  profitFormula: {
+  heroIcon: {
     alignItems: "center",
-    borderRadius: radius.md,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 5,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  profitFormulaText: {
-    fontSize: 11,
-    fontWeight: "800",
-    lineHeight: 15,
-  },
-  profitFormulaOperator: {
-    fontSize: 12,
-    fontWeight: "900",
-    lineHeight: 15,
-  },
-  heroBadge: {
-    alignItems: "center",
-    borderRadius: 8,
-    height: 52,
+    borderRadius: 18,
+    height: 54,
     justifyContent: "center",
-    width: 52,
+    width: 54,
   },
-  heroBadgeText: {
-    fontSize: 26,
-    fontWeight: "900",
-    lineHeight: 31,
-  },
-  metricGrid: {
+  heroMetrics: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
   },
-  inlineNote: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
+  heroMetric: {
+    borderLeftWidth: 1,
+    flexBasis: "46%",
+    flexGrow: 1,
+    gap: 2,
+    paddingLeft: spacing.sm,
   },
-  setupRows: {
-    gap: spacing.sm,
-  },
-  setupRow: {
+  heroFooter: {
     alignItems: "center",
     flexDirection: "row",
-    gap: spacing.md,
+    flexWrap: "wrap",
+    gap: spacing.sm,
     justifyContent: "space-between",
   },
-  setupLabelWrap: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  setupLabel: {
-    ...typography.body,
-  },
-  setupValue: {
-    ...typography.button,
-  },
-  quickAddGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  quickAddCell: {
-    alignItems: "center",
-    flexBasis: "22%",
-    flexGrow: 1,
-    gap: 5,
-    minHeight: 58,
-  },
-  quickAddIcon: {
-    alignItems: "center",
-    borderRadius: radius.md,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  quickAddLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 14,
-    textAlign: "center",
+  sectionGap: {
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
   },
   stallList: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   stallCard: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.sm,
-    padding: 12,
+    padding: 14,
   },
-  stallCardHeader: {
-    alignItems: "center",
+  stallHeader: {
+    alignItems: "flex-start",
     flexDirection: "row",
     gap: spacing.sm,
     justifyContent: "space-between",
   },
-  stallTitleWrap: {
+  stallTitle: {
     flex: 1,
     gap: 2,
-  },
-  stallName: {
-    ...typography.button,
-  },
-  selectedStallLabel: {
-    fontSize: 11,
-    fontWeight: "800",
-    lineHeight: 14,
   },
   stallMetrics: {
     flexDirection: "row",
@@ -801,179 +616,86 @@ const styles = StyleSheet.create({
   stallMetric: {
     flex: 1,
     gap: 2,
-  },
-  stallMetricLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 14,
-  },
-  stallMetricValue: {
-    fontSize: 14,
-    fontWeight: "900",
-    lineHeight: 18,
-  },
-  stallMeta: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
+    minWidth: 0,
   },
   stallActions: {
     flexDirection: "row",
     gap: spacing.sm,
   },
-  stallSecondaryAction: {
-    alignItems: "center",
-    borderRadius: radius.md,
-    borderWidth: 1,
+  stallActionCell: {
     flex: 1,
-    flexDirection: "row",
-    gap: spacing.xs,
-    justifyContent: "center",
-    minHeight: 42,
-    paddingHorizontal: spacing.sm,
+    minWidth: 0,
   },
-  stallPrimaryAction: {
-    alignItems: "center",
-    borderRadius: radius.md,
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.xs,
-    justifyContent: "center",
-    minHeight: 42,
-    paddingHorizontal: spacing.sm,
-  },
-  stallActionText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  nextActionRow: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: "row",
+  alertCard: {
     gap: spacing.sm,
-    padding: 12,
-  },
-  nextActionText: {
-    ...typography.body,
-    flex: 1,
-  },
-  attentionList: {
-    gap: spacing.sm,
-  },
-  attentionRow: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    padding: 12,
-  },
-  attentionText: {
-    ...typography.body,
-    flex: 1,
-  },
-  topRightRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  headerIconButton: {
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 36,
-    justifyContent: "center",
-    position: "relative",
-    width: 36,
-  },
-  notificationBadge: {
-    alignItems: "center",
-    borderRadius: radius.pill,
-    height: 17,
-    justifyContent: "center",
-    position: "absolute",
-    right: -5,
-    top: -5,
-    width: 17,
-  },
-  notificationBadgeText: {
-    fontSize: 10,
-    fontWeight: "900",
-    lineHeight: 13,
-  },
-  businessHubHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  businessHubCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  businessHubTitle: {
-    fontSize: 17,
-    fontWeight: "900",
-    lineHeight: 22,
-  },
-  businessHubActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  businessHubAction: {
-    flexBasis: "47%",
-    flexGrow: 1,
-  },
-  recentList: {
-    gap: spacing.sm,
-  },
-  body: {
-    ...typography.body,
-  },
-  alertList: {
-    gap: spacing.sm,
-  },
-  alertRow: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.xs,
-    padding: 12,
+    padding: spacing.md,
   },
   alertHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: spacing.sm,
-    justifyContent: "space-between",
   },
-  alertTitle: {
-    ...typography.button,
+  alertCopy: {
     flex: 1,
+    gap: 2,
   },
-  alertFooter: {
+  alertAction: {
+    alignSelf: "flex-end",
+  },
+  quickGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  quickAction: {
     alignItems: "center",
+    borderRadius: 16,
+    flexBasis: "22%",
+    flexGrow: 1,
+    gap: 5,
+    minHeight: 68,
+    minWidth: 64,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  quickIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  attentionRow: {
+    alignItems: "center",
+    borderRadius: 14,
     flexDirection: "row",
     gap: spacing.sm,
-    justifyContent: "space-between",
+    minHeight: 52,
+    padding: spacing.sm,
   },
-  alertTime: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
+  attentionCopy: {
+    flex: 1,
   },
-  resolveButton: {
+  recentList: {
+    gap: spacing.sm,
+  },
+  recentRow: {
     alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 34,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 54,
+    paddingBottom: spacing.sm,
   },
-  resolveButtonText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
+  recentIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  recentCopy: {
+    flex: 1,
+    gap: 2,
   },
 });

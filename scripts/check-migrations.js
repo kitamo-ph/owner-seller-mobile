@@ -14,6 +14,7 @@ const migrationModules = [
   ["007_selling_cogs.js", "sellingCogsMigration"],
   ["008_fixed_costs.js", "fixedCostsMigration"],
   ["009_checkout_idempotency.js", "checkoutIdempotencyMigration"],
+  ["010_problem_reports.js", "problemReportsMigration"],
 ];
 const migrations = migrationModules.map(([file, exportName]) => require(path.join(compiledDir, file))[exportName]);
 const dbPath = path.join(os.tmpdir(), `kitamo-migrations-${process.pid}-${Date.now()}.sqlite`);
@@ -43,6 +44,8 @@ try {
   const appliedCount = Number(sql("SELECT COUNT(*) FROM schema_migrations;"));
   const salesColumns = JSON.parse(sql("PRAGMA table_info(sales);", true));
   const hasCheckoutToken = salesColumns.some((column) => column.name === "checkout_token");
+  const problemReportColumns = JSON.parse(sql("PRAGMA table_info(problem_reports);", true));
+  const hasProblemReports = problemReportColumns.some((column) => column.name === "diagnostics_json");
 
   const saleColumns = "id, business_id, transaction_no, happened_at, amount, discount, payment_method, payment_status, created_at, updated_at, sync_status, deleted_at, checkout_token";
   const saleValues = "'sale_1', 'business_1', 'KTM-1', datetime('now'), 100, 0, 'cash', 'paid', datetime('now'), datetime('now'), 'local', NULL, 'checkout_1'";
@@ -61,12 +64,14 @@ try {
     secondRun === 0 &&
     appliedCount === migrations.length &&
     hasCheckoutToken &&
+    hasProblemReports &&
     duplicateRejected &&
     saleCount === 1;
 
   console.log(`first migration run: ${firstRun} applied`);
   console.log(`second migration run: ${secondRun} applied`);
   console.log(`checkout_token column: ${hasCheckoutToken ? "present" : "missing"}`);
+  console.log(`problem_reports table: ${hasProblemReports ? "present" : "missing"}`);
   console.log(`duplicate checkout token: ${duplicateRejected ? "rejected" : "accepted"}`);
   console.log(`sales with checkout_1: ${saleCount}`);
 

@@ -1,4 +1,5 @@
 export type ThemeMode = "light" | "dark" | "system";
+export type ResolvedThemeMode = Exclude<ThemeMode, "system">;
 
 export type ThemePalette = {
   primary: string;
@@ -21,50 +22,57 @@ export type ThemePalette = {
 };
 
 export const brandColors = {
-  forestGreen: "#166534",
-  warmGold: "#D59A17",
-  cream: "#F8FAF4",
-  offWhite: "#FFFFFF",
-  charcoal: "#17231D",
+  gabi: "#4F2EC9",
+  gabiBright: "#5C3BE3",
+  gabiDeep: "#4326B8",
+  liwanag: "#FFAF1F",
+  ink: "#1C1830",
+  mist: "#F6F5FB",
+  white: "#FFFFFF",
 } as const;
 
-export const themePalettes: Record<Exclude<ThemeMode, "system">, ThemePalette> = {
+// These keys intentionally stay aligned 1:1 with the pre-Gabi ThemePalette API.
+export const themePalettes: Record<ResolvedThemeMode, ThemePalette> = {
   light: {
-    primary: brandColors.forestGreen,
-    accent: brandColors.warmGold,
-    background: brandColors.cream,
-    surface: brandColors.offWhite,
-    border: "#D9E2D0",
-    text: brandColors.charcoal,
-    mutedText: "#667085",
-    softPrimary: "#ECFDF5",
-    softAccent: "#FEF3C7",
-    softDanger: "#FEF2F2",
-    softSuccess: "#ECFDF5",
-    softWarning: "#FFFBEB",
-    success: "#166534",
-    warning: "#B45309",
-    danger: "#B42318",
-    kioskHeader: brandColors.forestGreen,
-    kioskHeaderText: brandColors.offWhite,
+    primary: "#4F2EC9",
+    accent: "#FFAF1F",
+    background: "#F6F5FB",
+    surface: "#FFFFFF",
+    border: "#E6E3F1",
+    text: "#1C1830",
+    mutedText: "#6E6A85",
+    softPrimary: "#F1EEFC",
+    softAccent: "#FFF2D6",
+    softDanger: "#FDEAE8",
+    softSuccess: "#E2F6EC",
+    softWarning: "#FFF3DE",
+    success: "#0F9D63",
+    warning: "#E08700",
+    danger: "#E23D32",
+    kioskHeader: "#1C1830",
+    kioskHeaderText: "#FFFFFF",
   },
   dark: {
-    primary: "#76C69A",
-    accent: "#E1B84E",
-    background: "#101816",
-    surface: "#18231F",
-    border: "#30413A",
-    text: "#F5F1E8",
-    mutedText: "#B9C2BB",
-    softPrimary: "#1E352C",
-    softAccent: "#362D16",
-    softDanger: "#3A2020",
-    softSuccess: "#1F352B",
-    softWarning: "#342B17",
-    success: "#79C79D",
-    warning: "#E2B957",
-    danger: "#F08A8A",
-    kioskHeader: "#0F3D2B",
-    kioskHeaderText: "#FFFDF7",
+    primary: "#A48BF2",
+    accent: "#F5B342",
+    background: "#141020",
+    surface: "#1F1935",
+    border: "#37305A",
+    text: "#F2EFFA",
+    mutedText: "#A9A3C6",
+    softPrimary: "#2A2348",
+    softAccent: "#3A2D12",
+    softDanger: "#3D1F1E",
+    softSuccess: "#16352A",
+    softWarning: "#3A2B12",
+    success: "#43C98A",
+    warning: "#F0A23C",
+    danger: "#F87A6C",
+    kioskHeader: "#0D0A18",
+    kioskHeaderText: "#F2EFFA",
   },
 };
+
+export function resolveThemeMode(themeMode: ThemeMode, systemMode: ResolvedThemeMode): ResolvedThemeMode {
+  return themeMode === "system" ? systemMode : themeMode;
+}

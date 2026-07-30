@@ -1,37 +1,46 @@
 # KitaMo Android - Final Release Readiness
 
-Status: engineering release candidate for Google Play Internal Testing. The Android seller app is authoritative; the PWA remains frozen and unchanged.
+Status: versionCode 2 artifact conditionally verified for Google Play Internal
+Testing; owner actions remain. The Android seller app is authoritative; the PWA
+remains frozen and unchanged. No Play upload or public rollout is approved.
 
 ## Release identity
 
 - App: **KitaMo**
 - Package: **`ph.kitamo.app`**
-- Version: **`1.0.0`** (`versionCode` 1)
+- Version: **`1.0.0`** (`versionCode` 2)
 - Expo SDK 54 / React Native 0.81 / New Architecture
-- Preview profile: standalone APK
 - Production profile: signed Android App Bundle
-- Branded launcher, adaptive, splash, Play icon, and feature graphic are present
+- Branded launcher icon, adaptive icon, splash, Play icon, and feature graphic are present
 - EAS project: `@kitamoandroidapp/kitamo-android`
 
-## Security and privacy boundary
+## Product boundary
 
-- SQLite is the local source of truth; Android backup is disabled.
-- No Supabase runtime, endpoint, key, auth, analytics, ads, AI API, OCR/camera, Bluetooth, payment SDK, Customer Mode, or LGU Mode.
-- Production export contains no `supabase`, `EXPO_PUBLIC_SUPABASE`, service-role, or anon-key strings.
-- Owner Mode supports a salted local PIN, optional Android biometric confirmation, retry cooldown, background lock, and Kiosk-entry lock.
-- Native prebuild removes internet, legacy external-storage, and system-overlay permissions.
-- Expected merged release permissions: network/Wi-Fi state, vibration, biometric, and fingerprint fallback. Verify from the signed artifacts.
-- The Owner lock protects against casual shared-device access; it does not encrypt SQLite or defend a rooted/compromised phone. Android backup is disabled to keep the local database out of device backups.
+- SQLite is the local source of truth. Android backup is disabled.
+- Kiosk Mode is local, same-device, and stall-specific. Opening Kiosk requires explicit stall selection and confirmation.
+- Notifications are local SQLite alerts only.
+- No Supabase, cloud sync, cloud auth, AI, OCR/camera, Bluetooth printing, seller accounts, real shifts, QR joining, remote approvals, push notifications, Customer Mode, or LGU Mode is enabled.
+- `offline_queue` records future sync intent but has no consumer in this release. Its rows remain local until pilot data is reset.
 
-## Data integrity
+## Final QA result
 
-- Checkout writes sale, items, COGS, stock, inventory movements, receipt, ingredient usage, and local queue data in one exclusive SQLite transaction.
-- Migration `009_checkout_idempotency` adds a unique checkout token. A retry returns the original receipt and cannot decrement stock twice.
-- Full local reset clears all business tables, settings, queue rows, demo flags, and Owner protection after confirmation.
-- Demo data remains opt-in only.
-- `offline_queue` has no cloud consumer in this release. It keeps one future-sync-intent row per local sale until the pilot data is reset, so its growth must be monitored during a long pilot.
+The user approved the redesigned app's manual QA. Codex then reran the release
+gates on `codex/gabi-redesign` after the measured low-end fix. This source and
+versionCode 1 runtime history remains useful evidence, but it is not presented
+as a versionCode 2 install/runtime test:
 
-## Profit contract
+- `npm run typecheck`: pass
+- `npm run lint`: pass
+- Owner-context, pricing, recipe, production, COGS, fixed-cost/profit, pilot, checkout-idempotency, and migration checks: pass
+- Repeat-safe migrations: 9 applied on first run, 0 on second run, unique checkout token preserved
+- Expo Doctor: 18/18
+- Production Android export: pass; Hermes bundle approximately 4.02 MB
+- Clean first launch, explicit Demo seed, Owner/Kiosk navigation, force-close recovery, Araw/Gabi persistence, Kiosk theme lock, large-font Home, and focused logcat inspection: pass on the constrained emulator
+- No tracked QA routes, synthetic seeds, emulator-only code, APKs, AABs, or debug files remain in the repository
+
+## Protected business behavior
+
+The final release changes after the redesign audit touched only startup migration serialization, a native gradient host stability guard, and bounded rendering in Inventory/Grocery screens. They did not alter accounting, inventory writes, exact grocery-lot traceability, recipe costing, production, checkout, bundle pricing, COGS, fixed costs, spoilage, transfers, profit, or reports.
 
 ```text
 Revenue
@@ -41,68 +50,95 @@ Revenue
 = Net Profit
 ```
 
-All domain checks, the end-to-end pilot scenario, and the repeat-safe migration check pass without changing the accounting engine.
+## Measured low-end results
 
-## Performance checkpoint
+Test environment: Android 9/API 28 AVD, 2 GB RAM, 2 CPU cores, 360x800 viewport. The external synthetic SQLite dataset contained 303 products, 3,000 sales and related records, 200 ingredients, 400 exact lots, 100 recipes, and 500 production batches. It was injected into the emulator only and is not part of the app.
 
-- Production Hermes export succeeds with dotenv disabled.
-- Bundle: 3.87 MB.
-- Icon fonts: one Ionicons font, 390 KB (previously nineteen font assets).
-- Supabase runtime removal dropped its dependency chain.
-- Large-list conversion and SQL pagination remain evidence-driven; do not change them until low-end device profiling shows a bottleneck.
-- Home keeps sequential shared-handle SQLite reads because concurrent reads previously caused SDK 54 prepared-statement failures.
-- `npm audit --omit=dev` reports 13 moderate advisories in Expo's bundled build/configuration toolchain (`postcss` and `uuid`). The offered fix is a breaking Expo 57 upgrade; no high or critical advisory was reported, and these packages are not part of KitaMo's shipped Hermes application logic. Reassess on the next supported Expo upgrade.
+- Cold launch: 562-1,171 ms across five runs; median 634 ms
+- Warm foreground resume after 60 seconds: 241 ms; same process and Kiosk context retained
+- Force-stop/reopen: about 1.02 seconds; persistent data/context restored and transient Kiosk session correctly closed
+- 30-minute Kiosk soak: 100,131 KB final PSS, zero swap, no fatal/Fabric/SQLite/font errors; memory was lower than its 103,819 KB baseline
+- Network: no app-UID netstats entry during the soak; final manifest has no `INTERNET` permission
+- Battery: emulator batterystats did not advance time-on-battery, so a trustworthy drain percentage requires a physical phone
+- Large font: 1.3x at 360x800 remained usable without overlapping primary controls
 
-## Finished store assets
+Profiling identified two proven bottlenecks and only those were changed:
 
-- `docs/play-store/assets/play-icon-512.png`
-- `docs/play-store/assets/feature-graphic-1024x500.png`
-- Release-candidate listing, release notes, privacy policy, Data Safety guide, screenshot plan, and tester guide under `docs/play-store/`
+- Inventory dropped from roughly 3,900 native views to 644 for the first 30-row batch.
+- Grocery Stock dropped from 8,294 native views to 928 for the first 20 ingredient groups.
+- `Ipakita pa` reveals the next bounded batch while preserving search, filters, totals, and exact lot details.
+- Recipes reached 2,668 views / about 173 MB PSS with the synthetic dataset, but remained usable; no speculative refactor was made.
 
-## Release-build evidence
+## Security and artifact checks
 
-- EAS authentication and project link complete: `@kitamoandroidapp/kitamo-android` (`d2ab769c-4916-4efa-ab1e-a2dfdc638607`).
-- EAS-managed Android keystore created and retained on Expo's credential service.
-- Preview APK build complete: `f3b64c64-04d0-4f71-ac54-1ceba8029403`.
-- The preview environment contains no EAS plain-text or sensitive environment variables.
-- Sanitized local native release compilation produced an APK and AAB with package `ph.kitamo.app`, version `1.0.0 (1)`, target API 36, `allowBackup=false`, and no Internet/camera/microphone/storage/location/Bluetooth permission.
-- Local APK signature verification passed v2 signing. That local artifact uses the debug certificate and is engineering evidence only; the EAS-managed artifact is the distributable preview candidate.
-- Local APK `zipalign -c -P 16 -v 4` passed. Local AAB `bundletool validate` passed and reports `PAGE_ALIGNMENT_16K`.
-- Low-end API 28 / 2 GB AVD: clean-data first launch, explicit demo seed, Home, and sell-first Kiosk rendered without red-screen errors or system-bar overlap. Fresh database initialization took about 5.1 seconds; a warm launch measured about 0.7 seconds. The Kiosk displayed large product tiles, favorites, recent/category filters, and Add controls.
-- Production AAB and its EAS/Play signing inspection remain pending. The desktop execution approval quota blocked the production command after the preview completed; this is an environment gate, not an app build failure.
+- Owner Mode uses a salted local PIN, optional Android biometric confirmation, retry cooldown, background lock, and Kiosk-entry lock.
+- Owner protection is a shared-device access control, not database encryption and not protection against a rooted/compromised phone.
+- Expected merged permissions: network/Wi-Fi state, vibration, biometric, fingerprint fallback, and an app-local signature receiver permission.
+- Forbidden permissions: Internet, camera, microphone, storage, location, Bluetooth, and system overlay.
+- `allowBackup=false`; Secure Store backup is also disabled.
+- The versionCode 2 AAB static scan found no Supabase/Clerk/OpenAI/Lis client,
+  endpoint, or credential-shaped token. Remote EAS environment state was not
+  rechecked by that binary inspection.
+- `npm audit --omit=dev` reports 13 moderate and 0 high/critical advisories in Expo build/configuration transitive dependencies. The offered remediation requires a breaking Expo 57 upgrade; defer to the next supported SDK upgrade.
+- The designated Internal Testing artifact is
+  `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`.
+- Its SHA-256 is
+  `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`.
+- Its package/version identity is `ph.kitamo.app` / `1.0.0` / versionCode `2`,
+  with minimum API 24 and target API 36.
+- Its signer exactly matches the independently verified EAS production
+  upload-certificate SHA-256 fingerprint
+  `9E:2A:60:C0:C9:28:A2:99:24:50:D8:8D:28:3F:89:1C:58:69:ED:5D:A1:E8:23:53:CB:F3:E8:B8:97:6E:A2:C1`.
+- Bundletool/ZIP processing, the expected permission and backup boundary, static
+  offline/cloud exclusion scans, APK ZIP alignment, and all 40 applicable
+  arm64/x86_64 16 KB ELF checks passed. A versionCode 2 signed APK was not
+  installed; Play analysis remains pending.
+- The complete evidence and limitations are in the
+  [versionCode 2 AAB verification record](versioncode-2-aab-verification.md).
 
-## External gates still required
+Historical versionCode 1 evidence remains preserved:
 
-1. Supply the public support email and hosted privacy-policy URL.
-2. Download/install the completed EAS preview APK on a low-end physical Android phone; complete the regression matrix below and capture real screenshots.
-3. Run `eas build -p android --profile production`, then validate and upload the resulting AAB after the Play app exists.
-4. Review the Play pre-launch report and resolve every Data Safety `REVIEW` item before rollout.
+- EAS build `362a9631-f557-4ac4-9b0c-b770c10ea637`, source `376b2f1`, artifact
+  `release-artifacts/KitaMo-1.0.0-production-eas-376b2f1.aab`, SHA-256
+  `51c515df2b9da82687f68fd553e4f4936801c77bea650c44190ae4538fa6efcd`.
+- Its earlier bundletool, signature, package/version, permission, backup,
+  universal-APK signing/install, 16 KB, and 1.09-second clean-launch checks remain
+  dated evidence for that binary.
+- That artifact and every instruction to upload it are
+  **Superseded — do not upload**.
 
-The release workstation now has Node 20, JDK 17, Android Studio, API 36 SDK/build tools, ADB, two test AVDs, and bundletool. A sanitized local release APK and AAB compile successfully; their final manifest, package/version, signature format, and 16 KB native-library alignment were inspected. EAS remains the authoritative source for the managed-keystore preview APK and production AAB. See `release-engineering-environment.md`.
+## Known limitations
 
-Expo Doctor previously passed 17/17 with network access. The 2026-07-11 rerun passed all 15 local checks; the two remote schema/package-directory checks could not reach Expo from the sandbox and reported no dependency finding.
+- Fresh/Demo choice remains on first launch for the pilot. Post-pilot, start Fresh by default and move Demo into Settings or Pilot Guide.
+- All data is local to one device; uninstall/reset permanently removes it.
+- Pending queue rows do not sync and can grow during a long pilot.
+- No remote seller access, multi-device assignments, cloud backup, or server recovery exists.
+- Real-device battery, thermal, vendor-firmware, storage-pressure, and biometric behavior cannot be proven by the emulator.
 
-## Real-device regression matrix
+## Human-owned Play gates
 
-- [ ] Fresh launch stays empty; Demo appears only after explicit selection.
-- [ ] Favorites, recents, category/search filters, and quick quantity controls survive navigation/reopen as designed.
-- [ ] Bundle checkout produces the expected amount and one stock decrement.
-- [ ] Rapid repeated Confirm taps create one sale, receipt, movement set, and local queue row.
-- [ ] Interrupt/background checkout; retry returns the same sale rather than a duplicate.
-- [ ] Cash requires no reference; GCash/Maya/bank requires one.
-- [ ] Orders, receipt, shift, reports, and local-save count survive force-close/reopen.
-- [ ] Grocery -> Recipe -> Production -> Sale preserves ingredient deductions and sold COGS.
-- [ ] Cook-upon-order remains sellable and flags estimated cost when appropriate.
-- [ ] Transfers, spoilage, fixed costs, and reports preserve their existing calculations.
-- [ ] Owner PIN locks after background/Kiosk entry; wrong-PIN cooldown and optional biometrics work.
-- [ ] Clear All Local Pilot Data returns to first run with zero records and no automatic Demo data.
-- [ ] Large font, small screen, keyboard, TalkBack labels, and gesture navigation remain usable.
+1. [ ] Create or grant access to the KitaMo Play Console app for package
+   `ph.kitamo.app`.
+2. [ ] Supply a monitored public support email.
+3. [ ] Host the approved privacy policy at a public HTTPS URL.
+4. [ ] Supply the Internal Testing Google-account email list.
+5. [ ] Capture final store screenshots from the signed candidate on a physical
+   phone.
+6. [ ] Enter and owner-confirm the drafted Data Safety, App Access,
+   content-rating, target-audience, and financial-feature answers.
+7. [ ] Enable Play App Signing and upload only the designated versionCode 2 AAB
+   to Internal Testing.
+8. [ ] Enter the prepared release notes and approve the Internal Testing rollout.
+9. [ ] Review the Play pre-launch report before considering any later track.
 
-## Verification commands
+No Play upload, tester rollout, pre-launch report, or public release can be claimed until those owner-controlled gates are complete.
+
+## Verification commands and future-build boundary
 
 ```sh
 npm run typecheck
 npm run lint
+npm run check:owner-context
 npm run check:pricing
 npm run check:recipes
 npm run check:production
@@ -110,8 +146,9 @@ npm run check:cogs
 npm run check:fixedcosts
 npm run check:pilot
 npm run check:migrations
-npx expo-doctor
+EXPO_NO_DOTENV=1 npx expo-doctor
 EXPO_NO_DOTENV=1 npx expo export --platform android
-eas build -p android --profile preview
-eas build -p android --profile production
 ```
+
+Do not rebuild or replace the designated versionCode 2 artifact. A separately
+approved later build must use versionCode 3 or higher.

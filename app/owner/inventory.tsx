@@ -1,18 +1,23 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { type ComponentProps, useCallback, useRef, useState } from "react";
+import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
-import { AppTopBar, EmptyState, formatPeso, InlineNotice, LoadingState, MetricCard, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { NetworkStatusBadge } from "@/components/common/NetworkStatusBadge";
+import { GabiPrimaryButton, GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiField } from "@/components/gabi/GabiControls";
+import { GabiEmptyState, GabiNotice, GabiSkeleton, GabiSnackbar } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { TindahanTabs } from "@/components/owner/TindahanTabs";
+import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { createProduct, updateProduct } from "@/db/repositories";
+import { bundleLabelFor, hasBundlePricing } from "@/domain/pricing";
 import type { Product, ProductType, UnitType } from "@/domain/types";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
 import { recordCookedBatch, recordSpoilage } from "@/services/stockOps";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
-import { radius } from "@/theme/radius";
-import { shadows } from "@/theme/shadows";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, getUserSafeErrorMessage, logDevError } from "@/utils/errors";
 
 const productTypes: ProductType[] = ["retail item", "cooked food", "ingredient-based item", "service/other"];
@@ -51,6 +56,7 @@ const emptyProductForm: ProductForm = {
 };
 
 const numbersOnlyMessage = "Numbers only, like 1500 or 12.5. Walang comma.";
+const productRenderBatch = 30;
 
 type CookForm = {
   productId: string | null;
@@ -84,10 +90,11 @@ export default function OwnerInventoryScreen() {
   const [spoilageSaving, setSpoilageSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
+  const [productRenderLimit, setProductRenderLimit] = useState(productRenderBatch);
+  const [openProductActionsId, setOpenProductActionsId] = useState<string | null>(null);
+  const [stockAction, setStockAction] = useState<"cook" | "spoilage" | null>(null);
   const cookLock = useRef(false);
   const spoilageLock = useRef(false);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
   const router = useRouter();
 
   function setNotice(text: string) {
@@ -308,6 +315,7 @@ export default function OwnerInventoryScreen() {
   }
 
   function editProduct(product: Product) {
+    setOpenProductActionsId(null);
     setShowProductForm(true);
     setProductForm({
       id: product.id,
@@ -326,6 +334,22 @@ export default function OwnerInventoryScreen() {
     });
   }
 
+  function openManualCook(product: Product) {
+    setOpenProductActionsId(null);
+    setCookForm({ ...emptyCookForm, productId: product.id });
+    setCookMessage(null);
+    setCookIsError(false);
+    setStockAction("cook");
+  }
+
+  function openSpoilage(product: Product) {
+    setOpenProductActionsId(null);
+    setSpoilageForm({ ...emptySpoilageForm, productId: product.id });
+    setSpoilageMessage(null);
+    setSpoilageIsError(false);
+    setStockAction("spoilage");
+  }
+
   const canEditProducts = Boolean(status?.activeBusiness);
   const products = status?.products ?? [];
   const lowStockCount = products.filter((product) => product.stockQty <= product.lowStockThreshold).length;
@@ -338,342 +362,332 @@ export default function OwnerInventoryScreen() {
       (stockFilter === "out" ? product.stockQty <= 0 : product.stockQty > 0 && product.stockQty <= product.lowStockThreshold);
     return matchesSearch && matchesStock;
   });
+  const renderedProducts = visibleProducts.slice(0, productRenderLimit);
+  const remainingProductCount = Math.max(0, visibleProducts.length - renderedProducts.length);
+  const actionProduct = products.find((product) => product.id === openProductActionsId) ?? null;
+
+  const openProductForm = () => {
+    setProductForm(emptyProductForm);
+    setShowProductForm(true);
+  };
+  const closeProductForm = () => {
+    setProductForm(emptyProductForm);
+    setShowProductForm(false);
+  };
 
   return (
     <ScreenScroll bottomNav>
-      <AppTopBar subtitle="Paninda at sangkap" title="Inventory" />
+      <AppTopBar
+        eyebrow="Tindahan"
+        right={<GabiIconButton accessibilityLabel="Magdagdag ng paninda" icon="add" onPress={openProductForm} />}
+        subtitle="Paninda, grocery, recipe, at stock actions"
+        title="Paninda"
+      />
 
-      {message ? <InlineNotice message={message} tone={messageIsError ? "danger" : "success"} /> : null}
+      <TindahanTabs active="paninda" />
+
+      {messageIsError && message ? <GabiNotice message={message} title="Hindi ma-save" tone="danger" /> : null}
 
       {!status ? (
-        <LoadingState label="Loading products and stock levels..." />
+        <GabiCard>
+          <GabiText tone="muted" variant="caption">Binabasa ang local na paninda...</GabiText>
+          <GabiSkeleton height={66} />
+          <GabiSkeleton height={66} />
+        </GabiCard>
+      ) : !status.activeBusiness ? (
+        <GabiCard>
+          <GabiEmptyState
+            actionLabel="Pumili ng negosyo"
+            icon="business-outline"
+            message="Kailangan ng deliberate business context bago magdagdag o magbago ng paninda."
+            onAction={() => router.push("/owner/context")}
+            title="Walang napiling negosyo"
+          />
+        </GabiCard>
       ) : (
-        <View style={styles.summaryGrid}>
-          <MetricCard detail="Total items" icon="I" label="Products" tone="primary" value={String(products.length)} />
-          <MetricCard detail="Need review" icon="!" label="Low Stock" tone={lowStockCount > 0 ? "warning" : "success"} value={`${lowStockCount} items`} />
-          <MetricCard detail="Cost basis" icon="P" label="Stock Value" tone="success" value={formatPeso(stockValue)} />
-        </View>
+        <>
+          <View style={styles.networkRow}>
+            <NetworkStatusBadge compact pendingQueueCount={status.pendingQueueCount} />
+            <GabiChip label={status.activeBranch?.branchName ?? "All stalls"} tone="primary" />
+          </View>
+
+          <GabiCard>
+            <View style={styles.summaryGrid}>
+              <SummaryMetric icon="cube-outline" label="Paninda" value={String(products.length)} />
+              <SummaryMetric
+                icon="warning-outline"
+                label="Paubos / ubos"
+                tone={lowStockCount > 0 ? "warning" : "success"}
+                value={String(lowStockCount)}
+              />
+              <SummaryMetric icon="wallet-outline" label="Stock value" tone="success" value={formatPeso(stockValue)} />
+            </View>
+          </GabiCard>
+
+          <GabiCard>
+            <GabiSectionHeader
+              action={<GabiPrimaryButton compact disabled={saving || !canEditProducts} icon="add" label="Paninda" onPress={openProductForm} />}
+              title="Listahan"
+            />
+
+            {products.length > 0 ? (
+              <>
+                <GabiField
+                  label="Hanapin"
+                  onChangeText={(value) => {
+                    setProductSearch(value);
+                    setProductRenderLimit(productRenderBatch);
+                  }}
+                  placeholder="Pangalan o category"
+                  value={productSearch}
+                />
+                <ScrollView
+                  contentContainerStyle={styles.filterRow}
+                  horizontal
+                  keyboardShouldPersistTaps="handled"
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {(["all", "low", "out"] as const).map((option) => (
+                    <FilterChip
+                      active={stockFilter === option}
+                      key={option}
+                      label={option === "all" ? "Lahat" : option === "low" ? "Paubos" : "Ubos na"}
+                      onPress={() => {
+                        setStockFilter(option);
+                        setProductRenderLimit(productRenderBatch);
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+
+            {products.length === 0 ? (
+              <GabiEmptyState
+                actionLabel="Magdagdag ng paninda"
+                icon="cube-outline"
+                message="Ilagay ang unang produktong ibebenta sa napiling business o stall."
+                onAction={openProductForm}
+                title="Wala pang paninda"
+              />
+            ) : visibleProducts.length === 0 ? (
+              <GabiEmptyState
+                actionLabel="I-reset ang filter"
+                icon="search-outline"
+                message="Walang tumutugma sa search at stock filter."
+                onAction={() => {
+                  setProductSearch("");
+                  setStockFilter("all");
+                  setProductRenderLimit(productRenderBatch);
+                }}
+                title="Walang nahanap"
+              />
+            ) : (
+              <View style={styles.productList}>
+                {renderedProducts.map((product) => (
+                  <InventoryProductRow
+                    actionsOpen={openProductActionsId === product.id}
+                    disabled={saving}
+                    key={product.id}
+                    onToggleActions={() => setOpenProductActionsId((current) => current === product.id ? null : product.id)}
+                    product={product}
+                  />
+                ))}
+                {remainingProductCount > 0 ? (
+                  <GabiSoftButton
+                    icon="chevron-down"
+                    label={`Ipakita pa (${remainingProductCount})`}
+                    onPress={() => setProductRenderLimit((current) => current + productRenderBatch)}
+                  />
+                ) : null}
+              </View>
+            )}
+          </GabiCard>
+
+          <View style={styles.flowGrid}>
+            <FlowLink icon="flame-outline" label="Niluto / Production" onPress={() => router.push("/owner/production")} />
+            <FlowLink icon="swap-horizontal-outline" label="Ilipat ang stock" onPress={() => router.push("/owner/transfers")} />
+          </View>
+
+          {stockAction === "cook" ? (
+            <GabiCard raised>
+              <GabiSectionHeader
+                action={<GabiChip label="Manual stock in" tone="success" />}
+                title="Dagdag luto (walang recipe)"
+              />
+              <GabiNotice
+                message="Diretsong dagdag ito sa finished stock. Para sa exact ingredient deduction at recipe cost, gamitin ang Niluto."
+                tone="warning"
+              />
+              <ProductChips
+                disabled={cookSaving}
+                onSelect={(productId) => setCookForm((form) => ({ ...form, productId }))}
+                products={products}
+                selectedId={cookForm.productId}
+              />
+              <View style={styles.twoColumn}>
+                <FormField
+                  editable={!cookSaving}
+                  keyboardType="decimal-pad"
+                  label="Ilang nadagdag?"
+                  onChangeText={(quantity) => setCookForm((form) => ({ ...form, quantity }))}
+                  placeholder="0"
+                  value={cookForm.quantity}
+                />
+                <FormField
+                  editable={!cookSaving}
+                  label="Note"
+                  onChangeText={(note) => setCookForm((form) => ({ ...form, note }))}
+                  placeholder="Optional"
+                  value={cookForm.note}
+                />
+              </View>
+              {cookMessage ? <GabiNotice message={cookMessage} tone={cookIsError ? "danger" : "success"} /> : null}
+              <View style={styles.formActions}>
+                <View style={styles.primaryAction}>
+                  <GabiPrimaryButton
+                    disabled={cookSaving}
+                    icon="checkmark-circle-outline"
+                    label={cookSaving ? "Sine-save..." : "I-save ang dagdag stock"}
+                    loading={cookSaving}
+                    onPress={saveCookedBatch}
+                  />
+                </View>
+                <GabiSoftButton icon="close" label="Isara" onPress={() => setStockAction(null)} />
+              </View>
+              <GabiSoftButton icon="flame-outline" label="May recipe? Buksan ang Niluto" onPress={() => router.push("/owner/production")} />
+            </GabiCard>
+          ) : null}
+
+          {stockAction === "spoilage" ? (
+            <GabiCard raised>
+              <GabiSectionHeader action={<GabiChip label="Stock out" tone="danger" />} title="Nasayang" />
+              <GabiNotice message="Ibabawas ito sa stock at isasama sa spoilage loss. Hindi puwedeng lumampas sa kasalukuyang stock." tone="warning" />
+              <ProductChips
+                disabled={spoilageSaving}
+                onSelect={(productId) => setSpoilageForm((form) => ({ ...form, productId }))}
+                products={products}
+                selectedId={spoilageForm.productId}
+              />
+              <View style={styles.twoColumn}>
+                <FormField
+                  editable={!spoilageSaving}
+                  keyboardType="decimal-pad"
+                  label="Ilang nasayang?"
+                  onChangeText={(quantity) => setSpoilageForm((form) => ({ ...form, quantity }))}
+                  placeholder="0"
+                  value={spoilageForm.quantity}
+                />
+                <FormField
+                  editable={!spoilageSaving}
+                  label="Dahilan"
+                  onChangeText={(reason) => setSpoilageForm((form) => ({ ...form, reason }))}
+                  placeholder="Hal. nabasag, na-expire"
+                  value={spoilageForm.reason}
+                />
+              </View>
+              {spoilageMessage ? <GabiNotice message={spoilageMessage} tone={spoilageIsError ? "danger" : "success"} /> : null}
+              <View style={styles.formActions}>
+                <View style={styles.primaryAction}>
+                  <GabiPrimaryButton
+                    disabled={spoilageSaving}
+                    icon="trash-outline"
+                    label={spoilageSaving ? "Sine-save..." : "I-save ang nasayang"}
+                    loading={spoilageSaving}
+                    onPress={saveSpoilage}
+                  />
+                </View>
+                <GabiSoftButton icon="close" label="Isara" onPress={() => setStockAction(null)} />
+              </View>
+            </GabiCard>
+          ) : null}
+
+          {productFormVisible ? (
+            <GabiCard raised>
+              <GabiSectionHeader
+                action={products.length > 0 ? <GabiSoftButton compact disabled={saving} icon="close" label="Isara" onPress={closeProductForm} /> : undefined}
+                title={productForm.id ? "I-edit ang paninda" : "Bagong paninda"}
+              />
+              <GabiField
+                disabled={!canEditProducts}
+                label="Pangalan"
+                onChangeText={(name) => setProductForm((form) => ({ ...form, name }))}
+                placeholder="Hal. Bottled water"
+                value={productForm.name}
+              />
+              <GabiField
+                disabled={!canEditProducts}
+                label="Category"
+                onChangeText={(category) => setProductForm((form) => ({ ...form, category }))}
+                placeholder="Drinks, meals, snacks"
+                value={productForm.category}
+              />
+              <OptionGroup
+                disabled={!canEditProducts}
+                label="Uri ng paninda"
+                onSelect={(productType) => setProductForm((form) => ({ ...form, productType }))}
+                options={productTypes}
+                selected={productForm.productType}
+              />
+              <OptionGroup
+                disabled={!canEditProducts}
+                label="Unit"
+                onSelect={(unitType) => setProductForm((form) => ({ ...form, unitType }))}
+                options={unitTypes}
+                selected={productForm.unitType}
+              />
+              <View style={styles.twoColumn}>
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Stock qty" onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))} placeholder="0" value={productForm.stockQty} />
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Paubos kapag" onChangeText={(lowStockThreshold) => setProductForm((form) => ({ ...form, lowStockThreshold }))} placeholder="0" value={productForm.lowStockThreshold} />
+              </View>
+              <View style={styles.twoColumn}>
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Presyo" onChangeText={(price) => setProductForm((form) => ({ ...form, price }))} placeholder="0" value={productForm.price} />
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Unit cost" onChangeText={(cost) => setProductForm((form) => ({ ...form, cost }))} placeholder="0" value={productForm.cost} />
+              </View>
+              <GabiNotice message="Optional ang bundle. Parehong quantity at presyo ang kailangan para ma-apply ito sa BENTA." />
+              <View style={styles.twoColumn}>
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Bundle quantity" onChangeText={(bundleQuantity) => setProductForm((form) => ({ ...form, bundleQuantity }))} placeholder="Optional" value={productForm.bundleQuantity} />
+                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Bundle price" onChangeText={(bundlePrice) => setProductForm((form) => ({ ...form, bundlePrice }))} placeholder="Optional" value={productForm.bundlePrice} />
+              </View>
+              <GabiField
+                disabled={!canEditProducts}
+                label="Bundle label"
+                onChangeText={(bundleLabel) => setProductForm((form) => ({ ...form, bundleLabel }))}
+                placeholder="Hal. 8 for PHP 150"
+                value={productForm.bundleLabel}
+              />
+              <View style={styles.formActions}>
+                <View style={styles.primaryAction}>
+                  <GabiPrimaryButton
+                    disabled={saving || !canEditProducts}
+                    icon="save-outline"
+                    label={saving ? "Sine-save..." : productForm.id ? "I-save ang paninda" : "Idagdag ang paninda"}
+                    loading={saving}
+                    onPress={saveProduct}
+                  />
+                </View>
+                {productForm.id ? <GabiSoftButton disabled={saving} icon="close" label="Cancel" onPress={closeProductForm} /> : null}
+              </View>
+            </GabiCard>
+          ) : null}
+        </>
       )}
 
-      <View style={styles.linkGrid}>
-        <View style={styles.linkCell}>
-          <SecondaryButton href="/owner/grocery" label="Grocery Stock" />
-        </View>
-        <View style={styles.linkCell}>
-          <SecondaryButton href="/owner/recipes" label="Recipes" />
-        </View>
-        <View style={styles.linkCell}>
-          <SecondaryButton href="/owner/production" label="Niluto" />
-        </View>
-        <View style={styles.linkCell}>
-          <SecondaryButton href="/owner/transfers" label="Transfers" />
-        </View>
-      </View>
-
-      <View style={[styles.section, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Product List</Text>
-          {products.length > 0 ? (
-            <SmallButton
-              disabled={saving || !canEditProducts}
-              label="Add Product"
-              onPress={() => {
-                setProductForm(emptyProductForm);
-                setShowProductForm(true);
-              }}
-            />
-          ) : null}
-        </View>
-        {products.length > 0 ? (
-          <>
-            <TextInput
-              onChangeText={setProductSearch}
-              placeholder="Search product or category"
-              placeholderTextColor={palette.mutedText}
-              style={[styles.searchInput, { backgroundColor: palette.background, borderColor: palette.border, color: palette.text }]}
-              value={productSearch}
-            />
-            <View style={styles.stockFilters}>
-              {(["all", "low", "out"] as const).map((option) => (
-                <Pressable
-                  key={option}
-                  onPress={() => setStockFilter(option)}
-                  style={[
-                    styles.stockFilter,
-                    {
-                      backgroundColor: stockFilter === option ? palette.primary : palette.background,
-                      borderColor: stockFilter === option ? palette.primary : palette.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.stockFilterText, { color: stockFilter === option ? palette.kioskHeaderText : palette.text }]}>
-                    {option === "all" ? "All" : option === "low" ? "Low stock" : "Out of stock"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
-        ) : null}
-        {status && status.products.length === 0 ? (
-          <Text style={[styles.empty, { color: palette.mutedText }]}>Add your first paninda</Text>
-        ) : null}
-
-        {status && products.length > 0 && visibleProducts.length === 0 ? (
-          <EmptyState description="Try another search or stock filter." title="No matching products" />
-        ) : null}
-
-        {visibleProducts.map((product) => {
-          const lowStock = product.stockQty <= product.lowStockThreshold;
-          return (
-            <View key={product.id} style={[styles.productRow, { backgroundColor: palette.background }]}>
-              <View style={styles.productHeader}>
-                <View style={styles.productText}>
-                  <Text style={[styles.productName, { color: palette.text }]}>{product.name}</Text>
-                  <Text style={[styles.body, { color: palette.mutedText }]}>
-                    Stock: {product.stockQty} {product.unitType} · Price: {formatPeso(product.price)}
-                  </Text>
-                </View>
-                <View style={styles.productHeaderRight}>
-                  <Pressable disabled={saving} hitSlop={8} onPress={() => editProduct(product)}>
-                    <Text style={[styles.editLink, { color: palette.primary, opacity: saving ? 0.5 : 1 }]}>Edit</Text>
-                  </Pressable>
-                  <Pill label={product.stockQty <= 0 ? "Out" : lowStock ? "Low stock" : "Good"} tone={product.stockQty <= 0 ? "danger" : lowStock ? "warning" : "success"} />
-                </View>
-              </View>
-              <View style={styles.productMetaGrid}>
-                <Text style={[styles.productMeta, { color: palette.mutedText }]}>Cost {formatPeso(product.cost)}</Text>
-                <Text style={[styles.productMeta, { color: palette.mutedText }]}>Reorder {product.lowStockThreshold}</Text>
-                <Text style={[styles.productMeta, { color: palette.mutedText }]}>{product.category}</Text>
-              </View>
-              {product.bundleLabel ? <Text style={[styles.body, { color: palette.mutedText }]}>Bundle: {product.bundleLabel}</Text> : null}
-            </View>
-          );
-        })}
-      </View>
-
-      {products.length > 0 ? (
-        <View style={[styles.section, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionHeaderText}>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Niluto ngayon</Text>
-              <Text style={[styles.sectionHint, { color: palette.mutedText }]}>Idagdag sa stock ang bagong luto</Text>
-            </View>
-            <Pill label="Stock in" tone="success" />
-          </View>
-
-          <View style={styles.stockField}>
-            <Text style={[styles.fieldLabel, { color: palette.text }]}>Anong paninda?</Text>
-            <ProductChips
-              disabled={cookSaving}
-              onSelect={(productId) => setCookForm((form) => ({ ...form, productId }))}
-              products={products}
-              selectedId={cookForm.productId}
-            />
-          </View>
-
-          <View style={styles.twoColumn}>
-            <FormField
-              editable={!cookSaving}
-              keyboardType="decimal-pad"
-              label="Ilang piraso?"
-              onChangeText={(quantity) => setCookForm((form) => ({ ...form, quantity }))}
-              placeholder="0"
-              value={cookForm.quantity}
-            />
-            <FormField
-              editable={!cookSaving}
-              label="Note (optional)"
-              onChangeText={(note) => setCookForm((form) => ({ ...form, note }))}
-              placeholder="Example: umagang luto"
-              value={cookForm.note}
-            />
-          </View>
-
-          {cookMessage ? (
-            <Text style={[styles.body, { color: cookIsError ? palette.danger : palette.text }]}>{cookMessage}</Text>
-          ) : null}
-
-          <ActionButton disabled={cookSaving} label={cookSaving ? "Saving..." : "I-save ang niluto"} onPress={saveCookedBatch} />
-
-          <Pressable hitSlop={6} onPress={() => router.push("/owner/production")} style={styles.recipeLink}>
-            <Text style={[styles.recipeLinkText, { color: palette.primary }]}>May recipe? Buksan ang Niluto para automatic ang sangkap →</Text>
-          </Pressable>
-        </View>
+      {actionProduct ? (
+        <ProductActionSheet
+          onClose={() => setOpenProductActionsId(null)}
+          onCook={() => openManualCook(actionProduct)}
+          onEdit={() => editProduct(actionProduct)}
+          onSpoilage={() => openSpoilage(actionProduct)}
+          onTransfer={() => {
+            setOpenProductActionsId(null);
+            router.push("/owner/transfers");
+          }}
+          product={actionProduct}
+        />
       ) : null}
 
-      {products.length > 0 ? (
-        <View style={[styles.section, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionHeaderText}>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Nasayang</Text>
-              <Text style={[styles.sectionHint, { color: palette.mutedText }]}>Bawasan ang stock kapag may nasira</Text>
-            </View>
-            <Pill label="Stock out" tone="danger" />
-          </View>
-
-          <View style={styles.stockField}>
-            <Text style={[styles.fieldLabel, { color: palette.text }]}>Anong paninda?</Text>
-            <ProductChips
-              disabled={spoilageSaving}
-              onSelect={(productId) => setSpoilageForm((form) => ({ ...form, productId }))}
-              products={products}
-              selectedId={spoilageForm.productId}
-            />
-          </View>
-
-          <View style={styles.twoColumn}>
-            <FormField
-              editable={!spoilageSaving}
-              keyboardType="decimal-pad"
-              label="Ilang piraso?"
-              onChangeText={(quantity) => setSpoilageForm((form) => ({ ...form, quantity }))}
-              placeholder="0"
-              value={spoilageForm.quantity}
-            />
-            <FormField
-              editable={!spoilageSaving}
-              label="Reason (optional)"
-              onChangeText={(reason) => setSpoilageForm((form) => ({ ...form, reason }))}
-              placeholder="Example: nabasag, na-expire"
-              value={spoilageForm.reason}
-            />
-          </View>
-
-          {spoilageMessage ? (
-            <Text style={[styles.body, { color: spoilageIsError ? palette.danger : palette.text }]}>{spoilageMessage}</Text>
-          ) : null}
-
-          <ActionButton disabled={spoilageSaving} label={spoilageSaving ? "Saving..." : "I-save ang nasayang"} onPress={saveSpoilage} />
-        </View>
-      ) : null}
-
-      {productFormVisible ? (
-        <View style={[styles.section, styles.formSection, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: palette.text }]}>{productForm.id ? "Edit Product" : "Add Product"}</Text>
-            {products.length > 0 ? (
-              <SmallButton
-                disabled={saving}
-                label="Close"
-                onPress={() => {
-                  setProductForm(emptyProductForm);
-                  setShowProductForm(false);
-                }}
-              />
-            ) : null}
-          </View>
-          {!status?.activeBusiness ? (
-            <Text style={[styles.empty, { color: palette.mutedText }]}>Create a business profile before adding products.</Text>
-          ) : null}
-
-          <FormField
-            editable={canEditProducts}
-            label="Product name"
-            onChangeText={(name) => setProductForm((form) => ({ ...form, name }))}
-            placeholder="Example: Bottled water"
-            value={productForm.name}
-          />
-          <FormField
-            editable={canEditProducts}
-            label="Category/type"
-            onChangeText={(category) => setProductForm((form) => ({ ...form, category }))}
-            placeholder="Drinks, meals, snacks"
-            value={productForm.category}
-          />
-          <OptionGroup
-            disabled={!canEditProducts}
-            label="Product kind"
-            onSelect={(productType) => setProductForm((form) => ({ ...form, productType }))}
-            options={productTypes}
-            selected={productForm.productType}
-          />
-          <OptionGroup
-            disabled={!canEditProducts}
-            label="Unit"
-            onSelect={(unitType) => setProductForm((form) => ({ ...form, unitType }))}
-            options={unitTypes}
-            selected={productForm.unitType}
-          />
-
-          <View style={styles.twoColumn}>
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Stock qty"
-              onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))}
-              placeholder="0"
-              value={productForm.stockQty}
-            />
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Low-stock threshold"
-              onChangeText={(lowStockThreshold) => setProductForm((form) => ({ ...form, lowStockThreshold }))}
-              placeholder="0"
-              value={productForm.lowStockThreshold}
-            />
-          </View>
-
-          <View style={styles.twoColumn}>
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Selling price"
-              onChangeText={(price) => setProductForm((form) => ({ ...form, price }))}
-              placeholder="0"
-              value={productForm.price}
-            />
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Unit cost"
-              onChangeText={(cost) => setProductForm((form) => ({ ...form, cost }))}
-              placeholder="0"
-              value={productForm.cost}
-            />
-          </View>
-
-          <View style={styles.twoColumn}>
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Bundle quantity"
-              onChangeText={(bundleQuantity) => setProductForm((form) => ({ ...form, bundleQuantity }))}
-              placeholder="Optional"
-              value={productForm.bundleQuantity}
-            />
-            <FormField
-              editable={canEditProducts}
-              keyboardType="decimal-pad"
-              label="Bundle price"
-              onChangeText={(bundlePrice) => setProductForm((form) => ({ ...form, bundlePrice }))}
-              placeholder="Optional"
-              value={productForm.bundlePrice}
-            />
-          </View>
-          <FormField
-            editable={canEditProducts}
-            label="Bundle label"
-            onChangeText={(bundleLabel) => setProductForm((form) => ({ ...form, bundleLabel }))}
-            placeholder="Example: 3 for PHP 100"
-            value={productForm.bundleLabel}
-          />
-
-          <View style={styles.inlineActions}>
-            <ActionButton disabled={saving || !canEditProducts} label={productForm.id ? "Save Product" : "Add Product"} onPress={saveProduct} />
-            {productForm.id ? (
-              <SmallButton
-                disabled={saving}
-                label="Cancel edit"
-                onPress={() => {
-                  setProductForm(emptyProductForm);
-                  setShowProductForm(false);
-                }}
-              />
-            ) : null}
-          </View>
-        </View>
-      ) : null}
+      {!messageIsError && message ? <GabiSnackbar message={message} onDismiss={() => setMessage(null)} /> : null}
     </ScreenScroll>
   );
 }
@@ -716,31 +730,7 @@ type FormFieldProps = {
 };
 
 function FormField({ label, value, onChangeText, placeholder, keyboardType = "default", editable = true }: FormFieldProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
-  return (
-    <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: palette.text }]}>{label}</Text>
-      <TextInput
-        editable={editable}
-        keyboardType={keyboardType}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={palette.mutedText}
-        style={[
-          styles.input,
-          {
-            backgroundColor: editable ? palette.background : palette.surface,
-            borderColor: palette.border,
-            color: palette.text,
-            opacity: editable ? 1 : 0.65,
-          },
-        ]}
-        value={value}
-      />
-    </View>
-  );
+  return <GabiField disabled={!editable} keyboardType={keyboardType} label={label} onChangeText={onChangeText} placeholder={placeholder} value={value} />;
 }
 
 type ProductChipsProps = {
@@ -751,8 +741,7 @@ type ProductChipsProps = {
 };
 
 function ProductChips({ products, selectedId, onSelect, disabled = false }: ProductChipsProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
 
   return (
     <ScrollView
@@ -771,13 +760,14 @@ function ProductChips({ products, selectedId, onSelect, disabled = false }: Prod
             style={[
               styles.productChip,
               {
-                backgroundColor: selected ? palette.primary : palette.background,
-                borderColor: selected ? palette.primary : palette.border,
-                opacity: disabled ? 0.6 : 1,
+                backgroundColor: disabled ? extended.disabledBg : selected ? palette.kioskHeader : palette.surface,
+                borderColor: disabled ? extended.disabledBg : selected ? palette.kioskHeader : palette.border,
               },
             ]}
           >
-            <Text style={[styles.productChipText, { color: selected ? palette.kioskHeaderText : palette.text }]}>{product.name}</Text>
+            <GabiText style={{ color: disabled ? extended.disabledText : selected ? palette.kioskHeaderText : palette.text }} variant="buttonSm">
+              {product.name}
+            </GabiText>
           </Pressable>
         );
       })}
@@ -794,12 +784,11 @@ type OptionGroupProps<T extends string> = {
 };
 
 function OptionGroup<T extends string>({ label, options, selected, onSelect, disabled = false }: OptionGroupProps<T>) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
 
   return (
     <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: palette.text }]}>{label}</Text>
+      <GabiText variant="buttonSm">{label}</GabiText>
       <View style={styles.optionWrap}>
         {options.map((option) => {
           const selectedOption = option === selected;
@@ -811,13 +800,14 @@ function OptionGroup<T extends string>({ label, options, selected, onSelect, dis
               style={[
                 styles.option,
                 {
-                  backgroundColor: selectedOption ? palette.primary : palette.background,
-                  borderColor: selectedOption ? palette.primary : palette.border,
-                  opacity: disabled ? 0.6 : 1,
+                  backgroundColor: disabled ? extended.disabledBg : selectedOption ? palette.kioskHeader : palette.surface,
+                  borderColor: disabled ? extended.disabledBg : selectedOption ? palette.kioskHeader : palette.border,
                 },
               ]}
             >
-              <Text style={[styles.optionText, { color: selectedOption ? palette.kioskHeaderText : palette.text }]}>{option}</Text>
+              <GabiText style={{ color: disabled ? extended.disabledText : selectedOption ? palette.kioskHeaderText : palette.text }} variant="caption">
+                {option}
+              </GabiText>
             </Pressable>
           );
         })}
@@ -826,133 +816,331 @@ function OptionGroup<T extends string>({ label, options, selected, onSelect, dis
   );
 }
 
-type ButtonProps = {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-};
+type IconName = ComponentProps<typeof Ionicons>["name"];
+type MetricTone = "primary" | "success" | "warning";
 
-function ActionButton({ label, onPress, disabled = false }: ButtonProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+function SummaryMetric({ icon, label, value, tone = "primary" }: { icon: IconName; label: string; value: string; tone?: MetricTone }) {
+  const { palette } = useGabiTheme();
+  const backgroundColor = tone === "success" ? palette.softSuccess : tone === "warning" ? palette.softWarning : palette.softPrimary;
+  const foreground = tone === "success" ? palette.success : tone === "warning" ? palette.warning : palette.primary;
 
   return (
+    <View style={styles.summaryMetric}>
+      <View style={[styles.summaryIcon, { backgroundColor }]}>
+        <Ionicons color={foreground} name={icon} size={19} />
+      </View>
+      <GabiText numberOfLines={1} tone="muted" variant="caption">{label}</GabiText>
+      <GabiText adjustsFontSizeToFit minimumFontScale={0.72} money={value.startsWith("₱")} numberOfLines={1} variant="metricValue">
+        {value}
+      </GabiText>
+    </View>
+  );
+}
+
+function FlowLink({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+  const { palette } = useGabiTheme();
+  return (
     <Pressable
-      disabled={disabled}
+      accessibilityLabel={label}
+      accessibilityRole="button"
       onPress={onPress}
-      style={[styles.actionButton, { backgroundColor: palette.primary, opacity: disabled ? 0.6 : 1 }]}
+      style={({ pressed }) => [
+        styles.flowLink,
+        { backgroundColor: pressed ? palette.softPrimary : palette.surface, borderColor: palette.border },
+      ]}
     >
-      <Text style={[styles.actionButtonText, { color: palette.kioskHeaderText }]}>{label}</Text>
+      <View style={[styles.flowIcon, { backgroundColor: palette.softPrimary }]}>
+        <Ionicons color={palette.primary} name={icon} size={19} />
+      </View>
+      <GabiText numberOfLines={2} variant="buttonSm">{label}</GabiText>
+      <Ionicons color={palette.mutedText} name="chevron-forward" size={16} />
     </Pressable>
   );
 }
 
-function SmallButton({ label, onPress, disabled = false }: ButtonProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function FilterChip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  const { palette } = useGabiTheme();
   return (
     <Pressable
-      disabled={disabled}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
       onPress={onPress}
-      style={[styles.smallButton, { borderColor: palette.border, opacity: disabled ? 0.55 : 1 }]}
+      style={[
+        styles.filterChip,
+        {
+          backgroundColor: active ? palette.kioskHeader : palette.surface,
+          borderColor: active ? palette.kioskHeader : palette.border,
+        },
+      ]}
     >
-      <Text style={[styles.smallButtonText, { color: palette.primary }]}>{label}</Text>
+      <GabiText style={active ? { color: palette.kioskHeaderText } : undefined} variant="caption">{label}</GabiText>
+    </Pressable>
+  );
+}
+
+type InventoryProductRowProps = {
+  product: Product;
+  actionsOpen: boolean;
+  disabled: boolean;
+  onToggleActions: () => void;
+};
+
+function InventoryProductRow({
+  product,
+  actionsOpen,
+  disabled,
+  onToggleActions,
+}: InventoryProductRowProps) {
+  const { palette, extended } = useGabiTheme();
+  const outOfStock = product.stockQty <= 0;
+  const lowStock = !outOfStock && product.stockQty <= product.lowStockThreshold;
+  const stateTone = outOfStock ? "danger" : lowStock ? "warning" : "success";
+  const stateLabel = outOfStock ? "Ubos na" : lowStock ? `${product.stockQty} na lang` : "May stock";
+  const bundleLabel = hasBundlePricing(product)
+    ? bundleLabelFor(product.bundleQuantity, product.bundlePrice, product.bundleLabel)
+    : null;
+  const icon = product.productType === "cooked food"
+    ? "fast-food-outline"
+    : product.productType === "ingredient-based item"
+      ? "restaurant-outline"
+      : product.productType === "service/other"
+        ? "briefcase-outline"
+        : "cube-outline";
+
+  return (
+    <View style={[styles.productRow, { borderColor: palette.border }]}>
+      <View style={styles.productMain}>
+        <View style={[styles.productIcon, { backgroundColor: outOfStock ? palette.softDanger : lowStock ? palette.softWarning : palette.softPrimary }]}>
+          <Ionicons color={outOfStock ? palette.danger : lowStock ? palette.warning : palette.primary} name={icon} size={21} />
+        </View>
+        <View style={styles.productCopy}>
+          <GabiText adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} variant="cardTitle">{product.name}</GabiText>
+          <GabiText tone="muted" variant="caption">{product.category} · {product.productType}</GabiText>
+          <View style={styles.productChips}>
+            <GabiChip label={stateLabel} tone={stateTone} />
+            {bundleLabel ? <GabiChip icon="pricetag-outline" label={bundleLabel} tone="primary" /> : null}
+            {!product.active ? <GabiChip label="Naka-off" tone="neutral" /> : null}
+          </View>
+          <GabiText tone="muted" variant="caption">
+            Stock {product.stockQty} {product.unitType} · Paubos sa {product.lowStockThreshold}
+          </GabiText>
+        </View>
+        <View style={styles.productTrailing}>
+          <GabiText money tone="primary" variant="metricValue">{formatPeso(product.price)}</GabiText>
+          <GabiText tone="faint" variant="caption">Cost {formatPeso(product.cost)}</GabiText>
+          <Pressable
+            accessibilityLabel={`Mga action para sa ${product.name}`}
+            accessibilityRole="button"
+            disabled={disabled}
+            onPress={onToggleActions}
+            style={[
+              styles.moreButton,
+              { backgroundColor: disabled ? extended.disabledBg : palette.softPrimary },
+            ]}
+          >
+            <Ionicons color={disabled ? extended.disabledText : palette.primary} name={actionsOpen ? "close" : "ellipsis-horizontal"} size={19} />
+          </Pressable>
+        </View>
+      </View>
+
+    </View>
+  );
+}
+
+function ProductActionSheet({
+  product,
+  onClose,
+  onCook,
+  onSpoilage,
+  onTransfer,
+  onEdit,
+}: {
+  product: Product;
+  onClose: () => void;
+  onCook: () => void;
+  onSpoilage: () => void;
+  onTransfer: () => void;
+  onEdit: () => void;
+}) {
+  const { palette, extended } = useGabiTheme();
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible>
+      <View style={styles.modalRoot}>
+        <Pressable accessibilityLabel="Isara ang product actions" onPress={onClose} style={[styles.modalScrim, { backgroundColor: extended.scrim }]} />
+        <View style={[styles.actionSheet, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+          <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetTitle}>
+              <GabiText variant="h2">{product.name}</GabiText>
+              <GabiText tone="muted" variant="caption">{product.stockQty} {product.unitType} sa stock · {formatPeso(product.price)}</GabiText>
+            </View>
+            <GabiSoftButton compact icon="close" label="Isara" onPress={onClose} />
+          </View>
+          <View style={[styles.sheetActions, { backgroundColor: palette.softPrimary }]}>
+            <MenuAction icon="flame-outline" label="Dagdag luto (walang recipe)" onPress={onCook} />
+            <MenuAction danger icon="trash-outline" label="Nasayang" onPress={onSpoilage} />
+            <MenuAction icon="swap-horizontal-outline" label="Ilipat sa ibang stall" onPress={onTransfer} />
+            <MenuAction icon="create-outline" label="I-edit ang paninda" onPress={onEdit} />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function MenuAction({ icon, label, onPress, danger = false }: { icon: IconName; label: string; onPress: () => void; danger?: boolean }) {
+  const { palette } = useGabiTheme();
+  return (
+    <Pressable accessibilityLabel={label} accessibilityRole="button" onPress={onPress} style={styles.menuAction}>
+      <Ionicons color={danger ? palette.danger : palette.primary} name={icon} size={18} />
+      <GabiText style={danger ? { color: palette.danger } : undefined} variant="buttonSm">{label}</GabiText>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  summaryGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  linkGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  linkCell: {
-    flexBasis: "47%",
-    flexGrow: 1,
-  },
-  header: {
-    gap: spacing.xs,
-    paddingTop: spacing.sm,
-  },
-  eyebrow: {
-    ...typography.label,
-  },
-  title: {
-    ...typography.title,
-  },
-  body: {
-    ...typography.body,
-  },
-  message: {
-    ...typography.body,
-  },
-  searchInput: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  stockFilters: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  stockFilter: {
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    minHeight: 36,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  stockFilterText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  section: {
-    borderRadius: radius.lg,
-    gap: spacing.sm,
-    padding: spacing.md,
-    ...shadows.card,
-  },
-  formSection: {
-    opacity: 0.98,
-  },
-  sectionHeaderRow: {
+  networkRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
     justifyContent: "space-between",
   },
-  sectionTitle: {
-    ...typography.heading,
+  summaryGrid: {
+    flexDirection: "row",
+    gap: spacing.sm,
   },
-  sectionHeaderText: {
+  summaryMetric: {
     flex: 1,
-    gap: 2,
+    gap: 3,
+    minWidth: 0,
   },
-  sectionHint: {
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 16,
+  summaryIcon: {
+    alignItems: "center",
+    borderRadius: 11,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
-  stockField: {
+  flowGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  flowLink: {
+    alignItems: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    flexBasis: "47%",
+    flexGrow: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 60,
+    padding: spacing.sm,
+  },
+  flowIcon: {
+    alignItems: "center",
+    borderRadius: 11,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  filterRow: {
     gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+  },
+  productList: {
+    gap: 0,
+  },
+  productRow: {
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  productMain: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  productIcon: {
+    alignItems: "center",
+    borderRadius: 13,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  productCopy: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  productChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  productTrailing: {
+    alignItems: "flex-end",
+    gap: 4,
+    maxWidth: 108,
+  },
+  moreButton: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalScrim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  actionSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    gap: spacing.md,
+    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    borderRadius: 999,
+    height: 4,
+    width: 44,
+  },
+  sheetHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  sheetTitle: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  sheetActions: {
+    borderRadius: 16,
+    padding: spacing.xs,
+  },
+  menuAction: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
   },
   chipRow: {
     flexDirection: "row",
@@ -960,43 +1148,16 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   productChip: {
-    borderRadius: radius.pill,
+    borderRadius: 999,
     borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  productChipText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  recipeLink: {
-    paddingTop: spacing.xs,
-  },
-  recipeLinkText: {
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  empty: {
-    ...typography.body,
   },
   field: {
     flex: 1,
     gap: spacing.xs,
     minWidth: 132,
-  },
-  fieldLabel: {
-    ...typography.button,
-  },
-  input: {
-    borderRadius: 8,
-    borderWidth: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    minHeight: 42,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
   },
   optionWrap: {
     flexDirection: "row",
@@ -1004,96 +1165,25 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   option: {
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 40,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  optionText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
   },
   twoColumn: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
   },
-  inlineActions: {
+  formActions: {
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
   },
-  actionButton: {
-    alignItems: "center",
-    borderRadius: 8,
-    minHeight: 44,
-    minWidth: 160,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  actionButtonText: {
-    ...typography.button,
-  },
-  smallButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 38,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  smallButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  productRow: {
-    borderRadius: radius.md,
-    gap: spacing.xs,
-    padding: spacing.sm + 2,
-  },
-  productHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-  },
-  productHeaderRight: {
-    alignItems: "flex-end",
-    gap: spacing.xs,
-  },
-  editLink: {
-    fontSize: 14,
-    fontWeight: "800",
-    lineHeight: 18,
-  },
-  productText: {
+  primaryAction: {
     flex: 1,
-    gap: spacing.xs,
-  },
-  productName: {
-    ...typography.button,
-  },
-  productMetaGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  productMeta: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  badge: {
-    borderRadius: 8,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-    overflow: "hidden",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    minWidth: 210,
   },
 });

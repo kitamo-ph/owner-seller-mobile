@@ -1,18 +1,20 @@
-import { useFocusEffect } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import { NetworkStatusBadge } from "@/components/common/NetworkStatusBadge";
-import { AppTopBar, Card, EmptyState, formatPeso, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { GabiEmptyState, GabiNotice, GabiSkeleton, GabiSnackbar } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { listActiveOwnerAlerts } from "@/db/repositories";
 import { isLowStock } from "@/domain/inventory";
 import type { Product } from "@/domain/types";
 import { loadKioskContext, type KioskContext } from "@/services/kioskSales";
 import { notifyOwnerLowStock } from "@/services/stockOps";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, getUserSafeErrorMessage, logDevError } from "@/utils/errors";
 
 export default function KioskStockScreen() {
@@ -22,8 +24,7 @@ export default function KioskStockScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [messageIsError, setMessageIsError] = useState(false);
   const notifyLock = useRef(false);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const router = useRouter();
 
   const refresh = useCallback(async () => {
     const nextContext = await loadKioskContext();
@@ -84,38 +85,57 @@ export default function KioskStockScreen() {
   return (
     <ScreenScroll kioskNav>
       <AppTopBar
-        subtitle={context?.activeBusiness ? `${context.activeBusiness.businessName} · quick stock view` : "Quick stock view for the selling counter."}
-        title={context?.activeBranch?.branchName ?? "Stock check"}
+        eyebrow="KIOSK"
+        subtitle="Mabilis na stock check para sa confirmed stall"
+        title="Stock"
       />
 
       <NetworkStatusBadge pendingQueueCount={context?.pendingQueueCount ?? 0} compact />
 
-      {message ? <Text style={[styles.body, { color: messageIsError ? palette.danger : palette.success }]}>{message}</Text> : null}
+      {messageIsError && message ? <GabiNotice message={message} title="Hindi ma-update ang local alert" tone="danger" /> : null}
 
-      <Card>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Products</Text>
-        {context?.setupMessage && context.setupMessage !== "Add products in Owner Inventory first." ? (
-          <Text style={[styles.body, { color: palette.warning }]}>{context.setupMessage}</Text>
-        ) : null}
-        {context && context.products.length === 0 ? (
-          <>
-            <EmptyState description="Add your first paninda para makita dito ang stock." title="No products yet" />
-            <SecondaryButton href="/owner/inventory" label="Open Owner Inventory" />
-          </>
-        ) : null}
-
-        {context?.products.map((product) => (
-          <StockRow
-            cookedToOrder={Boolean(context.cookUponOrderRecipeByProductId[product.id])}
-            key={product.id}
-            notifying={notifyingProductId === product.id}
-            notifyDisabled={notifyingProductId !== null}
-            onNotify={() => notifyOwner(product)}
-            ownerNotified={alertedProductIds.has(product.id)}
-            product={product}
+      {!context ? (
+        <GabiCard>
+          <GabiText tone="muted" variant="caption">Binabasa ang local stock...</GabiText>
+          <GabiSkeleton height={74} />
+          <GabiSkeleton height={74} />
+        </GabiCard>
+      ) : (
+        <GabiCard>
+          <GabiSectionHeader
+            action={<GabiChip label={`${context.products.length} paninda`} tone="primary" />}
+            title={context.activeBranch?.branchName ?? "Stock ng stall"}
           />
-        ))}
-      </Card>
+          {context.setupMessage && context.setupMessage !== "Add products in Owner Inventory first." ? (
+            <GabiNotice message={context.setupMessage} tone="warning" />
+          ) : null}
+          {context.products.length === 0 ? (
+            <GabiEmptyState
+              actionLabel="Buksan ang Owner Inventory"
+              icon="cube-outline"
+              message="Magdagdag muna ng paninda sa Owner Mode para makita ang stall stock dito."
+              onAction={() => router.push("/owner/inventory")}
+              title="Wala pang paninda"
+            />
+          ) : (
+            <View style={styles.stockList}>
+              {context.products.map((product) => (
+                <StockRow
+                  cookedToOrder={Boolean(context.cookUponOrderRecipeByProductId[product.id])}
+                  key={product.id}
+                  notifying={notifyingProductId === product.id}
+                  notifyDisabled={notifyingProductId !== null}
+                  onNotify={() => notifyOwner(product)}
+                  ownerNotified={alertedProductIds.has(product.id)}
+                  product={product}
+                />
+              ))}
+            </View>
+          )}
+        </GabiCard>
+      )}
+
+      {!messageIsError && message ? <GabiSnackbar message={message} onDismiss={() => setMessage(null)} /> : null}
     </ScreenScroll>
   );
 }
@@ -130,100 +150,108 @@ type StockRowProps = {
 };
 
 function StockRow({ product, cookedToOrder, ownerNotified, notifying, notifyDisabled, onNotify }: StockRowProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
   const outOfStock = product.stockQty <= 0 && !cookedToOrder;
   const lowStock = !outOfStock && !cookedToOrder && isLowStock(product.stockQty, product.lowStockThreshold);
   const needsAttention = outOfStock || lowStock;
 
   return (
-    <View style={[styles.stockRow, { backgroundColor: palette.background, borderColor: palette.border }]}>
+    <View style={[styles.stockRow, { borderColor: palette.border }]}>
       <View style={styles.stockTopRow}>
-        <View style={styles.stockText}>
-          <Text style={[styles.itemTitle, { color: palette.text }]}>{product.name}</Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            {product.stockQty} {product.unitType} | Threshold {product.lowStockThreshold}
-          </Text>
+        <View style={[styles.stockIcon, { backgroundColor: outOfStock ? palette.softDanger : lowStock ? palette.softWarning : palette.softPrimary }]}>
+          <Ionicons color={outOfStock ? palette.danger : lowStock ? palette.warning : palette.primary} name="cube-outline" size={21} />
         </View>
-        <View style={styles.badges}>
-          {cookedToOrder ? (
-            <Pill label="Made to order" tone="accent" />
-          ) : (
-            <Pill label={outOfStock ? "Out of stock" : lowStock ? "Low stock" : "Good"} tone={outOfStock ? "danger" : lowStock ? "warning" : "success"} />
-          )}
-          <Text style={[styles.price, { color: palette.text }]}>{formatPeso(product.price)}</Text>
+        <View style={styles.stockText}>
+          <GabiText adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={2} variant="cardTitle">{product.name}</GabiText>
+          <GabiText tone="muted" variant="caption">
+            {product.stockQty} {product.unitType} · Paubos sa {product.lowStockThreshold}
+          </GabiText>
+          <View style={styles.stockChips}>
+            {cookedToOrder ? (
+              <GabiChip icon="flame-outline" label="Luto kapag may order" tone="accent" />
+            ) : (
+              <GabiChip
+                label={outOfStock ? "Ubos na" : lowStock ? `${product.stockQty} na lang` : "May stock"}
+                tone={outOfStock ? "danger" : lowStock ? "warning" : "success"}
+              />
+            )}
+            {ownerNotified ? <GabiChip icon="notifications-outline" label="Nasa Owner alerts" tone="primary" /> : null}
+          </View>
+        </View>
+        <View style={styles.stockPrice}>
+          <GabiText money tone="primary" variant="metricValue">{formatPeso(product.price)}</GabiText>
+          <GabiText tone="faint" variant="caption">presyo</GabiText>
         </View>
       </View>
 
-      {needsAttention ? (
-        <View style={styles.notifyRow}>
-          {ownerNotified ? (
-            <Pill label="Owner notified" tone="accent" />
-          ) : (
-            <Pressable
-              disabled={notifyDisabled}
-              onPress={onNotify}
-              style={[styles.notifyButton, { borderColor: palette.border, backgroundColor: palette.surface, opacity: notifyDisabled ? 0.55 : 1 }]}
-            >
-              <Text style={[styles.notifyButtonText, { color: palette.primary }]}>{notifying ? "Notifying..." : "Notify Owner"}</Text>
-            </Pressable>
-          )}
-        </View>
+      {needsAttention && !ownerNotified ? (
+        <Pressable
+          accessibilityLabel={`Gumawa ng local Owner alert para sa ${product.name}`}
+          accessibilityRole="button"
+          disabled={notifyDisabled}
+          onPress={onNotify}
+          style={[
+            styles.notifyButton,
+            {
+              backgroundColor: notifyDisabled ? extended.disabledBg : palette.softPrimary,
+              borderColor: notifyDisabled ? extended.disabledBg : palette.border,
+            },
+          ]}
+        >
+          <Ionicons color={notifyDisabled ? extended.disabledText : palette.primary} name="notifications-outline" size={18} />
+          <GabiText style={{ color: notifyDisabled ? extended.disabledText : palette.primary }} variant="buttonSm">
+            {notifying ? "Ginagawa ang local alert..." : "I-alert ang Owner sa phone na ito"}
+          </GabiText>
+        </Pressable>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: {
-    ...typography.body,
-  },
-  sectionTitle: {
-    ...typography.heading,
+  stockList: {
+    gap: 0,
   },
   stockRow: {
-    borderRadius: 8,
-    borderWidth: 1,
+    borderTopWidth: 1,
     gap: spacing.sm,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
   },
   stockTopRow: {
-    alignItems: "center",
+    alignItems: "flex-start",
     flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  stockIcon: {
+    alignItems: "center",
+    borderRadius: 13,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
   },
   stockText: {
     flex: 1,
-    gap: spacing.xs,
+    gap: 4,
+    minWidth: 0,
   },
-  itemTitle: {
-    ...typography.button,
-  },
-  badges: {
-    alignItems: "flex-end",
-    gap: spacing.xs,
-  },
-  price: {
-    ...typography.button,
-  },
-  notifyRow: {
-    alignItems: "center",
+  stockChips: {
     flexDirection: "row",
-    gap: spacing.sm,
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  stockPrice: {
+    alignItems: "flex-end",
+    maxWidth: 92,
   },
   notifyButton: {
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: 14,
     borderWidth: 1,
-    minHeight: 38,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  notifyButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
+    paddingVertical: spacing.sm,
   },
 });

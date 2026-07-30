@@ -9,6 +9,7 @@ import {
   listIngredientLotsForBusiness,
   listIngredientLotsForIngredient,
   listIngredientsForBusiness,
+  listRecipeLinesForBusiness,
   searchIngredientLots,
   setIngredientLotRemainingQuantity,
   updateIngredient,
@@ -51,6 +52,7 @@ export type GroceryPoolSnapshot = {
   recentLotCount: number;
   totalRemainingValue: number;
   lowStockIngredients: LowStockIngredientSummary[];
+  recipeUsageCountByLot: Record<string, number>;
   lots: IngredientLotWithName[];
 };
 
@@ -208,7 +210,10 @@ export async function addGroceryPurchase(
   };
 }
 
-export async function loadGroceryPoolSnapshot(db: RepositoryDatabase = openKitamoDatabase()): Promise<GroceryPoolSnapshot> {
+async function loadGroceryPoolSnapshotInternal(
+  db: RepositoryDatabase,
+  includeRecipeUsage: boolean,
+): Promise<GroceryPoolSnapshot> {
   await runMigrations(db);
   const status = await loadOwnerSetupStatus(db);
 
@@ -220,6 +225,7 @@ export async function loadGroceryPoolSnapshot(db: RepositoryDatabase = openKitam
       recentLotCount: 0,
       totalRemainingValue: 0,
       lowStockIngredients: [],
+      recipeUsageCountByLot: {},
       lots: [],
     };
   }
@@ -227,7 +233,22 @@ export async function loadGroceryPoolSnapshot(db: RepositoryDatabase = openKitam
   const businessId = status.activeBusiness.id;
   const ingredients = await listIngredientsForBusiness(businessId, db);
   const lots = await listIngredientLotsForBusiness(businessId, db);
+  const recipeLines = includeRecipeUsage ? await listRecipeLinesForBusiness(businessId, db) : [];
   const visibleLots = lots.filter((lot) => lot.status !== "archived");
+
+  const recipeIdsByLot = new Map<string, Set<string>>();
+  for (const line of recipeLines) {
+    if (!line.ingredientLotId) {
+      continue;
+    }
+
+    const recipeIds = recipeIdsByLot.get(line.ingredientLotId) ?? new Set<string>();
+    recipeIds.add(line.recipeId);
+    recipeIdsByLot.set(line.ingredientLotId, recipeIds);
+  }
+  const recipeUsageCountByLot = Object.fromEntries(
+    [...recipeIdsByLot.entries()].map(([lotId, recipeIds]) => [lotId, recipeIds.size]),
+  );
 
   const totalRemainingValue = visibleLots.reduce((total, lot) => total + lot.remainingQuantity * lot.costPerUnit, 0);
 
@@ -266,8 +287,17 @@ export async function loadGroceryPoolSnapshot(db: RepositoryDatabase = openKitam
     recentLotCount,
     totalRemainingValue,
     lowStockIngredients,
+    recipeUsageCountByLot,
     lots,
   };
+}
+
+export async function loadGroceryPoolSnapshot(db: RepositoryDatabase = openKitamoDatabase()): Promise<GroceryPoolSnapshot> {
+  return loadGroceryPoolSnapshotInternal(db, false);
+}
+
+export async function loadGroceryPoolScreenSnapshot(db: RepositoryDatabase = openKitamoDatabase()): Promise<GroceryPoolSnapshot> {
+  return loadGroceryPoolSnapshotInternal(db, true);
 }
 
 export async function searchGroceryLots(

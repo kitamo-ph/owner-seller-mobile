@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
 import { AppShell } from "@/components/common/AppShell";
+import { ProblemReportBreadcrumbTracker } from "@/components/common/ProblemReportBreadcrumbTracker";
 import { useThemeStore } from "@/state/themeStore";
 import { themePalettes } from "@/theme/colors";
 
@@ -11,13 +12,12 @@ export default function RootLayout() {
 
   return (
     <AppShell>
+      <ProblemReportBreadcrumbTracker />
       <StatusBar style={themeMode === "dark" ? "light" : "dark"} backgroundColor={palette.background} />
       <Stack
         screenOptions={{
-          contentStyle: { backgroundColor: palette.background },
-          headerStyle: { backgroundColor: palette.surface },
-          headerTintColor: palette.text,
-          headerTitleStyle: { fontWeight: "700" },
+          contentStyle: { backgroundColor: "transparent" },
+          headerShown: false,
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />

@@ -1,0 +1,491 @@
+{
+  "kind": "sqlite-migration-inventory",
+  "inspectionDate": "2026-07-25",
+  "repository": "kitamo-ph/owner-seller-mobile",
+  "branch": "codex/pre-internal-hardening",
+  "commit": "6ed9ace3a92f7435f84c2f75f0084a03070ae2e4",
+  "source": "Fresh replay of ordered migration up strings into an OS-temporary SQLite database.",
+  "recordCount": 10,
+  "records": [
+    {
+      "order": 1,
+      "id": "001_initial_schema",
+      "sourceFile": "src/db/migrations/001_initial_schema.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "businesses",
+          "statement": "CREATE TABLE IF NOT EXISTS businesses ( id TEXT PRIMARY KEY NOT NULL, business_name TEXT NOT NULL, business_type TEXT NOT NULL, owner_name TEXT NOT NULL, barangay TEXT NOT NULL, contact_number TEXT, preferred_language TEXT NOT NULL DEFAULT 'Taglish', currency TEXT NOT NULL DEFAULT 'PHP', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "branches",
+          "statement": "CREATE TABLE IF NOT EXISTS branches ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_name TEXT NOT NULL, location TEXT, branch_type TEXT NOT NULL DEFAULT 'stall', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "products",
+          "statement": "CREATE TABLE IF NOT EXISTS products ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'General', price REAL NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0, stock_qty REAL NOT NULL DEFAULT 0, unit_type TEXT NOT NULL DEFAULT 'piece', low_stock_threshold REAL NOT NULL DEFAULT 0, bundle_quantity REAL, bundle_price REAL, bundle_label TEXT, active INTEGER NOT NULL DEFAULT 1, product_type TEXT NOT NULL DEFAULT 'retail item', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "sales",
+          "statement": "CREATE TABLE IF NOT EXISTS sales ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, transaction_no TEXT NOT NULL, happened_at TEXT NOT NULL, amount REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, payment_method TEXT NOT NULL DEFAULT 'cash', payment_status TEXT NOT NULL DEFAULT 'paid', external_reference_number TEXT, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "sale_items",
+          "statement": "CREATE TABLE IF NOT EXISTS sale_items ( id TEXT PRIMARY KEY NOT NULL, sale_id TEXT NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, product_id TEXT, name TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, unit_price REAL NOT NULL DEFAULT 0, unit_cost REAL NOT NULL DEFAULT 0, line_total REAL NOT NULL DEFAULT 0, bundle_applied INTEGER NOT NULL DEFAULT 0, discount_amount REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "inventory_movements",
+          "statement": "CREATE TABLE IF NOT EXISTS inventory_movements ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, product_id TEXT, movement_type TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, reason TEXT NOT NULL, linked_sale_id TEXT, unit_cost REAL, total_cost REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL, FOREIGN KEY (linked_sale_id) REFERENCES sales(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "recipe_batches",
+          "statement": "CREATE TABLE IF NOT EXISTS recipe_batches ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, recipe_name TEXT NOT NULL, batches REAL NOT NULL DEFAULT 1, expected_servings REAL NOT NULL DEFAULT 0, actual_servings REAL NOT NULL DEFAULT 0, total_batch_cost REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "owner_alerts",
+          "statement": "CREATE TABLE IF NOT EXISTS owner_alerts ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, alert_type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', source TEXT NOT NULL DEFAULT 'local', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "receipt_records",
+          "statement": "CREATE TABLE IF NOT EXISTS receipt_records ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, sale_id TEXT, transaction_no TEXT NOT NULL, receipt_text TEXT NOT NULL, issued_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "offline_queue",
+          "statement": "CREATE TABLE IF NOT EXISTS offline_queue ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT, branch_id TEXT, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'pending' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "app_settings",
+          "statement": "CREATE TABLE IF NOT EXISTS app_settings ( id TEXT PRIMARY KEY NOT NULL, key TEXT NOT NULL UNIQUE, value TEXT NOT NULL, value_type TEXT NOT NULL DEFAULT 'string', created_at TEXT NOT NULL, updated_at TEXT NOT NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_branches_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_branches_business_id ON branches(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_products_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_products_business_id ON products(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_products_branch_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_products_branch_id ON products(branch_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_sales_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_sales_business_id ON sales(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_sales_branch_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_sales_branch_id ON sales(branch_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_sale_items_sale_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_inventory_movements_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_inventory_movements_business_id ON inventory_movements(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_inventory_movements_product_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_id ON inventory_movements(product_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_recipe_batches_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_recipe_batches_business_id ON recipe_batches(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_owner_alerts_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_owner_alerts_business_id ON owner_alerts(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_receipt_records_sale_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_receipt_records_sale_id ON receipt_records(sale_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_offline_queue_status",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_offline_queue_status ON offline_queue(status)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_app_settings_key",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_app_settings_key ON app_settings(key)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 2,
+      "id": "002_owner_setup_fields",
+      "sourceFile": "src/db/migrations/002_owner_setup_fields.ts",
+      "operations": [
+        {
+          "kind": "ALTER TABLE",
+          "object": "businesses",
+          "statement": "ALTER TABLE businesses ADD COLUMN notes TEXT"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "branches",
+          "statement": "ALTER TABLE branches ADD COLUMN notes TEXT"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 3,
+      "id": "003_owner_alert_fields",
+      "sourceFile": "src/db/migrations/003_owner_alert_fields.ts",
+      "operations": [
+        {
+          "kind": "ALTER TABLE",
+          "object": "owner_alerts",
+          "statement": "ALTER TABLE owner_alerts ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "owner_alerts",
+          "statement": "ALTER TABLE owner_alerts ADD COLUMN product_id TEXT"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_owner_alerts_status",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_owner_alerts_status ON owner_alerts(status)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_owner_alerts_product_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_owner_alerts_product_id ON owner_alerts(product_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 4,
+      "id": "004_grocery_pool",
+      "sourceFile": "src/db/migrations/004_grocery_pool.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "ingredients",
+          "statement": "CREATE TABLE IF NOT EXISTS ingredients ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, name TEXT NOT NULL, default_unit TEXT NOT NULL DEFAULT 'pcs', category TEXT NOT NULL DEFAULT 'General', low_stock_threshold REAL NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "ingredient_lots",
+          "statement": "CREATE TABLE IF NOT EXISTS ingredient_lots ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, ingredient_id TEXT NOT NULL, brand_name TEXT, source_name TEXT, purchase_date TEXT NOT NULL, purchased_quantity REAL NOT NULL DEFAULT 0, remaining_quantity REAL NOT NULL DEFAULT 0, unit TEXT NOT NULL DEFAULT 'pcs', total_cost REAL NOT NULL DEFAULT 0, cost_per_unit REAL NOT NULL DEFAULT 0, notes TEXT, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "ingredient_movements",
+          "statement": "CREATE TABLE IF NOT EXISTS ingredient_movements ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, ingredient_id TEXT NOT NULL, lot_id TEXT, movement_type TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, unit TEXT NOT NULL DEFAULT 'pcs', unit_cost REAL, total_cost REAL, reason TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE, FOREIGN KEY (lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredients_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredients_business_id ON ingredients(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredients_name",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredients_name ON ingredients(name)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredient_lots_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredient_lots_business_id ON ingredient_lots(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredient_lots_ingredient_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredient_lots_ingredient_id ON ingredient_lots(ingredient_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredient_lots_status",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredient_lots_status ON ingredient_lots(status)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredient_movements_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredient_movements_business_id ON ingredient_movements(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_ingredient_movements_ingredient_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_ingredient_movements_ingredient_id ON ingredient_movements(ingredient_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 5,
+      "id": "005_recipes",
+      "sourceFile": "src/db/migrations/005_recipes.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "recipes",
+          "statement": "CREATE TABLE IF NOT EXISTS recipes ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, output_product_id TEXT NOT NULL, name TEXT NOT NULL, output_quantity REAL NOT NULL DEFAULT 1, output_unit TEXT NOT NULL DEFAULT 'pcs', production_mode TEXT NOT NULL DEFAULT 'prepared_before_selling', suggested_selling_price REAL, notes TEXT, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (output_product_id) REFERENCES products(id) ON DELETE CASCADE )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "recipe_ingredient_lines",
+          "statement": "CREATE TABLE IF NOT EXISTS recipe_ingredient_lines ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, recipe_id TEXT NOT NULL, ingredient_id TEXT, ingredient_lot_id TEXT, custom_name TEXT, quantity REAL NOT NULL DEFAULT 0, unit TEXT NOT NULL DEFAULT 'pcs', cost_override REAL, cost_per_unit_snapshot REAL, line_cost_snapshot REAL NOT NULL DEFAULT 0, source_label_snapshot TEXT, is_custom INTEGER NOT NULL DEFAULT 0, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE, FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL, FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_recipes_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_recipes_business_id ON recipes(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_recipes_output_product_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_recipes_output_product_id ON recipes(output_product_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_recipe_ingredient_lines_recipe_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_recipe_ingredient_lines_recipe_id ON recipe_ingredient_lines(recipe_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_recipe_ingredient_lines_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_recipe_ingredient_lines_business_id ON recipe_ingredient_lines(business_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 6,
+      "id": "006_production",
+      "sourceFile": "src/db/migrations/006_production.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "production_batches",
+          "statement": "CREATE TABLE IF NOT EXISTS production_batches ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, recipe_id TEXT, output_product_id TEXT, recipe_name TEXT NOT NULL, output_quantity REAL NOT NULL DEFAULT 0, output_unit TEXT NOT NULL DEFAULT 'pcs', batch_multiplier REAL NOT NULL DEFAULT 1, total_batch_cost REAL NOT NULL DEFAULT 0, cost_per_output_unit REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL, FOREIGN KEY (output_product_id) REFERENCES products(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "production_ingredient_usages",
+          "statement": "CREATE TABLE IF NOT EXISTS production_ingredient_usages ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, production_batch_id TEXT NOT NULL, ingredient_id TEXT, ingredient_lot_id TEXT, quantity_used REAL NOT NULL DEFAULT 0, unit TEXT NOT NULL DEFAULT 'pcs', line_cost REAL NOT NULL DEFAULT 0, source_label_snapshot TEXT, is_custom INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (production_batch_id) REFERENCES production_batches(id) ON DELETE CASCADE, FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL, FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_production_batches_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_production_batches_business_id ON production_batches(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_production_batches_branch_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_production_batches_branch_id ON production_batches(branch_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_production_usages_batch_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_production_usages_batch_id ON production_ingredient_usages(production_batch_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_production_usages_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_production_usages_business_id ON production_ingredient_usages(business_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 7,
+      "id": "007_selling_cogs",
+      "sourceFile": "src/db/migrations/007_selling_cogs.ts",
+      "operations": [
+        {
+          "kind": "ALTER TABLE",
+          "object": "sale_items",
+          "statement": "ALTER TABLE sale_items ADD COLUMN cogs_total REAL"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "sale_items",
+          "statement": "ALTER TABLE sale_items ADD COLUMN cogs_per_unit REAL"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "sale_items",
+          "statement": "ALTER TABLE sale_items ADD COLUMN cogs_source TEXT"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "sale_items",
+          "statement": "ALTER TABLE sale_items ADD COLUMN cogs_is_estimated INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "kind": "ALTER TABLE",
+          "object": "sale_items",
+          "statement": "ALTER TABLE sale_items ADD COLUMN related_recipe_id TEXT"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "sale_ingredient_usages",
+          "statement": "CREATE TABLE IF NOT EXISTS sale_ingredient_usages ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, sale_id TEXT NOT NULL, sale_item_id TEXT NOT NULL, recipe_id TEXT, ingredient_id TEXT, ingredient_lot_id TEXT, quantity_used REAL NOT NULL DEFAULT 0, unit TEXT NOT NULL DEFAULT 'pcs', line_cost REAL NOT NULL DEFAULT 0, is_estimated INTEGER NOT NULL DEFAULT 0, shortfall_quantity REAL NOT NULL DEFAULT 0, source_label_snapshot TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE, FOREIGN KEY (sale_item_id) REFERENCES sale_items(id) ON DELETE CASCADE, FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL, FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL, FOREIGN KEY (ingredient_lot_id) REFERENCES ingredient_lots(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "product_transfers",
+          "statement": "CREATE TABLE IF NOT EXISTS product_transfers ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, from_branch_id TEXT, to_branch_id TEXT, from_product_id TEXT, to_product_id TEXT, product_name TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 0, unit_cost REAL NOT NULL DEFAULT 0, total_cost REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (from_branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (to_branch_id) REFERENCES branches(id) ON DELETE SET NULL, FOREIGN KEY (from_product_id) REFERENCES products(id) ON DELETE SET NULL, FOREIGN KEY (to_product_id) REFERENCES products(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_sale_ingredient_usages_sale_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_sale_ingredient_usages_sale_id ON sale_ingredient_usages(sale_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_sale_ingredient_usages_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_sale_ingredient_usages_business_id ON sale_ingredient_usages(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_product_transfers_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_product_transfers_business_id ON product_transfers(business_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 8,
+      "id": "008_fixed_costs",
+      "sourceFile": "src/db/migrations/008_fixed_costs.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "fixed_costs",
+          "statement": "CREATE TABLE IF NOT EXISTS fixed_costs ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, branch_id TEXT, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', amount REAL NOT NULL DEFAULT 0, frequency TEXT NOT NULL DEFAULT 'monthly', due_date TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT, status TEXT NOT NULL DEFAULT 'active', notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "fixed_cost_payments",
+          "statement": "CREATE TABLE IF NOT EXISTS fixed_cost_payments ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT NOT NULL, fixed_cost_id TEXT NOT NULL, branch_id TEXT, due_date TEXT NOT NULL, paid_date TEXT, amount REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'paid', notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE, FOREIGN KEY (fixed_cost_id) REFERENCES fixed_costs(id) ON DELETE CASCADE, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_fixed_costs_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_fixed_costs_business_id ON fixed_costs(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_fixed_cost_payments_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_fixed_cost_payments_business_id ON fixed_cost_payments(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_fixed_cost_payments_cost_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_fixed_cost_payments_cost_id ON fixed_cost_payments(fixed_cost_id)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 9,
+      "id": "009_checkout_idempotency",
+      "sourceFile": "src/db/migrations/009_checkout_idempotency.ts",
+      "operations": [
+        {
+          "kind": "ALTER TABLE",
+          "object": "sales",
+          "statement": "ALTER TABLE sales ADD COLUMN checkout_token TEXT"
+        },
+        {
+          "kind": "CREATE UNIQUE INDEX IF NOT EXISTS",
+          "object": "idx_sales_checkout_token",
+          "statement": "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_checkout_token ON sales(checkout_token) WHERE checkout_token IS NOT NULL AND deleted_at IS NULL"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    },
+    {
+      "order": 10,
+      "id": "010_problem_reports",
+      "sourceFile": "src/db/migrations/010_problem_reports.ts",
+      "operations": [
+        {
+          "kind": "CREATE TABLE IF NOT EXISTS",
+          "object": "problem_reports",
+          "statement": "CREATE TABLE IF NOT EXISTS problem_reports ( id TEXT PRIMARY KEY NOT NULL, business_id TEXT, branch_id TEXT, mode TEXT NOT NULL CHECK (mode IN ('owner', 'kiosk')), category TEXT NOT NULL CHECK (category IN ( 'app_crashed', 'app_slow', 'button_not_working', 'incorrect_information', 'confusing_screen', 'pin_problem', 'other' )), description TEXT NOT NULL, user_action TEXT NOT NULL, expected_result TEXT NOT NULL, actual_result TEXT NOT NULL, diagnostics_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local', 'pending', 'synced', 'failed')), deleted_at TEXT, FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE SET NULL, FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL )"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_problem_reports_business_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_problem_reports_business_id ON problem_reports(business_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_problem_reports_branch_id",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_problem_reports_branch_id ON problem_reports(branch_id)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_problem_reports_status",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_problem_reports_status ON problem_reports(status)"
+        },
+        {
+          "kind": "CREATE INDEX IF NOT EXISTS",
+          "object": "idx_problem_reports_created_at",
+          "statement": "CREATE INDEX IF NOT EXISTS idx_problem_reports_created_at ON problem_reports(created_at DESC)"
+        }
+      ],
+      "rollback": null,
+      "reversible": false,
+      "appliedByExclusiveTransaction": true,
+      "confidence": "Confirmed"
+    }
+  ]
+}

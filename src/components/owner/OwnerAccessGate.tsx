@@ -4,10 +4,12 @@ import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, Vi
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { IconBadge, KitaMoBrand, PrimaryButton, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { formatOwnerPinLockoutMessage, ownerPinLockoutRemainingMs } from "@/domain/ownerPinSecurity";
 import {
   authenticateOwnerWithBiometrics,
   getOwnerAccessStatus,
-  verifyOwnerPin,
+  getOwnerPinAttemptState,
+  verifyOwnerPinWithThrottle,
 } from "@/services/ownerAccess";
 import { useOwnerAccessStore } from "@/state/ownerAccessStore";
 import { useThemeStore } from "@/state/themeStore";
@@ -17,16 +19,13 @@ import { spacing } from "@/theme/spacing";
 import { typography } from "@/theme/typography";
 import { logDevError } from "@/utils/errors";
 
-const MAX_PIN_ATTEMPTS = 5;
-const COOLDOWN_MS = 30_000;
-
 export function OwnerAccessGate({ children }: PropsWithChildren) {
   const [pin, setPin] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const attemptLock = useRef(false);
   const hydrated = useOwnerAccessStore((state) => state.hydrated);
   const isProtectionEnabled = useOwnerAccessStore((state) => state.isProtectionEnabled);
@@ -40,10 +39,12 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let active = true;
-    getOwnerAccessStatus()
-      .then((status) => {
+    Promise.all([getOwnerAccessStatus(), getOwnerPinAttemptState()])
+      .then(([status, attemptState]) => {
         if (active) {
           setBiometricEnabled(status.biometricEnabled);
+          setLockoutUntil(attemptState.lockoutUntil);
+          setClockNow(Date.now());
           hydrate(status.hasPin);
         }
       })
@@ -58,6 +59,21 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
       active = false;
     };
   }, [hydrate]);
+
+  const lockoutRemainingMs = ownerPinLockoutRemainingMs({ failedAttempts: 0, lockoutUntil }, clockNow);
+
+  useEffect(() => {
+    if (lockoutRemainingMs <= 0) {
+      if (message?.startsWith("Too many attempts.")) {
+        setMessage(null);
+      }
+      return;
+    }
+
+    setMessage(formatOwnerPinLockoutMessage(lockoutRemainingMs));
+    const timer = setTimeout(() => setClockNow(Date.now()), Math.min(1000, lockoutRemainingMs));
+    return () => clearTimeout(timer);
+  }, [lockoutRemainingMs, message]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -83,11 +99,6 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
       return;
     }
 
-    if (Date.now() < cooldownUntil) {
-      setMessage("Too many attempts. Try again in 30 seconds.");
-      return;
-    }
-
     if (!/^\d{4,6}$/.test(pin)) {
       setMessage("Enter your 4 to 6 digit Owner PIN.");
       return;
@@ -97,22 +108,22 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
     setChecking(true);
     setMessage(null);
     try {
-      if (await verifyOwnerPin(pin)) {
+      const result = await verifyOwnerPinWithThrottle(pin);
+      if (result.status === "success") {
         setPin("");
-        setFailedAttempts(0);
+        setLockoutUntil(0);
         unlock();
         return;
       }
 
-      const nextAttempts = failedAttempts + 1;
-      setFailedAttempts(nextAttempts);
       setPin("");
-      if (nextAttempts >= MAX_PIN_ATTEMPTS) {
-        setCooldownUntil(Date.now() + COOLDOWN_MS);
-        setFailedAttempts(0);
-        setMessage("Too many attempts. Try again in 30 seconds.");
+      if (result.status === "locked") {
+        setLockoutUntil(result.state.lockoutUntil);
+        setClockNow(Date.now());
+        setMessage(formatOwnerPinLockoutMessage(result.remainingMs));
       } else {
-        setMessage(`Wrong PIN. ${MAX_PIN_ATTEMPTS - nextAttempts} attempt${MAX_PIN_ATTEMPTS - nextAttempts === 1 ? "" : "s"} left.`);
+        const attempts = result.attemptsBeforeLockout;
+        setMessage(`Wrong PIN. ${attempts} attempt${attempts === 1 ? "" : "s"} before a 30-second lock.`);
       }
     } catch (error) {
       logDevError("OwnerAccessGate.submitPin", error);
@@ -168,6 +179,7 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
           <Text style={[styles.helper, { color: palette.mutedText }]}>Enter the local PIN to view reports, costs, and business settings.</Text>
           <TextInput
             autoFocus
+            editable={lockoutRemainingMs <= 0 && !checking}
             keyboardType="number-pad"
             maxLength={6}
             onChangeText={(value) => setPin(value.replace(/\D/g, ""))}
@@ -179,7 +191,11 @@ export function OwnerAccessGate({ children }: PropsWithChildren) {
             value={pin}
           />
           {message ? <Text style={[styles.message, { color: palette.danger }]}>{message}</Text> : null}
-          <PrimaryButton disabled={checking} label={checking ? "Checking..." : "Unlock Owner Mode"} onPress={submitPin} />
+          <PrimaryButton
+            disabled={checking || lockoutRemainingMs > 0}
+            label={checking ? "Checking..." : lockoutRemainingMs > 0 ? "Temporarily locked" : "Unlock Owner Mode"}
+            onPress={submitPin}
+          />
           {biometricEnabled ? (
             <SecondaryButton disabled={checking} label="Use fingerprint or face unlock" onPress={useBiometrics} />
           ) : null}
@@ -229,7 +245,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     fontSize: 24,
     fontWeight: "800",
-    letterSpacing: 8,
+    letterSpacing: 0,
     minHeight: 54,
     paddingHorizontal: spacing.md,
     textAlign: "center",

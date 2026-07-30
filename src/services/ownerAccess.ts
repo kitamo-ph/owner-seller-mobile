@@ -2,13 +2,30 @@ import * as Crypto from "expo-crypto";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 
+import {
+  createOwnerPinAttemptManager,
+  type OwnerPinVerificationResult,
+} from "@/domain/ownerPinSecurity";
+
 const PIN_HASH_KEY = "kitamo.owner.pinHash.v1";
 const PIN_SALT_KEY = "kitamo.owner.pinSalt.v1";
 const BIOMETRIC_KEY = "kitamo.owner.biometric.v1";
+const PIN_FAILED_ATTEMPTS_KEY = "kitamo.owner.pinFailedAttempts.v1";
+const PIN_LOCKOUT_UNTIL_KEY = "kitamo.owner.pinLockoutUntil.v1";
 
 const secureStoreOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
+
+const ownerPinAttemptManager = createOwnerPinAttemptManager({
+  failedAttemptsKey: PIN_FAILED_ATTEMPTS_KEY,
+  lockoutUntilKey: PIN_LOCKOUT_UNTIL_KEY,
+  storage: {
+    getItem: (key) => SecureStore.getItemAsync(key),
+    setItem: (key, value) => SecureStore.setItemAsync(key, value, secureStoreOptions),
+    removeItem: (key) => SecureStore.deleteItemAsync(key),
+  },
+});
 
 export type OwnerAccessStatus = {
   hasPin: boolean;
@@ -55,6 +72,7 @@ export async function saveOwnerPin(pin: string) {
   const pinHash = await hashPin(pin, salt);
   await SecureStore.setItemAsync(PIN_SALT_KEY, salt, secureStoreOptions);
   await SecureStore.setItemAsync(PIN_HASH_KEY, pinHash, secureStoreOptions);
+  await ownerPinAttemptManager.clear();
 }
 
 export async function verifyOwnerPin(pin: string) {
@@ -70,6 +88,22 @@ export async function verifyOwnerPin(pin: string) {
   return (await hashPin(pin, salt)) === storedHash;
 }
 
+export function getOwnerPinAttemptState() {
+  return ownerPinAttemptManager.load();
+}
+
+export function clearOwnerPinAttemptState() {
+  return ownerPinAttemptManager.clear();
+}
+
+export function verifyOwnerPinWithThrottle(pin: string, now = Date.now()): Promise<OwnerPinVerificationResult> {
+  return ownerPinAttemptManager.verify({
+    now,
+    pin,
+    verifyPin: verifyOwnerPin,
+  });
+}
+
 export async function authenticateOwnerWithBiometrics() {
   const status = await getOwnerAccessStatus();
   if (!status.biometricEnabled) {
@@ -81,6 +115,9 @@ export async function authenticateOwnerWithBiometrics() {
     disableDeviceFallback: true,
     promptMessage: "Unlock KitaMo Owner Mode",
   });
+  if (result.success) {
+    await ownerPinAttemptManager.clear();
+  }
   return result.success;
 }
 
@@ -97,5 +134,6 @@ export async function clearOwnerAccess() {
     SecureStore.deleteItemAsync(PIN_HASH_KEY),
     SecureStore.deleteItemAsync(PIN_SALT_KEY),
     SecureStore.deleteItemAsync(BIOMETRIC_KEY),
+    ownerPinAttemptManager.clear(),
   ]);
 }

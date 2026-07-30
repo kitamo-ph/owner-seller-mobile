@@ -4,7 +4,8 @@ Exact manual steps to get the first internal build onto testers' phones. Every s
 
 ## Before you start
 
-- [ ] Decide the permanent package name (see `google-play-internal-testing-execution.md` → package-name decision). Change `app.json` first if needed.
+- [x] Verify the protected package name is `ph.kitamo.app`; do not change it
+  (see `google-play-internal-testing-execution.md`).
 - [ ] Real-phone QA pass complete (`docs/release/final-release-readiness.md` checklist).
 - [ ] All repo checks green (see the command list in the release-readiness doc).
 - [ ] Real app icon (512×512), feature graphic (1024×500), and 4+ phone screenshots ready.
@@ -17,9 +18,18 @@ Exact manual steps to get the first internal build onto testers' phones. Every s
 3. **Set app name** — matches the listing; max 30 chars.
 4. **App / Free** — confirm Free; you cannot switch a Free app to Paid later.
 5. **Support email** — Store settings → set the real support email.
-6. **Build the `.aab`** — `eas build -p android --profile production` (cloud build; download the `.aab` from the EAS dashboard). See the AAB section of the README / release-readiness doc.
-7. **Upload to Internal Testing** — Testing → Internal testing → Create new release → upload the `.aab`. Accept Play App Signing when prompted.
-8. **Add release notes** — paste from `docs/play-store/release-notes-internal.md`. Release name e.g. `1.0.0 (1) - pilot`.
+6. **Select and verify the existing `.aab`** — use only
+   `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`; recompute
+   SHA-256 and require
+   `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`.
+   Do not rebuild or replace it. See the
+   [verification record](versioncode-2-aab-verification.md).
+7. **Upload to Internal Testing** — Testing → Internal testing → Create new
+   release → upload that exact versionCode 2 AAB. Accept Play App Signing when
+   prompted.
+8. **Add release notes** — paste from
+   `docs/play-store/release-notes-internal.md`. Release name:
+   `1.0.0 (2) - pilot`.
 9. **Add tester emails** — Internal testing → Testers → create an email list → add testers' Gmail addresses (see `tester-plan.md`).
 10. **Copy the opt-in link** — Internal testing → Testers → copy the "Join on the web" URL.
 11. **Install on a phone** — open the opt-in link on a tester phone (signed into a listed Gmail), Become a tester → install from Play.
@@ -44,5 +54,8 @@ Fill from `docs/play-store/data-safety-draft.md` and `privacy-policy-draft.md`:
 
 - `eas.json` uses `appVersionSource: local`, so **versionCode comes from `app.json`** and `production.autoIncrement` is `false`.
 - **Every new upload needs a higher `versionCode`.** Play rejects a reused versionCode.
-- Before each new build: bump `android.versionCode` in `app.json` (1 → 2 → 3 …) and, for user-facing clarity, `version` (e.g. 1.0.0 → 1.0.1). Commit the change.
-- Alternative: set `production.autoIncrement: true` in `eas.json` to let EAS bump it — but then track the number EAS assigns.
+- The designated candidate already uses versionCode `2`.
+- Any later or replacement build must use versionCode `3` or higher. Make that
+  application/configuration change only in a separately approved build task.
+- Do not change `production.autoIncrement` or any Expo/EAS identity as part of
+  this upload-documentation workflow.

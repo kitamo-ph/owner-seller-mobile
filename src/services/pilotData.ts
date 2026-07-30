@@ -16,26 +16,6 @@ import type { Branch, Business, Product } from "@/domain/types";
 
 import { clearOwnerAccess } from "./ownerAccess";
 
-export async function initializeLocalDataFoundation(db: RepositoryDatabase = openKitamoDatabase()) {
-  const migrationResult = await runMigrations(db);
-  const counts = await getLocalDataCounts(db);
-
-  return {
-    ...migrationResult,
-    counts,
-  };
-}
-
-export async function getLocalDataSnapshot(db: RepositoryDatabase = openKitamoDatabase()) {
-  const migrationResult = await runMigrations(db);
-  const counts = await getLocalDataCounts(db);
-
-  return {
-    ...migrationResult,
-    counts,
-  };
-}
-
 export async function seedDemoData(db: RepositoryDatabase = openKitamoDatabase()) {
   await runMigrations(db);
 

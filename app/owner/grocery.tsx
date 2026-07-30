@@ -1,15 +1,20 @@
-import { useFocusEffect } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
-import { AppTopBar, Card, EmptyState, formatPeso, formatQuantity, InlineNotice, LoadingState, MetricCard, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
-import { ingredientUnits } from "@/db/repositories";
+import { GabiPrimaryButton, GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiField } from "@/components/gabi/GabiControls";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { TindahanTabs } from "@/components/owner/TindahanTabs";
+import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
+import { ingredientUnits, type IngredientLotWithName } from "@/db/repositories";
 import type { IngredientUnit } from "@/domain/types";
-import { addGroceryPurchase, loadGroceryPoolSnapshot, type GroceryPoolSnapshot } from "@/services/groceryPool";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
+import { addGroceryPurchase, loadGroceryPoolScreenSnapshot, type GroceryPoolSnapshot } from "@/services/groceryPool";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, getUserSafeErrorMessage, logDevError } from "@/utils/errors";
 import { numbersOnlyMessage, parseOptionalStrictNumber, parseRequiredNumber } from "@/utils/numberInput";
 
@@ -25,6 +30,12 @@ type GroceryForm = {
   notes: string;
 };
 
+type GroceryLotGroup = {
+  ingredientId: string;
+  ingredientName: string;
+  lots: IngredientLotWithName[];
+};
+
 const emptyGroceryForm: GroceryForm = {
   ingredientName: "",
   brandName: "",
@@ -38,6 +49,7 @@ const emptyGroceryForm: GroceryForm = {
 };
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const groceryGroupRenderBatch = 20;
 
 function isValidIsoDate(value: string) {
   if (!isoDatePattern.test(value)) {
@@ -55,7 +67,26 @@ function formatDate(value: string) {
     return value;
   }
 
-  return parsed.toLocaleDateString("en-PH", { dateStyle: "medium" });
+  return parsed.toLocaleDateString("fil-PH", { dateStyle: "medium" });
+}
+
+function groupLots(lots: IngredientLotWithName[]): GroceryLotGroup[] {
+  const groups = new Map<string, GroceryLotGroup>();
+
+  for (const lot of lots) {
+    const existing = groups.get(lot.ingredientId);
+    if (existing) {
+      existing.lots.push(lot);
+    } else {
+      groups.set(lot.ingredientId, {
+        ingredientId: lot.ingredientId,
+        ingredientName: lot.ingredientName,
+        lots: [lot],
+      });
+    }
+  }
+
+  return [...groups.values()];
 }
 
 export default function OwnerGroceryScreen() {
@@ -65,18 +96,16 @@ export default function OwnerGroceryScreen() {
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formIsError, setFormIsError] = useState(false);
   const [filter, setFilter] = useState("");
+  const [groupRenderLimit, setGroupRenderLimit] = useState(groceryGroupRenderBatch);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const router = useRouter();
 
   const refresh = useCallback(async () => {
-    const nextSnapshot = await loadGroceryPoolSnapshot();
+    const nextSnapshot = await loadGroceryPoolScreenSnapshot();
     setSnapshot(nextSnapshot);
-    if (nextSnapshot.lots.length === 0) {
-      setShowAddForm(true);
-    }
   }, []);
 
   useFocusEffect(
@@ -106,17 +135,19 @@ export default function OwnerGroceryScreen() {
     [snapshot?.lowStockIngredients],
   );
 
-  const filteredLots = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const lots = snapshot?.lots ?? [];
-    const query = filter.trim().toLowerCase();
+    const query = filter.trim().toLocaleLowerCase();
     if (!query) {
-      return lots;
+      return groupLots(lots);
     }
 
-    return lots.filter((lot) =>
-      [lot.ingredientName, lot.brandName ?? "", lot.sourceName ?? ""].some((value) => value.toLowerCase().includes(query)),
+    return groupLots(
+      lots.filter((lot) =>
+        [lot.ingredientName, lot.brandName ?? "", lot.sourceName ?? ""].some((value) => value.toLocaleLowerCase().includes(query)),
+      ),
     );
-  }, [snapshot?.lots, filter]);
+  }, [filter, snapshot?.lots]);
 
   const costPreview = useMemo(() => {
     const quantity = parseRequiredNumber(form.quantity, 0);
@@ -125,8 +156,26 @@ export default function OwnerGroceryScreen() {
       return null;
     }
 
-    return `${formatPeso(totalCost / quantity)} per ${form.unit}`;
-  }, [form.quantity, form.totalCost, form.unit]);
+    const costPerUnit = totalCost / quantity;
+    const previousLot = snapshot?.lots.find(
+      (lot) => lot.ingredientName.toLocaleLowerCase() === form.ingredientName.trim().toLocaleLowerCase() && lot.unit === form.unit,
+    );
+
+    let comparison = "Bagong presyo para sa lot na ito.";
+    if (previousLot) {
+      const difference = costPerUnit - previousLot.costPerUnit;
+      if (Math.abs(difference) < 0.005) {
+        comparison = `Kapareho ng huling bili noong ${formatDate(previousLot.purchaseDate)}.`;
+      } else {
+        comparison = `${formatPeso(Math.abs(difference))} ${difference > 0 ? "mas mahal" : "mas mura"} bawat ${form.unit} kaysa huling bili.`;
+      }
+    }
+
+    return `${formatPeso(costPerUnit)} bawat ${form.unit}. ${comparison}`;
+  }, [form.ingredientName, form.quantity, form.totalCost, form.unit, snapshot?.lots]);
+
+  const renderedGroups = filteredGroups.slice(0, groupRenderLimit);
+  const remainingGroupCount = Math.max(0, filteredGroups.length - renderedGroups.length);
 
   async function saveGroceryPurchase() {
     if (saveLock.current) {
@@ -198,8 +247,9 @@ export default function OwnerGroceryScreen() {
       });
 
       setForm((current) => ({ ...emptyGroceryForm, unit: current.unit }));
+      setShowOptionalFields(false);
       setFormMessage(
-        `Saved locally on this device. ${result.ingredient.name}: ${formatPeso(result.costPerUnit)} per ${result.lot.unit}.`,
+        `Naka-save sa phone na ito. ${result.ingredient.name}: ${formatPeso(result.costPerUnit)} bawat ${result.lot.unit}.`,
       );
       setFormIsError(false);
 
@@ -219,378 +269,651 @@ export default function OwnerGroceryScreen() {
     }
   }
 
+  function openPurchaseSheet() {
+    setFormMessage(null);
+    setFormIsError(false);
+    setShowAddForm(true);
+  }
+
+  function closePurchaseSheet() {
+    if (saving) {
+      return;
+    }
+    setShowAddForm(false);
+    setFormMessage(null);
+    setFormIsError(false);
+  }
+
   const hasLots = (snapshot?.lots.length ?? 0) > 0;
 
   return (
     <ScreenScroll bottomNav>
-      <AppTopBar subtitle="I-track ang grocery at sangkap bago ang recipe costing." title="Grocery Stock" />
-
-      {loadError ? <InlineNotice message={loadError} tone="danger" /> : null}
-
-      {!snapshot ? <LoadingState label="Loading grocery lots and remaining values..." /> : <View style={styles.metricGrid}>
-        <MetricCard detail="Remaining stock value" icon="₱" label="Grocery Value" tone="primary" value={formatPeso(snapshot?.totalRemainingValue ?? 0)} />
-        <MetricCard detail="Saved sa pool" icon="I" label="Ingredients" tone="success" value={String(snapshot?.ingredientCount ?? 0)} />
-        <MetricCard
-          detail="Need review"
-          icon="!"
-          label="Low stock"
-          tone={(snapshot?.lowStockIngredients.length ?? 0) > 0 ? "warning" : "success"}
-          value={String(snapshot?.lowStockIngredients.length ?? 0)}
-        />
-        <MetricCard detail="Last 7 days" icon="G" label="Purchases" tone="accent" value={String(snapshot?.recentLotCount ?? 0)} />
-      </View>}
-
-      <SecondaryButton href="/owner/recipes" label="Use ingredients in a recipe" />
-      <SecondaryButton
-        label={showAddForm ? "Hide Grocery Form" : "Add Grocery Purchase"}
-        onPress={() => setShowAddForm((visible) => !visible)}
+      <AppTopBar
+        eyebrow="Tindahan"
+        right={<GabiIconButton accessibilityLabel="Magdagdag ng grocery purchase" icon="add" onPress={openPurchaseSheet} />}
+        subtitle="Bawat bili ay hiwalay na lot at presyo"
+        title="Grocery"
       />
 
-      {showAddForm ? <Card>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Add grocery item</Text>
-        {!snapshot?.hasBusiness && snapshot ? (
-          <Text style={[styles.body, { color: palette.warning }]}>Create your business profile in Owner Settings first.</Text>
-        ) : null}
+      <TindahanTabs active="grocery" />
 
-        <FormField
-          editable={!saving}
-          label="Ingredient"
-          onChangeText={(ingredientName) => setForm((current) => ({ ...current, ingredientName }))}
-          placeholder="Example: Rice, Soy sauce, Cucumber"
-          value={form.ingredientName}
-        />
+      {loadError ? <GabiNotice message={loadError} title="Hindi ma-load" tone="danger" /> : null}
 
-        <View style={styles.twoColumn}>
-          <FormField
-            editable={!saving}
-            label="Brand (optional)"
-            onChangeText={(brandName) => setForm((current) => ({ ...current, brandName }))}
-            placeholder="Example: Kikkoman"
-            value={form.brandName}
+      {!snapshot ? (
+        <GroceryLoadingState />
+      ) : !snapshot.hasBusiness ? (
+        <GabiCard>
+          <GabiEmptyState
+            actionLabel="Buksan ang Settings"
+            icon="business-outline"
+            message="Pumili o gumawa muna ng negosyo bago magtala ng grocery lots."
+            onAction={() => router.push("/owner/settings")}
+            title="Walang napiling negosyo"
           />
-          <FormField
-            editable={!saving}
-            label="Source (optional)"
-            onChangeText={(sourceName) => setForm((current) => ({ ...current, sourceName }))}
-            placeholder="Grocery, palengke, supplier"
-            value={form.sourceName}
+        </GabiCard>
+      ) : (
+        <>
+          <GrocerySummary snapshot={snapshot} />
+
+          <GabiSectionHeader
+            action={<GabiPrimaryButton compact icon="add" label="Dagdag bili" onPress={openPurchaseSheet} />}
+            title="Mga grocery lot"
           />
-        </View>
 
-        <View style={styles.twoColumn}>
-          <FormField
-            editable={!saving}
-            keyboardType="decimal-pad"
-            label="Quantity"
-            onChangeText={(quantity) => setForm((current) => ({ ...current, quantity }))}
-            placeholder="Example: 10"
-            value={form.quantity}
-          />
-          <FormField
-            editable={!saving}
-            keyboardType="decimal-pad"
-            label="Total cost"
-            onChangeText={(totalCost) => setForm((current) => ({ ...current, totalCost }))}
-            placeholder="Example: 650"
-            value={form.totalCost}
-          />
-        </View>
+          {hasLots ? (
+            <GabiField
+              label="Hanapin"
+              onChangeText={(value) => {
+                setFilter(value);
+                setGroupRenderLimit(groceryGroupRenderBatch);
+              }}
+              placeholder="Sangkap, brand, o pinagbilhan"
+              value={filter}
+            />
+          ) : null}
 
-        <UnitPicker disabled={saving} onSelect={(unit) => setForm((current) => ({ ...current, unit }))} selected={form.unit} />
-
-        {costPreview ? (
-          <Text style={[styles.costPreview, { color: palette.primary }]}>Cost per unit: {costPreview}</Text>
-        ) : null}
-
-        <View style={styles.twoColumn}>
-          <FormField
-            editable={!saving}
-            label="Purchase date (optional)"
-            onChangeText={(purchaseDate) => setForm((current) => ({ ...current, purchaseDate }))}
-            placeholder="Blank = today"
-            value={form.purchaseDate}
-          />
-          <FormField
-            editable={!saving}
-            keyboardType="decimal-pad"
-            label="Low-stock alert (optional)"
-            onChangeText={(lowStockThreshold) => setForm((current) => ({ ...current, lowStockThreshold }))}
-            placeholder="Example: 2"
-            value={form.lowStockThreshold}
-          />
-        </View>
-
-        <FormField
-          editable={!saving}
-          label="Notes (optional)"
-          onChangeText={(notes) => setForm((current) => ({ ...current, notes }))}
-          placeholder="Example: pang-sushi na bigas"
-          value={form.notes}
-        />
-
-        {formMessage ? <InlineNotice message={formMessage} tone={formIsError ? "danger" : "success"} /> : null}
-
-        <Pressable
-          disabled={saving || !snapshot?.hasBusiness}
-          onPress={saveGroceryPurchase}
-          style={[styles.saveButton, { backgroundColor: palette.primary, opacity: saving || !snapshot?.hasBusiness ? 0.6 : 1 }]}
-        >
-          <Text style={[styles.saveButtonText, { color: palette.kioskHeaderText }]}>{saving ? "Saving..." : "Save Grocery Item"}</Text>
-        </Pressable>
-      </Card> : null}
-
-      <Card>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Grocery stock</Text>
-
-        {hasLots ? (
-          <TextInput
-            onChangeText={setFilter}
-            placeholder="Search ingredient, brand, o source"
-            placeholderTextColor={palette.mutedText}
-            style={[styles.filterInput, { backgroundColor: palette.background, borderColor: palette.border, color: palette.text }]}
-            value={filter}
-          />
-        ) : null}
-
-        {snapshot && !hasLots ? (
-          <EmptyState description="Example: Rice, 10kg, ₱650." title="Add your first grocery item." />
-        ) : null}
-
-        {hasLots && filteredLots.length === 0 ? (
-          <Text style={[styles.body, { color: palette.mutedText }]}>Walang tugma. Try another ingredient, brand, o source.</Text>
-        ) : null}
-
-        {filteredLots.map((lot) => {
-          const depleted = lot.remainingQuantity <= 0;
-          const lowStock = !depleted && lowStockIngredientIds.has(lot.ingredientId);
-          const remainingValue = lot.remainingQuantity * lot.costPerUnit;
-
-          return (
-            <View key={lot.id} style={[styles.lotRow, { backgroundColor: palette.background, borderColor: palette.border }]}>
-              <View style={styles.lotHeader}>
-                <View style={styles.lotText}>
-                  <Text style={[styles.itemTitle, { color: palette.text }]}>
-                    {lot.ingredientName}
-                    {lot.brandName ? ` · ${lot.brandName}` : ""}
-                  </Text>
-                  <Text style={[styles.helper, { color: palette.mutedText }]}>
-                    {lot.sourceName ? `${lot.sourceName} · ` : ""}
-                    {formatDate(lot.purchaseDate)}
-                  </Text>
+          {!hasLots ? (
+            <GabiCard>
+              <GabiEmptyState
+                actionLabel="Idagdag ang unang bili"
+                icon="basket-outline"
+                message="Halimbawa: Bigas, 10 kilo, ₱650. Ise-save ito bilang sariling lot."
+                onAction={openPurchaseSheet}
+                title="Wala pang grocery lot"
+              />
+            </GabiCard>
+          ) : filteredGroups.length === 0 ? (
+            <GabiCard>
+              <GabiEmptyState
+                actionLabel="I-clear ang search"
+                icon="search-outline"
+                message="Walang lot na tumutugma sa ingredient, brand, o source."
+                onAction={() => {
+                  setFilter("");
+                  setGroupRenderLimit(groceryGroupRenderBatch);
+                }}
+                title="Walang nahanap"
+              />
+            </GabiCard>
+          ) : (
+            <View style={styles.groupList}>
+              {renderedGroups.map((group) => (
+                <View key={group.ingredientId} style={styles.groupSection}>
+                  <View style={styles.groupHeader}>
+                    <View style={styles.groupTitle}>
+                      <GabiText variant="h2">{group.ingredientName}</GabiText>
+                      <GabiChip label={`${group.lots.length} ${group.lots.length === 1 ? "lot" : "lots"}`} tone="primary" />
+                    </View>
+                    <GabiText tone="muted" variant="caption">
+                      Hindi pinagsasama ang presyo
+                    </GabiText>
+                  </View>
+                  {group.lots.map((lot) => (
+                    <GroceryLotCard
+                      key={lot.id}
+                      lowStock={lowStockIngredientIds.has(lot.ingredientId)}
+                      lot={lot}
+                      recipeUsageCount={snapshot.recipeUsageCountByLot[lot.id] ?? 0}
+                    />
+                  ))}
                 </View>
-                {depleted ? (
-                  <Pill label="Ubos na" tone="neutral" />
-                ) : lowStock ? (
-                  <Pill label="Low stock" tone="warning" />
-                ) : (
-                  <Pill label="In stock" tone="success" />
-                )}
-              </View>
-
-              <View style={styles.lotMetaGrid}>
-                <Text style={[styles.lotMeta, { color: palette.text }]}>
-                  {formatQuantity(lot.remainingQuantity)} {lot.unit} left of {formatQuantity(lot.purchasedQuantity)} {lot.unit}
-                </Text>
-                <Text style={[styles.lotMeta, { color: palette.primary }]}>{formatPeso(remainingValue)} value</Text>
-                <Text style={[styles.lotMeta, { color: palette.mutedText }]}>
-                  {formatPeso(lot.costPerUnit)} per {lot.unit}
-                </Text>
-              </View>
-
-              {lot.notes ? <Text style={[styles.body, { color: palette.mutedText }]}>{lot.notes}</Text> : null}
+              ))}
+              {remainingGroupCount > 0 ? (
+                <GabiSoftButton
+                  icon="chevron-down"
+                  label={`Ipakita pa (${remainingGroupCount} sangkap)`}
+                  onPress={() => setGroupRenderLimit((current) => current + groceryGroupRenderBatch)}
+                />
+              ) : null}
             </View>
-          );
-        })}
-      </Card>
+          )}
+        </>
+      )}
+
+      <GroceryPurchaseSheet
+        costPreview={costPreview}
+        form={form}
+        formIsError={formIsError}
+        formMessage={formMessage}
+        onClose={closePurchaseSheet}
+        onFormChange={setForm}
+        onSave={saveGroceryPurchase}
+        onToggleOptional={() => setShowOptionalFields((visible) => !visible)}
+        saving={saving}
+        showOptionalFields={showOptionalFields}
+        visible={showAddForm}
+      />
     </ScreenScroll>
   );
 }
 
-type FormFieldProps = {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder?: string;
-  keyboardType?: "default" | "decimal-pad";
-  editable?: boolean;
-};
-
-function FormField({ label, value, onChangeText, placeholder, keyboardType = "default", editable = true }: FormFieldProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function GroceryLoadingState() {
   return (
-    <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: palette.text }]}>{label}</Text>
-      <TextInput
-        editable={editable}
-        keyboardType={keyboardType}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={palette.mutedText}
-        style={[
-          styles.input,
-          {
-            backgroundColor: editable ? palette.background : palette.surface,
-            borderColor: palette.border,
-            color: palette.text,
-            opacity: editable ? 1 : 0.65,
-          },
-        ]}
-        value={value}
-      />
-    </View>
+    <>
+      <GabiCard>
+        <GabiSkeleton height={26} width="48%" />
+        <GabiSkeleton height={54} />
+      </GabiCard>
+      <GabiSkeleton height={132} />
+      <GabiSkeleton height={132} />
+    </>
   );
 }
 
-type UnitPickerProps = {
-  selected: IngredientUnit;
-  onSelect: (unit: IngredientUnit) => void;
-  disabled?: boolean;
-};
+function GrocerySummary({ snapshot }: { snapshot: GroceryPoolSnapshot }) {
+  const { palette } = useGabiTheme();
+  return (
+    <GabiCard>
+      <View style={styles.summaryTop}>
+        <View style={[styles.summaryIcon, { backgroundColor: palette.softSuccess }]}>
+          <Ionicons color={palette.success} name="wallet-outline" size={22} />
+        </View>
+        <View style={styles.summaryCopy}>
+          <GabiText tone="muted" variant="eyebrow">Natitirang grocery value</GabiText>
+          <GabiText money variant="heroPeso">{formatPeso(snapshot.totalRemainingValue)}</GabiText>
+        </View>
+      </View>
+      <View style={styles.summaryChips}>
+        <GabiChip label={`${snapshot.lotCount} lots`} tone="primary" />
+        <GabiChip label={`${snapshot.ingredientCount} sangkap`} tone="success" />
+        <GabiChip
+          label={`${snapshot.lowStockIngredients.length} paubos`}
+          tone={snapshot.lowStockIngredients.length > 0 ? "warning" : "success"}
+        />
+        <GabiChip label={`${snapshot.recentLotCount} bili nitong 7 araw`} tone="accent" />
+      </View>
+    </GabiCard>
+  );
+}
 
-function UnitPicker({ selected, onSelect, disabled = false }: UnitPickerProps) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+function GroceryLotCard({ lot, lowStock, recipeUsageCount }: { lot: IngredientLotWithName; lowStock: boolean; recipeUsageCount: number }) {
+  const { palette, extended } = useGabiTheme();
+  const depleted = lot.remainingQuantity <= 0;
+  const remainingValue = lot.remainingQuantity * lot.costPerUnit;
+  const remainingRatio = lot.purchasedQuantity > 0 ? Math.max(0, Math.min(1, lot.remainingQuantity / lot.purchasedQuantity)) : 0;
+  const statusTone = depleted ? "danger" : lowStock ? "warning" : "success";
+  const statusLabel = depleted ? "Ubos na" : lowStock ? "Paubos" : "May stock";
+  const fillColor = depleted ? palette.danger : lowStock ? palette.warning : palette.success;
 
   return (
-    <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: palette.text }]}>Unit</Text>
-      <View style={styles.unitWrap}>
+    <GabiCard raised style={styles.lotCard}>
+      <View style={styles.lotHeader}>
+        <View style={[styles.lotIcon, { backgroundColor: depleted ? palette.softDanger : lowStock ? palette.softWarning : palette.softPrimary }]}>
+          <Ionicons color={depleted ? palette.danger : lowStock ? palette.warning : palette.primary} name="basket-outline" size={20} />
+        </View>
+        <View style={styles.lotTitle}>
+          <GabiText numberOfLines={2} variant="cardTitle">{lot.brandName ?? "Walang brand"}</GabiText>
+          <GabiText tone="muted" variant="caption">
+            {lot.sourceName ?? "Hindi nakalagay ang source"} · {formatDate(lot.purchaseDate)}
+          </GabiText>
+        </View>
+        <GabiChip label={statusLabel} tone={statusTone} />
+      </View>
+
+      <View style={styles.lotFacts}>
+        <View style={styles.lotFact}>
+          <GabiText tone="muted" variant="caption">Natitira</GabiText>
+          <GabiText variant="metricValue">{formatQuantity(lot.remainingQuantity)} {lot.unit}</GabiText>
+        </View>
+        <View style={styles.lotFact}>
+          <GabiText tone="muted" variant="caption">Halaga</GabiText>
+          <GabiText money tone="success" variant="metricValue">{formatPeso(remainingValue)}</GabiText>
+        </View>
+        <View style={styles.lotFact}>
+          <GabiText tone="muted" variant="caption">Eksaktong cost</GabiText>
+          <GabiText money tone="primary" variant="metricValue">{formatPeso(lot.costPerUnit)}/{lot.unit}</GabiText>
+        </View>
+      </View>
+
+      <View style={styles.lotProgressRow}>
+        <View style={[styles.lotProgressTrack, { backgroundColor: extended.neutralChipBg }]}>
+          <View style={[styles.lotProgressFill, { backgroundColor: fillColor, width: `${remainingRatio * 100}%` }]} />
+        </View>
+        <GabiText tone="muted" variant="caption">
+          {formatQuantity(lot.remainingQuantity)} sa {formatQuantity(lot.purchasedQuantity)} {lot.unit}
+        </GabiText>
+      </View>
+
+      <View style={styles.lotFooter}>
+        {recipeUsageCount > 0 ? (
+          <GabiChip
+            icon="restaurant-outline"
+            label={`Ginagamit sa ${recipeUsageCount} ${recipeUsageCount === 1 ? "recipe" : "recipes"}`}
+            tone="primary"
+          />
+        ) : (
+          <GabiText tone="faint" variant="caption">Hindi pa ginagamit sa recipe</GabiText>
+        )}
+        <GabiText tone="muted" variant="caption">Bili: {formatPeso(lot.totalCost)}</GabiText>
+      </View>
+
+      {lot.notes ? <GabiNotice message={lot.notes} title="Note sa lot" /> : null}
+    </GabiCard>
+  );
+}
+
+function GroceryPurchaseSheet({
+  visible,
+  form,
+  onFormChange,
+  showOptionalFields,
+  onToggleOptional,
+  costPreview,
+  formMessage,
+  formIsError,
+  saving,
+  onSave,
+  onClose,
+}: {
+  visible: boolean;
+  form: GroceryForm;
+  onFormChange: React.Dispatch<React.SetStateAction<GroceryForm>>;
+  showOptionalFields: boolean;
+  onToggleOptional: () => void;
+  costPreview: string | null;
+  formMessage: string | null;
+  formIsError: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const { palette, extended } = useGabiTheme();
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible={visible}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalRoot}>
+        <Pressable
+          accessibilityLabel="Isara ang dagdag bili"
+          disabled={saving}
+          onPress={onClose}
+          style={[styles.modalScrim, { backgroundColor: extended.scrim }]}
+        />
+        <View style={[styles.purchaseSheet, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+          <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetTitle}>
+              <GabiText variant="h2">Dagdag bili</GabiText>
+              <GabiText tone="muted" variant="caption">Isang bili, isang traceable na lot</GabiText>
+            </View>
+            <GabiSoftButton compact disabled={saving} icon="close" label="Isara" onPress={onClose} />
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.sheetContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <GabiNotice
+              message="Hindi pagsasamahin ang presyo nito sa lumang stock. Mananatili ang brand, source, petsa, at exact cost ng lot."
+              title="Lot-exact ang costing"
+            />
+
+            <GabiField
+              autoCapitalize="words"
+              disabled={saving}
+              label="Ano ang binili mo?"
+              onChangeText={(ingredientName) => onFormChange((current) => ({ ...current, ingredientName }))}
+              placeholder="Hal. Bigas, toyo, mantika"
+              value={form.ingredientName}
+            />
+
+            <View style={styles.twoColumn}>
+              <View style={styles.quantityField}>
+                <GabiField
+                  disabled={saving}
+                  keyboardType="decimal-pad"
+                  label="Gaano karami?"
+                  onChangeText={(quantity) => onFormChange((current) => ({ ...current, quantity }))}
+                  placeholder="10"
+                  value={form.quantity}
+                />
+              </View>
+              <View style={styles.unitField}>
+                <UnitPicker
+                  disabled={saving}
+                  onSelect={(unit) => onFormChange((current) => ({ ...current, unit }))}
+                  selected={form.unit}
+                />
+              </View>
+            </View>
+
+            <GabiField
+              disabled={saving}
+              keyboardType="decimal-pad"
+              label="Magkano lahat?"
+              onChangeText={(totalCost) => onFormChange((current) => ({ ...current, totalCost }))}
+              placeholder="650"
+              value={form.totalCost}
+            />
+
+            {costPreview ? <GabiNotice message={costPreview} title="Kuwentang cost" tone="success" /> : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showOptionalFields }}
+              onPress={onToggleOptional}
+              style={[styles.optionalToggle, { backgroundColor: palette.softPrimary }]}
+            >
+              <View style={styles.optionalCopy}>
+                <GabiText variant="buttonSm">Brand, source, petsa, alert, at notes</GabiText>
+                <GabiText tone="muted" variant="caption">Optional pero mahalaga sa traceability</GabiText>
+              </View>
+              <Ionicons color={palette.primary} name={showOptionalFields ? "chevron-up" : "chevron-down"} size={20} />
+            </Pressable>
+
+            {showOptionalFields ? (
+              <View style={styles.optionalFields}>
+                <View style={styles.twoColumn}>
+                  <View style={styles.fieldColumn}>
+                    <GabiField
+                      disabled={saving}
+                      label="Brand"
+                      onChangeText={(brandName) => onFormChange((current) => ({ ...current, brandName }))}
+                      placeholder="Hal. Sinandomeng"
+                      value={form.brandName}
+                    />
+                  </View>
+                  <View style={styles.fieldColumn}>
+                    <GabiField
+                      disabled={saving}
+                      label="Pinagbilhan"
+                      onChangeText={(sourceName) => onFormChange((current) => ({ ...current, sourceName }))}
+                      placeholder="Palengke o grocery"
+                      value={form.sourceName}
+                    />
+                  </View>
+                </View>
+                <View style={styles.twoColumn}>
+                  <View style={styles.fieldColumn}>
+                    <GabiField
+                      disabled={saving}
+                      helperText="Blank = ngayong araw"
+                      label="Petsa (YYYY-MM-DD)"
+                      onChangeText={(purchaseDate) => onFormChange((current) => ({ ...current, purchaseDate }))}
+                      placeholder="2026-07-13"
+                      value={form.purchaseDate}
+                    />
+                  </View>
+                  <View style={styles.fieldColumn}>
+                    <GabiField
+                      disabled={saving}
+                      keyboardType="decimal-pad"
+                      label="Paubos kapag"
+                      onChangeText={(lowStockThreshold) => onFormChange((current) => ({ ...current, lowStockThreshold }))}
+                      placeholder="Optional"
+                      value={form.lowStockThreshold}
+                    />
+                  </View>
+                </View>
+                <GabiField
+                  disabled={saving}
+                  label="Notes"
+                  onChangeText={(notes) => onFormChange((current) => ({ ...current, notes }))}
+                  placeholder="Hal. pang-sushi na bigas"
+                  value={form.notes}
+                />
+              </View>
+            ) : null}
+
+            {formMessage ? (
+              <GabiNotice
+                message={formMessage}
+                title={formIsError ? "Hindi ma-save" : "Naka-save"}
+                tone={formIsError ? "danger" : "success"}
+              />
+            ) : null}
+
+            <GabiPrimaryButton
+              disabled={saving}
+              icon="save-outline"
+              label={saving ? "Sine-save..." : "I-save ang bili"}
+              loading={saving}
+              onPress={onSave}
+            />
+            <GabiSoftButton disabled={saving} icon="close" label="Cancel" onPress={onClose} />
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function UnitPicker({ selected, onSelect, disabled = false }: { selected: IngredientUnit; onSelect: (unit: IngredientUnit) => void; disabled?: boolean }) {
+  const { palette, extended } = useGabiTheme();
+
+  return (
+    <View style={styles.unitPicker}>
+      <GabiText variant="buttonSm">Unit</GabiText>
+      <ScrollView contentContainerStyle={styles.unitWrap} horizontal showsHorizontalScrollIndicator={false}>
         {ingredientUnits.map((unit) => {
           const isSelected = unit === selected;
           return (
             <Pressable
+              accessibilityRole="radio"
+              accessibilityState={{ checked: isSelected, disabled }}
               disabled={disabled}
               key={unit}
               onPress={() => onSelect(unit)}
               style={[
                 styles.unitOption,
                 {
-                  backgroundColor: isSelected ? palette.primary : palette.background,
-                  borderColor: isSelected ? palette.primary : palette.border,
-                  opacity: disabled ? 0.6 : 1,
+                  backgroundColor: disabled ? extended.disabledBg : isSelected ? palette.kioskHeader : palette.surface,
+                  borderColor: disabled ? extended.disabledBg : isSelected ? palette.kioskHeader : palette.border,
                 },
               ]}
             >
-              <Text style={[styles.unitText, { color: isSelected ? palette.kioskHeaderText : palette.text }]}>{unit}</Text>
+              <GabiText style={{ color: disabled ? extended.disabledText : isSelected ? palette.kioskHeaderText : palette.text }} variant="caption">
+                {unit}
+              </GabiText>
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: {
-    ...typography.body,
-  },
-  helper: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  metricGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    ...typography.heading,
-  },
-  field: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 132,
-  },
-  fieldLabel: {
-    ...typography.button,
-  },
-  input: {
-    borderRadius: 8,
-    borderWidth: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    minHeight: 44,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  twoColumn: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  unitWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  unitOption: {
-    borderRadius: 8,
-    borderWidth: 1,
-    minWidth: 52,
+  summaryTop: {
     alignItems: "center",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    flexDirection: "row",
+    gap: spacing.md,
   },
-  unitText: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  costPreview: {
-    fontSize: 14,
-    fontWeight: "800",
-    lineHeight: 19,
-  },
-  saveButton: {
+  summaryIcon: {
     alignItems: "center",
-    borderRadius: 8,
-    minHeight: 44,
+    borderRadius: 14,
+    height: 48,
     justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    width: 48,
   },
-  saveButtonText: {
-    ...typography.button,
+  summaryCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
   },
-  filterInput: {
-    borderRadius: 8,
-    borderWidth: 1,
-    fontSize: 15,
-    lineHeight: 20,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  summaryChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
-  lotRow: {
-    borderRadius: 8,
-    borderWidth: 1,
+  groupList: {
+    gap: spacing.lg,
+  },
+  groupSection: {
     gap: spacing.sm,
-    padding: 12,
+  },
+  groupHeader: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+  },
+  groupTitle: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  lotCard: {
+    gap: spacing.sm,
+    padding: spacing.md,
   },
   lotHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
+    gap: spacing.sm,
   },
-  lotText: {
+  lotIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  lotTitle: {
     flex: 1,
-    gap: spacing.xs,
+    gap: 2,
+    minWidth: 0,
   },
-  itemTitle: {
-    ...typography.button,
+  lotFacts: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
   },
-  lotMetaGrid: {
+  lotFact: {
+    flex: 1,
+    gap: 2,
+    minWidth: 94,
+  },
+  lotProgressRow: {
+    alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
   },
-  lotMeta: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
+  lotProgressTrack: {
+    borderRadius: 999,
+    flex: 1,
+    height: 8,
+    minWidth: 120,
+    overflow: "hidden",
+  },
+  lotProgressFill: {
+    borderRadius: 999,
+    height: "100%",
+  },
+  lotFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalScrim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  purchaseSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxHeight: "92%",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    borderRadius: 999,
+    height: 4,
+    width: 44,
+  },
+  sheetHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  sheetTitle: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  sheetContent: {
+    gap: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  twoColumn: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  quantityField: {
+    flex: 1,
+    minWidth: 112,
+  },
+  unitField: {
+    flex: 1.4,
+    minWidth: 176,
+  },
+  fieldColumn: {
+    flex: 1,
+    minWidth: 150,
+  },
+  unitPicker: {
+    gap: spacing.xs,
+  },
+  unitWrap: {
+    gap: spacing.xs,
+  },
+  unitOption: {
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 48,
+    minWidth: 48,
+    paddingHorizontal: spacing.sm,
+  },
+  optionalToggle: {
+    alignItems: "center",
+    borderRadius: 16,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 52,
+    padding: spacing.md,
+  },
+  optionalCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  optionalFields: {
+    gap: spacing.md,
   },
 });

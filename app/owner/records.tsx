@@ -1,8 +1,14 @@
-import { useFocusEffect } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { AppTopBar, Card, EmptyState, formatPeso, InlineNotice, LoadingState, MetricCard, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
+import { GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { KitaTabs } from "@/components/owner/KitaTabs";
+import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import {
   getLogbookDateGroup,
   listLogbookEvents,
@@ -13,14 +19,13 @@ import {
   type LogbookEventType,
 } from "@/services/localAnalytics";
 import { loadOwnerSetupStatus } from "@/services/ownerSetup";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
+import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 const filters: { id: LogbookEventFilter; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "all", label: "Lahat" },
   { id: "benta", label: "Benta" },
   { id: "grocery", label: "Grocery" },
   { id: "niluto", label: "Niluto" },
@@ -31,53 +36,49 @@ const filters: { id: LogbookEventFilter; label: string }[] = [
 
 const dateGroupOrder: LogbookDateGroup[] = ["today", "yesterday", "earlier"];
 
+const eventMeta: Record<LogbookEventType, { icon: React.ComponentProps<typeof Ionicons>["name"]; tone: "primary" | "success" | "danger" | "neutral" | "warning" | "accent" }> = {
+  benta: { icon: "cart-outline", tone: "success" },
+  grocery: { icon: "basket-outline", tone: "accent" },
+  niluto: { icon: "flame-outline", tone: "primary" },
+  bayarin: { icon: "receipt-outline", tone: "warning" },
+  nasayang: { icon: "trash-bin-outline", tone: "danger" },
+  lipat: { icon: "swap-horizontal-outline", tone: "neutral" },
+};
+
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString("en-PH", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return new Date(value).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function eventTone(eventType: LogbookEventType): "primary" | "success" | "danger" | "neutral" | "warning" | "accent" {
-  if (eventType === "benta") {
-    return "success";
-  }
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
+}
 
-  if (eventType === "grocery") {
-    return "accent";
-  }
-
-  if (eventType === "niluto") {
-    return "primary";
-  }
-
-  if (eventType === "bayarin") {
-    return "warning";
-  }
-
-  if (eventType === "nasayang") {
-    return "danger";
-  }
-
-  return "neutral";
+function signedAmount(event: LogbookEvent) {
+  if (event.amount === null) return null;
+  if (event.eventType === "benta") return `+${formatPeso(event.amount)}`;
+  if (event.eventType === "grocery" || event.eventType === "bayarin") return `−${formatPeso(event.amount)}`;
+  return formatPeso(event.amount);
 }
 
 export default function OwnerRecordsScreen() {
+  const router = useRouter();
+  const { palette } = useGabiTheme();
   const [events, setEvents] = useState<LogbookEvent[]>([]);
+  const [hasBusiness, setHasBusiness] = useState(true);
   const [activeFilter, setActiveFilter] = useState<LogbookEventFilter>("all");
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [summary, setSummary] = useState({ bentaTotal: 0, bentaCount: 0, eventCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const status = await loadOwnerSetupStatus();
-      const nextEvents = await listLogbookEvents(status.activeBusiness?.id ?? null);
+      const businessId = status.activeBusiness?.id ?? null;
+      const nextEvents = await listLogbookEvents(businessId);
       const bentaEvents = nextEvents.filter((event) => event.eventType === "benta");
+      setHasBusiness(Boolean(businessId));
       setEvents(nextEvents);
       setSummary({
         bentaTotal: bentaEvents.reduce((total, event) => total + (event.amount ?? 0), 0),
@@ -93,284 +94,208 @@ export default function OwnerRecordsScreen() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      refresh();
-    }, [refresh]),
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+
+  const filteredEvents = useMemo(
+    () => activeFilter === "all" ? events : events.filter((event) => event.eventType === activeFilter),
+    [activeFilter, events],
   );
 
-  const filteredEvents = useMemo(() => {
-    if (activeFilter === "all") {
-      return events;
-    }
-
-    return events.filter((event) => event.eventType === activeFilter);
-  }, [activeFilter, events]);
-
   const groupedEvents = useMemo(() => {
-    const groups = new Map<LogbookDateGroup, LogbookEvent[]>();
-    for (const group of dateGroupOrder) {
-      groups.set(group, []);
-    }
-
-    for (const event of filteredEvents) {
-      const group = getLogbookDateGroup(event.happenedAt);
-      groups.get(group)?.push(event);
-    }
-
-    return dateGroupOrder
-      .map((group) => ({ group, events: groups.get(group) ?? [] }))
-      .filter((entry) => entry.events.length > 0);
+    const groups = new Map<LogbookDateGroup, LogbookEvent[]>(dateGroupOrder.map((group) => [group, []]));
+    for (const event of filteredEvents) groups.get(getLogbookDateGroup(event.happenedAt))?.push(event);
+    return dateGroupOrder.map((group) => ({ group, events: groups.get(group) ?? [] })).filter((entry) => entry.events.length > 0);
   }, [filteredEvents]);
 
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
 
-  function changeFilter(filter: LogbookEventFilter) {
-    setActiveFilter(filter);
-    setSelectedEventId(null);
-  }
-
   return (
     <ScreenScroll bottomNav>
-      <AppTopBar subtitle="Timeline ng benta, grocery, niluto, bayarin, at iba pa." title="Logbook" />
+      <AppTopBar showBrand subtitle="Isang timeline ng galaw ng negosyo." title="Kita" />
 
-      {error ? <InlineNotice message={error} tone="danger" /> : null}
+      <KitaTabs />
 
-      {loading ? <LoadingState label="Loading the local business timeline..." /> : <View style={styles.summaryGrid}>
-        <MetricCard detail="All events" iconName="document-text-outline" label="Entries" tone="primary" value={String(summary.eventCount)} />
-        <MetricCard detail="Benta records" iconName="cash-outline" label="Benta" tone="success" value={String(summary.bentaCount)} />
-        <MetricCard detail="Total benta amount" iconName="wallet-outline" label="Benta total" tone="accent" value={formatPeso(summary.bentaTotal)} />
-      </View>}
-
-      <SecondaryButton href="/owner/reports" label="Open Kita Report" />
-
-      <Card>
-        <View style={styles.timelineHeader}>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>Money timeline</Text>
-          {!loading ? <Pill label={`${filteredEvents.length} shown`} tone="neutral" /> : null}
-        </View>
-        <View style={styles.filterRow}>
-          {filters.map((filter) => {
-            const active = activeFilter === filter.id;
-            return (
-              <Pressable
-                key={filter.id}
-                onPress={() => changeFilter(filter.id)}
-                style={[
-                  styles.filterButton,
-                  {
-                    backgroundColor: active ? palette.primary : palette.surface,
-                    borderColor: active ? palette.primary : palette.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterText, { color: active ? palette.kioskHeaderText : palette.text }]}>{filter.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {!loading && filteredEvents.length === 0 ? (
-          <>
-            <EmptyState description="Mag-start selling o mag-add ng grocery, niluto, o bayarin." title="Wala pang record sa filter na ito" />
-            <SecondaryButton href="/kiosk" label="Start Selling" />
-          </>
-        ) : null}
-
-        {groupedEvents.map(({ group, events: groupEvents }) => (
-          <View key={group} style={styles.dateGroup}>
-            <Text style={[styles.dateGroupTitle, { color: palette.mutedText }]}>{logbookDateGroupLabels[group]}</Text>
-            {groupEvents.map((event) => (
-              <LogbookEventCard
-                event={event}
-                key={event.id}
-                onPress={() => setSelectedEventId((current) => (current === event.id ? null : event.id))}
-                selected={selectedEventId === event.id}
-              />
-            ))}
-          </View>
-        ))}
-      </Card>
-
-      {selectedEvent?.receiptText ? (
-        <Card>
-          <View style={styles.receiptHeader}>
-            <View style={styles.receiptTitle}>
-              <Text style={[styles.sectionTitle, { color: palette.text }]}>Receipt</Text>
-              <Text style={[styles.body, { color: palette.mutedText }]}>{selectedEvent.title}</Text>
-            </View>
-            <Pill label="Receipt" tone="success" />
-          </View>
-          <Text style={[styles.receiptText, { color: palette.text }]}>{selectedEvent.receiptText}</Text>
-        </Card>
+      {error ? (
+        <GabiCard>
+          <GabiNotice message={error} title="Hindi mabuksan ang Logbook" tone="danger" />
+          <GabiSoftButton icon="refresh" label="Subukan ulit" onPress={() => void refresh()} />
+        </GabiCard>
       ) : null}
 
-      {selectedEvent && !selectedEvent.receiptText ? (
-        <Card>
-          <SectionDetail event={selectedEvent} />
-        </Card>
+      {loading ? <LogbookSkeleton /> : null}
+
+      {!loading && !hasBusiness ? (
+        <GabiCard>
+          <GabiEmptyState
+            actionLabel="Buksan ang Settings"
+            icon="business-outline"
+            message="Pumili o gumawa muna ng business para makita ang lokal na timeline."
+            onAction={() => router.push("/owner/settings")}
+            title="Wala pang business"
+          />
+        </GabiCard>
+      ) : null}
+
+      {!loading && hasBusiness ? (
+        <>
+          <GabiCard>
+            <GabiSectionHeader title="Buod" action={<GabiChip label={`${summary.eventCount} entries`} tone="neutral" />} />
+            <View style={styles.summaryRow}>
+              <SummaryMetric label="Benta" value={String(summary.bentaCount)} />
+              <View style={[styles.summaryDivider, { backgroundColor: palette.border }]} />
+              <SummaryMetric label="Halaga" money value={formatPeso(summary.bentaTotal)} />
+            </View>
+          </GabiCard>
+
+          <View style={styles.filterRow}>
+            {filters.map((filter) => {
+              const active = activeFilter === filter.id;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  key={filter.id}
+                  onPress={() => {
+                    setActiveFilter(filter.id);
+                    setSelectedEventId(null);
+                  }}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: active ? palette.primary : palette.surface,
+                      borderColor: active ? palette.primary : palette.border,
+                    },
+                  ]}
+                >
+                  <GabiText style={{ color: active ? palette.kioskHeaderText : palette.text }} variant="buttonSm">{filter.label}</GabiText>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {filteredEvents.length === 0 ? (
+            <GabiCard>
+              <GabiEmptyState
+                icon="document-text-outline"
+                message="Magbenta, bumili ng grocery, magluto, o mag-record ng bayarin para magkaroon ng entry."
+                title="Wala pang entry sa filter na ito"
+              />
+            </GabiCard>
+          ) : null}
+
+          {groupedEvents.map(({ group, events: groupEvents }) => (
+            <View key={group} style={styles.dateGroup}>
+              <View style={styles.dateHeader}>
+                <GabiText variant="h2">{logbookDateGroupLabels[group]}</GabiText>
+                <GabiText tone="faint" variant="caption">{groupEvents.length} entries</GabiText>
+              </View>
+              <GabiCard style={styles.timelineCard}>
+                {groupEvents.map((event, index) => (
+                  <LogbookRow
+                    event={event}
+                    key={event.id}
+                    last={index === groupEvents.length - 1}
+                    onPress={() => setSelectedEventId((current) => current === event.id ? null : event.id)}
+                    selected={selectedEventId === event.id}
+                  />
+                ))}
+              </GabiCard>
+            </View>
+          ))}
+
+          {selectedEvent ? (
+            <GabiCard>
+              <View style={styles.detailHeader}>
+                <View style={styles.flexCopy}>
+                  <GabiText variant="h2">{selectedEvent.receiptText ? "Receipt" : `${selectedEvent.label} detail`}</GabiText>
+                  <GabiText tone="muted" variant="caption">{formatDateTime(selectedEvent.happenedAt)}</GabiText>
+                </View>
+                <GabiChip label={selectedEvent.label} tone={eventMeta[selectedEvent.eventType].tone} />
+              </View>
+              {selectedEvent.receiptText ? (
+                <View style={[styles.receipt, { backgroundColor: palette.background, borderColor: palette.border }]}>
+                  <GabiText style={styles.receiptText}>{selectedEvent.receiptText}</GabiText>
+                </View>
+              ) : (
+                <>
+                  <GabiText variant="cardTitle">{selectedEvent.title}</GabiText>
+                  <GabiText tone="muted" variant="body">{selectedEvent.subtitle}</GabiText>
+                  {signedAmount(selectedEvent) ? <GabiText money tone={selectedEvent.eventType === "benta" ? "success" : "default"} variant="metricValue">{signedAmount(selectedEvent)}</GabiText> : null}
+                </>
+              )}
+            </GabiCard>
+          ) : null}
+        </>
       ) : null}
     </ScreenScroll>
   );
 }
 
-function LogbookEventCard({
-  event,
-  selected,
-  onPress,
-}: {
-  event: LogbookEvent;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+function SummaryMetric({ label, value, money = false }: { label: string; value: string; money?: boolean }) {
+  return (
+    <View style={styles.summaryMetric}>
+      <GabiText tone="muted" variant="caption">{label}</GabiText>
+      <GabiText money={money} tone="success" variant="metricValue">{value}</GabiText>
+    </View>
+  );
+}
 
+function LogbookRow({ event, selected, last, onPress }: { event: LogbookEvent; selected: boolean; last: boolean; onPress: () => void }) {
+  const { palette } = useGabiTheme();
+  const meta = eventMeta[event.eventType];
+  const amount = signedAmount(event);
+  const amountTone = event.eventType === "benta" ? "success" : event.eventType === "grocery" || event.eventType === "bayarin" ? "danger" : "default";
+  const iconColor = meta.tone === "success" ? palette.success : meta.tone === "accent" ? palette.accent : meta.tone === "warning" ? palette.warning : meta.tone === "danger" ? palette.danger : palette.primary;
+  const iconBg = meta.tone === "success" ? palette.softSuccess : meta.tone === "accent" ? palette.softAccent : meta.tone === "warning" ? palette.softWarning : meta.tone === "danger" ? palette.softDanger : palette.softPrimary;
   return (
     <Pressable
+      accessibilityRole="button"
       onPress={onPress}
-      style={[
-        styles.eventCard,
-        {
-          backgroundColor: selected ? palette.softPrimary : palette.background,
-          borderColor: selected ? palette.primary : palette.border,
-        },
+      style={({ pressed }) => [
+        styles.eventRow,
+        !last ? { borderBottomColor: palette.border, borderBottomWidth: 1 } : null,
+        selected || pressed ? { backgroundColor: palette.softPrimary } : null,
       ]}
     >
-      <View style={styles.eventTopRow}>
-        <View style={styles.eventText}>
-          <Text style={[styles.itemTitle, { color: palette.text }]}>{event.title}</Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>{event.subtitle}</Text>
-          <Text style={[styles.helper, { color: palette.mutedText }]}>{formatDateTime(event.happenedAt)}</Text>
-        </View>
-        {event.amount !== null ? (
-          <Text style={[styles.eventAmount, { color: palette.primary }]}>{formatPeso(event.amount)}</Text>
-        ) : null}
+      <View style={[styles.eventIcon, { backgroundColor: iconBg }]}>
+        <Ionicons color={iconColor} name={meta.icon} size={20} />
       </View>
-      <View style={styles.eventMetaRow}>
-        <Pill label={event.label} tone={eventTone(event.eventType)} />
-        {event.receiptText ? <Text style={[styles.helper, { color: palette.mutedText }]}>Tap for receipt</Text> : null}
+      <View style={styles.flexCopy}>
+        <GabiText numberOfLines={1} variant="cardTitle">{event.title}</GabiText>
+        <GabiText numberOfLines={2} tone="muted" variant="caption">{event.label} · {event.subtitle}</GabiText>
+        <GabiText tone="faint" variant="caption">{formatTime(event.happenedAt)}</GabiText>
+      </View>
+      <View style={styles.eventEnd}>
+        {amount ? <GabiText money tone={amountTone} variant="buttonSm">{amount}</GabiText> : null}
+        <Ionicons color={palette.mutedText} name={selected ? "chevron-up" : "chevron-forward"} size={18} />
       </View>
     </Pressable>
   );
 }
 
-function SectionDetail({ event }: { event: LogbookEvent }) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function LogbookSkeleton() {
   return (
-    <View style={styles.detailBlock}>
-      <Text style={[styles.sectionTitle, { color: palette.text }]}>{event.label} detail</Text>
-      <Text style={[styles.body, { color: palette.text }]}>{event.title}</Text>
-      <Text style={[styles.body, { color: palette.mutedText }]}>{event.subtitle}</Text>
-      {event.amount !== null ? (
-        <Text style={[styles.itemTitle, { color: palette.primary }]}>{formatPeso(event.amount)}</Text>
-      ) : null}
-      <Text style={[styles.helper, { color: palette.mutedText }]}>{formatDateTime(event.happenedAt)}</Text>
-    </View>
+    <GabiCard>
+      <GabiSkeleton height={26} width="42%" />
+      {[0, 1, 2].map((item) => <GabiSkeleton height={64} key={item} />)}
+    </GabiCard>
   );
 }
 
 const styles = StyleSheet.create({
-  message: {
-    ...typography.body,
-  },
-  summaryGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    ...typography.heading,
-  },
-  timelineHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-    justifyContent: "space-between",
-  },
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  filterButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  filterText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  dateGroup: {
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  dateGroupTitle: {
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 0.5,
-    lineHeight: 16,
-    textTransform: "uppercase",
-  },
-  eventCard: {
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.sm,
-    padding: 12,
-  },
-  eventTopRow: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.sm,
-    justifyContent: "space-between",
-  },
-  eventText: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  itemTitle: {
-    ...typography.button,
-  },
-  body: {
-    ...typography.body,
-  },
-  helper: {
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 16,
-  },
-  eventAmount: {
-    fontSize: 18,
-    fontWeight: "900",
-    lineHeight: 23,
-  },
-  eventMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  receiptHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-  },
-  receiptTitle: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  receiptText: {
-    fontFamily: "monospace",
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  detailBlock: {
-    gap: spacing.sm,
-  },
+  flexCopy: { flex: 1 },
+  summaryRow: { alignItems: "stretch", flexDirection: "row", gap: spacing.md },
+  summaryMetric: { flex: 1, gap: spacing.xs },
+  summaryDivider: { width: 1 },
+  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  filterChip: { borderRadius: radius.pill, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  dateGroup: { gap: spacing.sm },
+  dateHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  timelineCard: { gap: 0, padding: 0, overflow: "hidden" },
+  eventRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 78, padding: spacing.md },
+  eventIcon: { alignItems: "center", borderRadius: 14, height: 42, justifyContent: "center", width: 42 },
+  eventEnd: { alignItems: "flex-end", gap: spacing.xs },
+  detailHeader: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  receipt: { borderRadius: radius.md, borderWidth: 1, padding: spacing.md },
+  receiptText: { fontFamily: "monospace", fontSize: 13, lineHeight: 19 },
 });

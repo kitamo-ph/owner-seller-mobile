@@ -2,6 +2,8 @@
 
 Every item in Play Console → App content must be complete and accurate before a release can roll out. Answers below are drafted from a code/dependency audit of KitaMo; confirm each in the Console. **REVIEW** = a human must verify against Google's current wording and the pre-launch report.
 
+Status: prepared but not entered or owner-confirmed in Play Console.
+
 ## Privacy policy
 
 - [ ] Public URL set (host the content of `docs/play-store/privacy-policy-draft.md`).
@@ -32,10 +34,22 @@ Every item in Play Console → App content must be complete and accurate before 
 
 ## Permissions declaration
 
-- Declared in `app.json`: `permissions: []`.
-- Framework-added at build time: `INTERNET` (unused by app features at runtime), `ACCESS_NETWORK_STATE` (online/offline badge), `VIBRATE` (haptics).
+- Declared in `app.json`: `USE_BIOMETRIC` and `USE_FINGERPRINT` for the optional local Owner unlock.
+- Blocked in `app.json`: `INTERNET`, legacy external storage, and system overlay.
+- Verified versionCode 2 permissions:
+  `android.permission.USE_BIOMETRIC`,
+  `android.permission.USE_FINGERPRINT`, `android.permission.VIBRATE`,
+  `android.permission.ACCESS_WIFI_STATE`,
+  `android.permission.ACCESS_NETWORK_STATE`, and
+  `ph.kitamo.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+- The app-local signature receiver permission is not accessible to unrelated
+  apps. Network/Wi-Fi state permissions do not grant network transport.
 - **None** of: camera, location, contacts, microphone, Bluetooth, broad storage/photos, SMS/Call Log.
-- [ ] **REVIEW** the final `.aab`'s permission list in the Play pre-launch report; if anything beyond the three above appears, investigate the source before submitting. No sensitive-permission declaration form should be required for these.
+- [x] Local inspection of
+  `KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab` matches the set above and contains
+  no `INTERNET` permission; see the
+  [versionCode 2 verification](versioncode-2-aab-verification.md).
+- [ ] **REVIEW** Play's detected permission list in the pre-launch report; investigate any difference before submitting. No sensitive-permission declaration form should be required for the verified set.
 
 ## Financial features / regulated category
 

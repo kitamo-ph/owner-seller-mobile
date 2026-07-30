@@ -1,18 +1,13 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import {
-  AppTopBar,
-  Card,
-  EmptyState,
-  LoadingState,
-  Pill,
-  ScreenScroll,
-  SecondaryButton,
-  SectionHeader,
-} from "@/components/ui/KitaMoUI";
+import { GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, ScreenScroll } from "@/components/ui/KitaMoUI";
 import type { Branch } from "@/domain/types";
 import {
   loadOwnerSetupStatus,
@@ -21,11 +16,8 @@ import {
   type OwnerSetupStatus,
 } from "@/services/ownerSetup";
 import { useAppStore } from "@/state/appStore";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
-import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 export default function OwnerContextScreen() {
@@ -35,8 +27,7 @@ export default function OwnerContextScreen() {
   const [error, setError] = useState<string | null>(null);
   const switchLock = useRef(false);
   const setOwnerContext = useAppStore((state) => state.setOwnerContext);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
   const router = useRouter();
 
   const refresh = useCallback(async () => {
@@ -61,9 +52,7 @@ export default function OwnerContextScreen() {
   );
 
   async function chooseBusiness(businessId: string) {
-    if (switchLock.current || status?.activeBusiness?.id === businessId) {
-      return;
-    }
+    if (switchLock.current || status?.activeBusiness?.id === businessId) return;
 
     switchLock.current = true;
     setSwitchingId(businessId);
@@ -82,9 +71,7 @@ export default function OwnerContextScreen() {
   }
 
   async function chooseBranch(branch: Branch) {
-    if (switchLock.current || status?.activeBranch?.id === branch.id || !branch.active) {
-      return;
-    }
+    if (switchLock.current || status?.activeBranch?.id === branch.id || !branch.active) return;
 
     switchLock.current = true;
     setSwitchingId(branch.id);
@@ -104,181 +91,235 @@ export default function OwnerContextScreen() {
 
   return (
     <ScreenScroll bottomNav>
-      <AppTopBar subtitle="Choose the local Owner workspace for this phone" title="Business & Stall Context" />
+      <AppTopBar
+        backHref="/owner"
+        eyebrow="OWNER CONTEXT"
+        subtitle="Piliin ang persistent workspace sa phone na ito"
+        title="Negosyo at Stall"
+      />
 
-      <View style={[styles.notice, { backgroundColor: palette.softPrimary, borderColor: palette.border }]}>
-        <Ionicons color={palette.primary} name="phone-portrait-outline" size={20} />
-        <Text style={[styles.body, { color: palette.mutedText }]}>This changes local Owner context only. Kiosk still requires a separate stall confirmation for every app session.</Text>
-      </View>
+      <GabiNotice
+        message="Owner context lang ang binabago nito. Bawat Kiosk session ay kailangan pa ring pumili at magkumpirma ng stall."
+        title="Local at same-device"
+        tone="owner"
+      />
 
-      {error ? <Text style={[styles.message, { color: palette.danger }]}>{error}</Text> : null}
-      {loading && !status ? <LoadingState label="Loading saved businesses..." /> : null}
+      {error ? <GabiNotice message={error} title="Hindi napalitan ang context" tone="danger" /> : null}
+      {loading && !status ? (
+        <GabiCard>
+          <GabiSkeleton height={18} showImmediately width="38%" />
+          <GabiSkeleton height={70} showImmediately />
+          <GabiSkeleton height={70} showImmediately />
+        </GabiCard>
+      ) : null}
 
       {status ? (
-        <Card>
-          <SectionHeader action={<Pill label={`${status.businesses.length} saved`} tone="neutral" />} title="Businesses" />
+        <GabiCard>
+          <GabiSectionHeader action={<GabiChip label={`${status.businesses.length} saved`} />} title="Mga negosyo" />
           {status.businesses.length === 0 ? (
-            <EmptyState description="Create a business before choosing Owner context." title="No businesses yet" />
+            <GabiEmptyState
+              actionLabel="Gumawa ng negosyo"
+              icon="business-outline"
+              message="Gumawa muna ng local business profile bago pumili ng Owner context."
+              onAction={() => router.push("/owner/business-settings")}
+              title="Wala pang negosyo"
+            />
           ) : (
-            <View style={styles.list}>
+            <View accessibilityRole="radiogroup" style={styles.list}>
               {status.businesses.map((business) => {
                 const selected = status.activeBusiness?.id === business.id;
+                const switching = switchingId === business.id;
                 return (
                   <Pressable
+                    accessibilityLabel={business.businessName}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: selected, disabled: switchingId !== null }}
                     disabled={switchingId !== null}
                     key={business.id}
                     onPress={() => chooseBusiness(business.id)}
-                    style={[
+                    style={({ pressed }) => [
                       styles.option,
                       {
-                        backgroundColor: selected ? palette.softPrimary : palette.background,
+                        backgroundColor: selected ? palette.softPrimary : pressed ? palette.background : palette.surface,
                         borderColor: selected ? palette.primary : palette.border,
                       },
                     ]}
                   >
-                    <Ionicons color={selected ? palette.primary : palette.mutedText} name="business-outline" size={22} />
+                    <SelectionMark selected={selected} />
                     <View style={styles.optionCopy}>
-                      <Text numberOfLines={1} style={[styles.optionTitle, { color: palette.text }]}>{business.businessName}</Text>
-                      <Text numberOfLines={1} style={[styles.optionMeta, { color: palette.mutedText }]}>{business.businessType} · {business.barangay}</Text>
+                      <GabiText numberOfLines={1} variant="cardTitle">{business.businessName}</GabiText>
+                      <GabiText numberOfLines={2} tone="muted" variant="caption">
+                        {business.businessType} · {business.barangay}
+                      </GabiText>
                     </View>
-                    <Pill label={switchingId === business.id ? "Switching" : selected ? "Selected" : "Use"} tone={selected ? "success" : "neutral"} />
+                    <GabiChip label={switching ? "Pinapalitan" : selected ? "Aktibo" : "Piliin"} tone={selected ? "success" : "neutral"} />
                   </Pressable>
                 );
               })}
             </View>
           )}
-          <SecondaryButton href="/owner/business-settings" label={status.businesses.length === 0 ? "Create Business" : "Manage Businesses"} />
-        </Card>
+          {status.businesses.length > 0 ? (
+            <GabiSoftButton icon="settings-outline" label="Pamahalaan ang negosyo" onPress={() => router.push("/owner/business-settings")} />
+          ) : null}
+        </GabiCard>
       ) : null}
 
       {status?.activeBusiness ? (
-        <Card>
-          <SectionHeader
-            action={<Pill label={`${status.branches.filter((branch) => branch.active).length} active`} tone="success" />}
-            title={`${status.activeBusiness.businessName} Stalls`}
+        <GabiCard>
+          <GabiSectionHeader
+            action={<GabiChip label={`${status.branches.filter((branch) => branch.active).length} active`} tone="success" />}
+            title="Mga stall"
           />
+          <GabiText tone="muted" variant="caption">Sa {status.activeBusiness.businessName}</GabiText>
           {status.branches.length === 0 ? (
-            <EmptyState description="Add a stall before choosing an operational context." title="No stalls in this business" />
+            <GabiEmptyState
+              actionLabel="Magdagdag ng stall"
+              icon="storefront-outline"
+              message="Magdagdag muna ng stall bago pumili ng operational context."
+              onAction={() => router.push("/owner/business-settings")}
+              title="Wala pang stall"
+            />
           ) : (
-            <View style={styles.list}>
+            <View accessibilityRole="radiogroup" style={styles.list}>
               {status.branches.map((branch) => {
                 const selected = status.activeBranch?.id === branch.id;
                 const productCount = status.products.filter((product) => product.branchId === branch.id).length;
+                const switching = switchingId === branch.id;
                 return (
-                  <View key={branch.id} style={[styles.stallRow, { backgroundColor: palette.background, borderColor: selected ? palette.primary : palette.border }]}>
+                  <View
+                    key={branch.id}
+                    style={[
+                      styles.stallOption,
+                      {
+                        backgroundColor: branch.active ? palette.surface : extended.disabledBg,
+                        borderColor: selected ? palette.primary : palette.border,
+                      },
+                    ]}
+                  >
                     <Pressable
+                      accessibilityLabel={branch.branchName}
                       accessibilityRole="radio"
                       accessibilityState={{ checked: selected, disabled: !branch.active || switchingId !== null }}
                       disabled={!branch.active || switchingId !== null}
                       onPress={() => chooseBranch(branch)}
                       style={styles.stallSelect}
                     >
-                      <Ionicons color={branch.active ? palette.primary : palette.mutedText} name="storefront-outline" size={21} />
+                      <SelectionMark disabled={!branch.active} selected={selected} />
                       <View style={styles.optionCopy}>
-                        <Text numberOfLines={1} style={[styles.optionTitle, { color: palette.text }]}>{branch.branchName}</Text>
-                        <Text numberOfLines={1} style={[styles.optionMeta, { color: palette.mutedText }]}>
-                          {branch.location ?? branch.branchType} · {productCount} assigned product{productCount === 1 ? "" : "s"}
-                        </Text>
+                        <GabiText numberOfLines={1} style={!branch.active ? { color: extended.disabledText } : undefined} variant="cardTitle">
+                          {branch.branchName}
+                        </GabiText>
+                        <GabiText numberOfLines={2} style={!branch.active ? { color: extended.disabledText } : undefined} tone="muted" variant="caption">
+                          {branch.location ?? branch.branchType} · {productCount} paninda
+                        </GabiText>
                       </View>
-                      <Pill
-                        label={switchingId === branch.id ? "Switching" : selected ? "Selected" : branch.active ? "Use" : "Inactive"}
+                      <GabiChip
+                        label={switching ? "Pinapalitan" : selected ? "Aktibo" : branch.active ? "Piliin" : "Naka-off"}
                         tone={selected ? "success" : branch.active ? "neutral" : "warning"}
                       />
                     </Pressable>
-                    {branch.active ? (
+                    <View style={[styles.stallFooter, { borderColor: palette.border }]}>
+                      <GabiText tone={branch.active ? "muted" : "faint"} variant="caption">
+                        {branch.active ? "Kiosk requires confirmation" : "I-activate muna sa Business & Stalls"}
+                      </GabiText>
                       <Pressable
-                        accessibilityLabel={`Open Kiosk picker for ${branch.branchName}`}
+                        accessibilityLabel={`Buksan ang Kiosk picker para sa ${branch.branchName}`}
+                        accessibilityRole="button"
+                        disabled={!branch.active}
                         onPress={() => router.push({ pathname: "/kiosk", params: { branchId: branch.id } })}
-                        style={[styles.kioskButton, { borderColor: palette.border }]}
+                        style={styles.kioskAction}
                       >
-                        <Ionicons color={palette.primary} name="storefront" size={16} />
-                        <Text style={[styles.kioskText, { color: palette.primary }]}>Open Kiosk</Text>
+                        <Ionicons color={branch.active ? palette.primary : extended.disabledText} name="storefront-outline" size={17} />
+                        <GabiText style={!branch.active ? { color: extended.disabledText } : undefined} tone="primary" variant="buttonSm">
+                          {branch.active ? "Buksan Kiosk" : "Hindi available"}
+                        </GabiText>
                       </Pressable>
-                    ) : null}
+                    </View>
                   </View>
                 );
               })}
             </View>
           )}
-          <SecondaryButton href="/owner/business-settings" label="Manage Stalls" />
-        </Card>
+          <GabiSoftButton icon="storefront-outline" label="Pamahalaan ang stalls" onPress={() => router.push("/owner/business-settings")} />
+        </GabiCard>
       ) : status && status.businesses.length > 0 ? (
-        <Card>
-          <EmptyState description="Choose a saved business deliberately. KitaMo will not silently select one." title="No business selected" />
-        </Card>
+        <GabiEmptyState
+          icon="business-outline"
+          message="Pumili nang kusa ng saved business. Hindi awtomatikong pipili ang KitaMo."
+          title="Walang napiling negosyo"
+        />
       ) : null}
     </ScreenScroll>
   );
 }
 
+function SelectionMark({ selected, disabled = false }: { selected: boolean; disabled?: boolean }) {
+  const { palette, extended } = useGabiTheme();
+  return (
+    <View style={[styles.radio, { borderColor: disabled ? extended.disabledText : selected ? palette.primary : extended.radioOff }]}>
+      {selected ? <View style={[styles.radioDot, { backgroundColor: palette.primary }]} /> : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  notice: {
-    alignItems: "flex-start",
-    borderRadius: radius.md,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  body: {
-    ...typography.body,
-    flex: 1,
-  },
-  message: {
-    ...typography.body,
-  },
   list: {
     gap: spacing.sm,
   },
   option: {
     alignItems: "center",
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: spacing.sm,
-    minHeight: 64,
+    minHeight: 68,
     padding: spacing.sm,
   },
   optionCopy: {
     flex: 1,
+    gap: 2,
     minWidth: 0,
   },
-  optionTitle: {
-    fontSize: 14,
-    fontWeight: "900",
-    lineHeight: 18,
+  radio: {
+    alignItems: "center",
+    borderRadius: 11,
+    borderWidth: 2,
+    height: 22,
+    justifyContent: "center",
+    width: 22,
   },
-  optionMeta: {
-    fontSize: 11,
-    fontWeight: "600",
-    lineHeight: 15,
+  radioDot: {
+    borderRadius: 5,
+    height: 10,
+    width: 10,
   },
-  stallRow: {
-    borderRadius: radius.md,
-    borderWidth: 1,
+  stallOption: {
+    borderRadius: 16,
+    borderWidth: 1.5,
     overflow: "hidden",
   },
   stallSelect: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.sm,
-    minHeight: 64,
+    minHeight: 68,
     padding: spacing.sm,
   },
-  kioskButton: {
+  stallFooter: {
     alignItems: "center",
     borderTopWidth: 1,
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    minHeight: 48,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  kioskAction: {
+    alignItems: "center",
+    flexDirection: "row",
     gap: spacing.xs,
-    justifyContent: "center",
     minHeight: 44,
   },
-  kioskText: {
-    fontSize: 12,
-    fontWeight: "900",
-    lineHeight: 16,
-  },
 });
-

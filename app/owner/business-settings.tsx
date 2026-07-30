@@ -1,11 +1,9 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
-import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
-import { LocalDataVerificationPanel } from "@/components/common/LocalDataVerificationPanel";
 import { PilotStatusCard } from "@/components/owner/PilotStatusCard";
 import { AppTopBar, Card, IconBadge, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
-import { showLocalDataVerificationPanel } from "@/config/devTools";
 import {
   createBranch,
   createBusiness,
@@ -13,6 +11,10 @@ import {
   updateBusiness,
 } from "@/db/repositories";
 import type { Branch, Business, BusinessType } from "@/domain/types";
+import {
+  createSingleFlightProtectedAction,
+  formatOwnerPinLockoutMessage,
+} from "@/domain/ownerPinSecurity";
 import {
   clearActiveBranchContext,
   loadOwnerSetupStatus,
@@ -28,6 +30,7 @@ import {
   setOwnerBiometricEnabled,
   type OwnerAccessStatus,
   verifyOwnerPin,
+  verifyOwnerPinWithThrottle,
 } from "@/services/ownerAccess";
 import { clearLocalPilotData } from "@/services/pilotData";
 import { useAppStore } from "@/state/appStore";
@@ -35,6 +38,7 @@ import { useOwnerAccessStore } from "@/state/ownerAccessStore";
 import { useThemeStore } from "@/state/themeStore";
 import { themePalettes } from "@/theme/colors";
 import { spacing } from "@/theme/spacing";
+import { extendedThemePalettes } from "@/theme/tokens";
 import { typography } from "@/theme/typography";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
@@ -112,6 +116,11 @@ export default function OwnerSettingsScreen() {
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
+  const [clearDataPinVisible, setClearDataPinVisible] = useState(false);
+  const [clearDataPin, setClearDataPin] = useState("");
+  const [clearDataPinMessage, setClearDataPinMessage] = useState<string | null>(null);
+  const [clearDataRunning, setClearDataRunning] = useState(false);
+  const clearDataTapLock = useRef(false);
   const setOwnerContext = useAppStore((state) => state.setOwnerContext);
   const resetAppContext = useAppStore((state) => state.resetAppContext);
   const enableOwnerProtection = useOwnerAccessStore((state) => state.enableProtection);
@@ -119,7 +128,28 @@ export default function OwnerSettingsScreen() {
   const lockOwnerAccess = useOwnerAccessStore((state) => state.lock);
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
   const router = useRouter();
+
+  const protectedClearPilotData = useMemo(
+    () =>
+      createSingleFlightProtectedAction({
+        verify: async (pin: string) => {
+          const result = await verifyOwnerPinWithThrottle(pin);
+          if (result.status === "success") {
+            return true;
+          }
+          setClearDataPinMessage(
+            result.status === "locked"
+              ? formatOwnerPinLockoutMessage(result.remainingMs)
+              : `Wrong PIN. ${result.attemptsBeforeLockout} attempt${result.attemptsBeforeLockout === 1 ? "" : "s"} before a 30-second lock.`,
+          );
+          return false;
+        },
+        execute: clearLocalPilotData,
+      }),
+    [],
+  );
 
   function setNotice(text: string) {
     setMessage(text);
@@ -450,6 +480,18 @@ export default function OwnerSettingsScreen() {
   }
 
   function confirmClearPilotData() {
+    if (saving || clearDataRunning) {
+      return;
+    }
+
+    if (!ownerAccess?.hasPin) {
+      Alert.alert(
+        "Owner PIN required",
+        "Set an Owner PIN first. KitaMo requires the current PIN again before a complete local-data wipe.",
+      );
+      return;
+    }
+
     Alert.alert(
       "Clear all local KitaMo data?",
       "This permanently removes businesses, products, sales, receipts, costs, settings, and the Owner lock from this phone. Demo data will not return automatically.",
@@ -459,30 +501,55 @@ export default function OwnerSettingsScreen() {
           text: "Clear local data",
           style: "destructive",
           onPress: () => {
-            void clearPilotData();
+            setClearDataPin("");
+            setClearDataPinMessage(null);
+            setClearDataPinVisible(true);
           },
         },
       ],
     );
   }
 
-  async function clearPilotData() {
-    setSaving(true);
-    setMessage(null);
+  function cancelClearPilotData() {
+    if (clearDataRunning) return;
+    setClearDataPin("");
+    setClearDataPinMessage(null);
+    setClearDataPinVisible(false);
+  }
+
+  async function verifyAndClearPilotData() {
+    if (clearDataTapLock.current || clearDataRunning) return;
+    if (!isValidOwnerPin(clearDataPin)) {
+      setClearDataPinMessage("Enter your current 4 to 6 digit Owner PIN.");
+      return;
+    }
+
+    clearDataTapLock.current = true;
+    setClearDataRunning(true);
+    setClearDataPinMessage(null);
     try {
-      await clearLocalPilotData();
+      const result = await protectedClearPilotData(clearDataPin);
+      if (result.status !== "completed") {
+        return;
+      }
+
+      setClearDataPin("");
+      setClearDataPinVisible(false);
       disableOwnerProtection();
       resetAppContext();
       router.replace("/");
     } catch (error) {
       logDevError("OwnerSettings.clearPilotData", error);
-      setError(getFriendlyErrorMessage("Could not clear local data."));
-      setSaving(false);
+      setClearDataPinMessage(getFriendlyErrorMessage("Could not clear local data."));
+    } finally {
+      clearDataTapLock.current = false;
+      setClearDataRunning(false);
     }
   }
 
   return (
-    <ScreenScroll bottomNav>
+    <>
+      <ScreenScroll bottomNav>
       <AppTopBar subtitle="Business, stalls, Owner access, and local data" title="Business & Stalls" />
 
       {message ? <Text style={[styles.message, { color: messageIsError ? palette.danger : palette.text }]}>{message}</Text> : null}
@@ -754,13 +821,67 @@ export default function OwnerSettingsScreen() {
         <Text style={[styles.body, { color: palette.mutedText }]}>Business data stays in KitaMo on this phone. Cloud sync is not active, and Android backup is disabled.</Text>
         <SecondaryButton href="/privacy" label="Privacy Policy" />
         <SecondaryButton href="/owner/pilot-guide" label="Open Pilot Guide" />
-        <Pressable disabled={saving} onPress={confirmClearPilotData} style={[styles.clearDataButton, { borderColor: palette.danger }]}>
+        <Pressable disabled={saving || clearDataRunning} onPress={confirmClearPilotData} style={[styles.clearDataButton, { borderColor: palette.danger }]}>
           <Text style={[styles.smallButtonText, { color: palette.danger }]}>Clear All Local Pilot Data</Text>
         </Pressable>
       </View>
+      </ScreenScroll>
 
-      {__DEV__ && showLocalDataVerificationPanel ? <LocalDataVerificationPanel /> : null}
-    </ScreenScroll>
+      <Modal
+        animationType="fade"
+        onRequestClose={cancelClearPilotData}
+        transparent
+        visible={clearDataPinVisible}
+      >
+        <View style={[styles.modalBackdrop, { backgroundColor: extended.scrim }]}>
+          <View style={[styles.clearDataModal, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+            <IconBadge icon="shield-checkmark" size="lg" tone="danger" />
+            <View style={styles.clearDataModalCopy}>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Verify before deleting</Text>
+              <Text style={[styles.body, { color: palette.mutedText }]}>Enter the current Owner PIN. Cancel or a wrong PIN will leave all local data unchanged.</Text>
+            </View>
+            <TextInput
+              accessibilityLabel="Current Owner PIN for local data deletion"
+              autoFocus
+              editable={!clearDataRunning}
+              keyboardType="number-pad"
+              maxLength={6}
+              onChangeText={(value) => setClearDataPin(value.replace(/\D/g, ""))}
+              onSubmitEditing={verifyAndClearPilotData}
+              placeholder="Current Owner PIN"
+              placeholderTextColor={palette.mutedText}
+              secureTextEntry
+              style={[
+                styles.clearDataPinInput,
+                {
+                  backgroundColor: palette.background,
+                  borderColor: clearDataPinMessage ? palette.danger : palette.border,
+                  color: palette.text,
+                },
+              ]}
+              value={clearDataPin}
+            />
+            {clearDataPinMessage ? <Text accessibilityLiveRegion="polite" style={[styles.message, { color: palette.danger }]}>{clearDataPinMessage}</Text> : null}
+            <View style={styles.clearDataModalActions}>
+              <SmallButton disabled={clearDataRunning} label="Cancel" onPress={cancelClearPilotData} />
+              <Pressable
+                accessibilityRole="button"
+                disabled={clearDataRunning}
+                onPress={verifyAndClearPilotData}
+                style={[
+                  styles.deleteConfirmButton,
+                  { backgroundColor: clearDataRunning ? extended.disabledBg : palette.danger },
+                ]}
+              >
+                <Text style={[styles.actionButtonText, { color: clearDataRunning ? extended.disabledText : palette.kioskHeaderText }]}>
+                  {clearDataRunning ? "Verifying..." : "Verify & Delete"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -787,6 +908,7 @@ function FormField({
 }: FormFieldProps) {
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
 
   return (
     <View style={styles.field}>
@@ -803,10 +925,9 @@ function FormField({
           styles.input,
           multiline ? styles.multilineInput : null,
           {
-            backgroundColor: editable ? palette.background : palette.surface,
-            borderColor: palette.border,
-            color: palette.text,
-            opacity: editable ? 1 : 0.65,
+            backgroundColor: editable ? palette.background : extended.disabledBg,
+            borderColor: editable ? palette.border : extended.disabledBg,
+            color: editable ? palette.text : extended.disabledText,
           },
         ]}
         value={value}
@@ -826,6 +947,7 @@ type OptionGroupProps<T extends string> = {
 function OptionGroup<T extends string>({ label, options, selected, onSelect, disabled = false }: OptionGroupProps<T>) {
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
 
   return (
     <View style={styles.field}>
@@ -841,13 +963,12 @@ function OptionGroup<T extends string>({ label, options, selected, onSelect, dis
               style={[
                 styles.option,
                 {
-                  backgroundColor: isSelected ? palette.primary : palette.background,
-                  borderColor: isSelected ? palette.primary : palette.border,
-                  opacity: disabled ? 0.6 : 1,
+                  backgroundColor: disabled ? extended.disabledBg : isSelected ? palette.primary : palette.background,
+                  borderColor: disabled ? extended.disabledBg : isSelected ? palette.primary : palette.border,
                 },
               ]}
             >
-              <Text style={[styles.optionText, { color: isSelected ? palette.kioskHeaderText : palette.text }]}>{option}</Text>
+              <Text style={[styles.optionText, { color: disabled ? extended.disabledText : isSelected ? palette.kioskHeaderText : palette.text }]}>{option}</Text>
             </Pressable>
           );
         })}
@@ -865,14 +986,15 @@ type ButtonProps = {
 function ActionButton({ label, onPress, disabled = false }: ButtonProps) {
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
 
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      style={[styles.actionButton, { backgroundColor: palette.primary, opacity: disabled ? 0.6 : 1 }]}
+      style={[styles.actionButton, { backgroundColor: disabled ? extended.disabledBg : palette.primary }]}
     >
-      <Text style={[styles.actionButtonText, { color: palette.kioskHeaderText }]}>{label}</Text>
+      <Text style={[styles.actionButtonText, { color: disabled ? extended.disabledText : palette.kioskHeaderText }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -880,14 +1002,15 @@ function ActionButton({ label, onPress, disabled = false }: ButtonProps) {
 function SmallButton({ label, onPress, disabled = false }: ButtonProps) {
   const themeMode = useThemeStore((state) => state.themeMode);
   const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const extended = extendedThemePalettes[themeMode];
 
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      style={[styles.smallButton, { borderColor: palette.border, opacity: disabled ? 0.55 : 1 }]}
+      style={[styles.smallButton, { backgroundColor: disabled ? extended.disabledBg : palette.surface, borderColor: disabled ? extended.disabledBg : palette.border }]}
     >
-      <Text style={[styles.smallButtonText, { color: palette.primary }]}>{label}</Text>
+      <Text style={[styles.smallButtonText, { color: disabled ? extended.disabledText : palette.primary }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -938,6 +1061,50 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 44,
     paddingHorizontal: spacing.md,
+  },
+  modalBackdrop: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  clearDataModal: {
+    alignItems: "stretch",
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxWidth: 440,
+    padding: spacing.lg,
+    width: "100%",
+  },
+  clearDataModalCopy: {
+    gap: spacing.xs,
+  },
+  clearDataPinInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: 0,
+    minHeight: 52,
+    paddingHorizontal: spacing.md,
+    textAlign: "center",
+  },
+  clearDataModalActions: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  deleteConfirmButton: {
+    alignItems: "center",
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 152,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   summaryText: {
     flex: 1,

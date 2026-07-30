@@ -1,17 +1,18 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { AppTopBar, Card, EmptyState, LoadingState, Pill, ScreenScroll, SectionHeader } from "@/components/ui/KitaMoUI";
+import { GabiSoftButton } from "@/components/gabi/GabiButton";
+import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
+import { GabiCard, GabiChip, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
+import { GabiText } from "@/components/gabi/GabiText";
+import { AppTopBar, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { listRecentOwnerAlerts, resolveOwnerAlert } from "@/db/repositories";
 import type { OwnerAlert, OwnerAlertSeverity } from "@/domain/types";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
-import { useThemeStore } from "@/state/themeStore";
-import { themePalettes } from "@/theme/colors";
-import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
-import { typography } from "@/theme/typography";
+import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 type AlertView = "active" | "resolved";
@@ -19,8 +20,8 @@ type AlertScope = "all" | "business" | "activeStall";
 
 const severityLabels: Record<OwnerAlertSeverity, string> = {
   info: "Info",
-  warning: "Warning",
-  critical: "Critical",
+  warning: "Bantayan",
+  critical: "Urgent",
 };
 
 const severityTones: Record<OwnerAlertSeverity, "neutral" | "warning" | "danger"> = {
@@ -39,19 +40,18 @@ export default function OwnerNotificationsScreen() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resolveLock = useRef(false);
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
+  const { palette, extended } = useGabiTheme();
   const router = useRouter();
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const status = await loadOwnerSetupStatus();
-      const nextAlerts = status.activeBusiness ? await listRecentOwnerAlerts(status.activeBusiness.id, 100) : [];
-      setStatus(status);
+      const nextStatus = await loadOwnerSetupStatus();
+      const nextAlerts = nextStatus.activeBusiness ? await listRecentOwnerAlerts(nextStatus.activeBusiness.id, 100) : [];
+      setStatus(nextStatus);
       setAlerts(nextAlerts);
-      setBranchNames(Object.fromEntries(status.branches.map((branch) => [branch.id, branch.branchName])));
-      setScope((current) => (current === "activeStall" && !status.activeBranch ? "all" : current));
+      setBranchNames(Object.fromEntries(nextStatus.branches.map((branch) => [branch.id, branch.branchName])));
+      setScope((current) => (current === "activeStall" && !nextStatus.activeBranch ? "all" : current));
       setError(null);
     } catch (loadError) {
       logDevError("OwnerNotifications.refresh", loadError);
@@ -72,27 +72,16 @@ export default function OwnerNotificationsScreen() {
   const visibleAlerts = useMemo(
     () =>
       alerts.filter((alert) => {
-        if (alert.status !== view) {
-          return false;
-        }
-
-        if (scope === "business") {
-          return alert.branchId === null;
-        }
-
-        if (scope === "activeStall") {
-          return Boolean(status?.activeBranch && alert.branchId === status.activeBranch.id);
-        }
-
+        if (alert.status !== view) return false;
+        if (scope === "business") return alert.branchId === null;
+        if (scope === "activeStall") return Boolean(status?.activeBranch && alert.branchId === status.activeBranch.id);
         return true;
       }),
     [alerts, scope, status?.activeBranch, view],
   );
 
   async function resolve(alertId: string) {
-    if (resolveLock.current) {
-      return;
-    }
+    if (resolveLock.current) return;
 
     resolveLock.current = true;
     setResolvingId(alertId);
@@ -111,127 +100,120 @@ export default function OwnerNotificationsScreen() {
   return (
     <ScreenScroll bottomNav>
       <AppTopBar
-        right={
-          <Pressable
-            accessibilityLabel="Settings"
-            hitSlop={8}
-            onPress={() => router.push("/owner/settings")}
-            style={[styles.headerButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
-          >
-            <Ionicons color={palette.primary} name="settings-outline" size={20} />
-          </Pressable>
-        }
-        subtitle="Alerts saved on this phone"
+        backHref="/owner"
+        eyebrow="LOCAL ALERTS"
+        right={<GabiIconButton accessibilityLabel="Settings" icon="settings-outline" onPress={() => router.push("/owner/settings")} />}
+        subtitle="Mga abisong naka-save sa phone na ito"
         title="Notifications"
       />
 
-      <View style={[styles.localNotice, { backgroundColor: palette.softPrimary, borderColor: palette.border }]}>
-        <Ionicons color={palette.primary} name="phone-portrait-outline" size={20} />
-        <View style={styles.noticeCopy}>
-          <Text style={[styles.noticeTitle, { color: palette.text }]}>Local notifications only</Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>Kiosk alerts appear here on this shared device. Push notifications and remote pings are not enabled.</Text>
-        </View>
-      </View>
+      <GabiNotice
+        message="Dito lang sa shared device lumalabas ang Kiosk alerts. Wala pang push notification, remote ping, o cloud delivery."
+        title="Local notifications only"
+        tone="owner"
+      />
 
-      {error ? <Text style={[styles.message, { color: palette.danger }]}>{error}</Text> : null}
+      {error ? <GabiNotice message={error} title="Hindi ma-load ang alerts" tone="danger" /> : null}
 
-      <View style={[styles.segmentedControl, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-        <SegmentButton count={activeCount} label="Active" onPress={() => setView("active")} selected={view === "active"} />
-        <SegmentButton count={resolvedCount} label="Resolved" onPress={() => setView("resolved")} selected={view === "resolved"} />
+      <View accessibilityRole="tablist" style={[styles.segmented, { backgroundColor: extended.neutralChipBg }]}>
+        <AlertTab count={activeCount} label="Aktibo" onPress={() => setView("active")} selected={view === "active"} />
+        <AlertTab count={resolvedCount} label="Resolved" onPress={() => setView("resolved")} selected={view === "resolved"} />
       </View>
 
       <View style={styles.scopeRow}>
-        <ScopeButton label="All stalls" onPress={() => setScope("all")} selected={scope === "all"} />
-        <ScopeButton label="Business-wide" onPress={() => setScope("business")} selected={scope === "business"} />
-        <ScopeButton
+        <ScopeChip label="Lahat" onPress={() => setScope("all")} selected={scope === "all"} />
+        <ScopeChip label="Business-wide" onPress={() => setScope("business")} selected={scope === "business"} />
+        <ScopeChip
           disabled={!status?.activeBranch}
-          label={status?.activeBranch?.branchName ?? "No active stall"}
+          label={status?.activeBranch?.branchName ?? "Walang active stall"}
           onPress={() => setScope("activeStall")}
           selected={scope === "activeStall"}
         />
       </View>
 
-      {loading ? <LoadingState label="Reading local alerts..." /> : null}
+      {loading ? (
+        <GabiCard>
+          <GabiSkeleton height={18} showImmediately width="42%" />
+          <GabiSkeleton height={112} showImmediately />
+          <GabiSkeleton height={112} showImmediately />
+        </GabiCard>
+      ) : null}
 
       {!loading && visibleAlerts.length === 0 ? (
-        <Card>
-          <EmptyState
-            description={view === "active" ? "New same-device Kiosk alerts will appear here." : "Resolved alerts will remain available for local review."}
-            title={view === "active" ? "No active alerts" : "No resolved alerts"}
-          />
-        </Card>
+        <GabiEmptyState
+          icon={view === "active" ? "notifications-off-outline" : "checkmark-done-outline"}
+          message={view === "active" ? "Lalabas dito ang bagong same-device Kiosk alerts." : "Mananatili rito ang resolved alerts para sa local review."}
+          title={view === "active" ? "Walang active alert" : "Wala pang resolved alert"}
+        />
       ) : null}
 
       {!loading && visibleAlerts.length > 0 ? (
-        <Card>
-          <SectionHeader title={view === "active" ? "Needs review" : "Alert history"} />
-          <View style={styles.alertList}>
-            {visibleAlerts.map((alert) => (
-              <View key={alert.id} style={[styles.alertCard, { backgroundColor: palette.background, borderColor: palette.border }]}>
-                <View style={styles.alertHeader}>
-                  <View style={styles.alertTitleCopy}>
-                    <Text style={[styles.alertTitle, { color: palette.text }]}>{alert.title}</Text>
-                    <Text style={[styles.alertMeta, { color: palette.mutedText }]}>
-                      {alert.branchId ? branchNames[alert.branchId] ?? "Saved stall" : "Business-wide"} · {formatSource(alert.source)}
-                    </Text>
-                  </View>
-                  <Pill label={severityLabels[alert.severity]} tone={severityTones[alert.severity]} />
+        <View style={styles.alertSection}>
+          <GabiSectionHeader
+            action={<GabiChip label={`${visibleAlerts.length}`} tone={view === "active" ? "warning" : "success"} />}
+            title={view === "active" ? "Kailangang tingnan" : "Alert history"}
+          />
+          {visibleAlerts.map((alert) => (
+            <GabiCard key={alert.id} raised={alert.severity === "critical"}>
+              <View style={styles.alertHeader}>
+                <View style={[styles.alertIcon, { backgroundColor: alert.severity === "critical" ? palette.softDanger : alert.severity === "warning" ? palette.softWarning : palette.softPrimary }]}>
+                  <Ionicons
+                    color={alert.severity === "critical" ? palette.danger : alert.severity === "warning" ? palette.warning : palette.primary}
+                    name={alert.severity === "critical" ? "alert-circle" : alert.severity === "warning" ? "warning" : "information-circle"}
+                    size={21}
+                  />
                 </View>
-                <Text style={[styles.body, { color: palette.mutedText }]}>{alert.message}</Text>
-                <View style={styles.alertFooter}>
-                  <Text style={[styles.alertTime, { color: palette.mutedText }]}>{formatAlertTime(alert.createdAt)}</Text>
-                  {alert.status === "active" ? (
-                    <Pressable
-                      disabled={resolvingId !== null}
-                      onPress={() => resolve(alert.id)}
-                      style={[styles.resolveButton, { backgroundColor: palette.surface, borderColor: palette.border, opacity: resolvingId !== null ? 0.55 : 1 }]}
-                    >
-                      <Text style={[styles.resolveText, { color: palette.primary }]}>{resolvingId === alert.id ? "Resolving..." : "Resolve"}</Text>
-                    </Pressable>
-                  ) : (
-                    <Pill label="Resolved" tone="success" />
-                  )}
+                <View style={styles.alertTitleCopy}>
+                  <GabiText variant="cardTitle">{alert.title}</GabiText>
+                  <GabiText numberOfLines={2} tone="muted" variant="caption">
+                    {alert.branchId ? branchNames[alert.branchId] ?? "Saved stall" : "Business-wide"} · {formatSource(alert.source)}
+                  </GabiText>
                 </View>
+                <GabiChip label={severityLabels[alert.severity]} tone={severityTones[alert.severity]} />
               </View>
-            ))}
-          </View>
-        </Card>
+              <GabiText tone="muted" variant="body">{alert.message}</GabiText>
+              <View style={styles.alertFooter}>
+                <GabiText tone="faint" variant="caption">{formatAlertTime(alert.createdAt)}</GabiText>
+                {alert.status === "active" ? (
+                  <GabiSoftButton
+                    compact
+                    disabled={resolvingId !== null}
+                    icon="checkmark-circle-outline"
+                    label={resolvingId === alert.id ? "Inaayos..." : "Ayos na"}
+                    loading={resolvingId === alert.id}
+                    onPress={() => resolve(alert.id)}
+                  />
+                ) : (
+                  <GabiChip label="Resolved" tone="success" />
+                )}
+              </View>
+            </GabiCard>
+          ))}
+        </View>
       ) : null}
     </ScreenScroll>
   );
 }
 
-function SegmentButton({ label, count, selected, onPress }: { label: string; count: number; selected: boolean; onPress: () => void }) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function AlertTab({ label, count, selected, onPress }: { label: string; count: number; selected: boolean; onPress: () => void }) {
+  const { palette } = useGabiTheme();
   return (
     <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
       onPress={onPress}
-      style={[styles.segmentButton, { backgroundColor: selected ? palette.primary : palette.surface }]}
+      style={[styles.segment, selected ? { backgroundColor: palette.surface } : undefined]}
     >
-      <Text style={[styles.segmentText, { color: selected ? palette.kioskHeaderText : palette.mutedText }]}>{label}</Text>
-      <View style={[styles.segmentCount, { backgroundColor: selected ? palette.softAccent : palette.softPrimary }]}>
-        <Text style={[styles.segmentCountText, { color: selected ? palette.primary : palette.mutedText }]}>{count}</Text>
+      <GabiText tone={selected ? "primary" : "muted"} variant="buttonSm">{label}</GabiText>
+      <View style={[styles.tabCount, { backgroundColor: selected ? palette.softPrimary : palette.background }]}>
+        <GabiText tone={selected ? "primary" : "muted"} variant="caption">{count}</GabiText>
       </View>
     </Pressable>
   );
 }
 
-function ScopeButton({
-  label,
-  selected,
-  disabled = false,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  const themeMode = useThemeStore((state) => state.themeMode);
-  const palette = themePalettes[themeMode === "dark" ? "dark" : "light"];
-
+function ScopeChip({ label, selected, disabled = false, onPress }: { label: string; selected: boolean; disabled?: boolean; onPress: () => void }) {
+  const { palette, extended } = useGabiTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -239,17 +221,22 @@ function ScopeButton({
       disabled={disabled}
       onPress={onPress}
       style={[
-        styles.scopeButton,
+        styles.scopeChip,
         {
-          backgroundColor: selected ? palette.softPrimary : palette.surface,
-          borderColor: selected ? palette.primary : palette.border,
-          opacity: disabled ? 0.5 : 1,
+          backgroundColor: disabled ? extended.disabledBg : selected ? palette.softPrimary : palette.surface,
+          borderColor: disabled ? extended.disabledBg : selected ? palette.primary : palette.border,
         },
       ]}
     >
-      <Text maxFontSizeMultiplier={1.2} numberOfLines={1} style={[styles.scopeText, { color: selected ? palette.primary : palette.mutedText }]}>
+      <GabiText
+        maxFontSizeMultiplier={1.25}
+        numberOfLines={1}
+        style={disabled ? { color: extended.disabledText } : undefined}
+        tone={selected ? "primary" : "muted"}
+        variant="buttonSm"
+      >
         {label}
-      </Text>
+      </GabiText>
     </Pressable>
   );
 }
@@ -263,137 +250,65 @@ function formatSource(source: string) {
 }
 
 const styles = StyleSheet.create({
-  headerButton: {
-    alignItems: "center",
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    height: 36,
-    justifyContent: "center",
-    width: 36,
-  },
-  localNotice: {
-    alignItems: "flex-start",
-    borderRadius: radius.md,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  noticeCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  noticeTitle: {
-    ...typography.button,
-  },
-  body: {
-    ...typography.body,
-  },
-  message: {
-    ...typography.body,
-  },
-  segmentedControl: {
-    borderRadius: radius.md,
-    borderWidth: 1,
+  segmented: {
+    borderRadius: 14,
     flexDirection: "row",
     gap: spacing.xs,
-    padding: spacing.xs,
+    padding: 3,
   },
-  segmentButton: {
+  segment: {
     alignItems: "center",
-    borderRadius: radius.sm,
+    borderRadius: 12,
     flex: 1,
     flexDirection: "row",
     gap: spacing.xs,
     justifyContent: "center",
     minHeight: 44,
   },
-  segmentText: {
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 17,
-  },
-  segmentCount: {
+  tabCount: {
     alignItems: "center",
-    borderRadius: radius.pill,
+    borderRadius: 10,
     minWidth: 22,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  segmentCountText: {
-    fontSize: 10,
-    fontWeight: "900",
-    lineHeight: 13,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
   },
   scopeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.xs,
   },
-  scopeButton: {
-    borderRadius: radius.pill,
+  scopeChip: {
+    borderRadius: 18,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 44,
     maxWidth: "100%",
+    minHeight: 44,
     paddingHorizontal: spacing.md,
   },
-  scopeText: {
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
-  },
-  alertList: {
-    gap: spacing.sm,
-  },
-  alertCard: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: spacing.sm,
-    padding: spacing.md,
+  alertSection: {
+    gap: spacing.md,
   },
   alertHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: spacing.sm,
-    justifyContent: "space-between",
+  },
+  alertIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
   },
   alertTitleCopy: {
     flex: 1,
     gap: 2,
   },
-  alertTitle: {
-    ...typography.button,
-  },
-  alertMeta: {
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 15,
-    textTransform: "capitalize",
-  },
   alertFooter: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
     justifyContent: "space-between",
-  },
-  alertTime: {
-    flex: 1,
-    fontSize: 11,
-    fontWeight: "700",
-    lineHeight: 15,
-  },
-  resolveButton: {
-    alignItems: "center",
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-  },
-  resolveText: {
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 16,
   },
 });

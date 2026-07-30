@@ -1,0 +1,303 @@
+{
+  "generatedAt": "2026-07-25",
+  "repository": "kitamo-ph/owner-seller-mobile",
+  "branch": "codex/pre-internal-hardening",
+  "head": "6ed9ace3a92f7435f84c2f75f0084a03070ae2e4",
+  "scope": "Persisted string unions, status vocabularies, and typed setting vocabularies observed in the Android repository. Values are case-sensitive unless future contracts explicitly decide otherwise.",
+  "vocabularyCount": 27,
+  "vocabularies": [
+    {
+      "name": "SyncStatus",
+      "source": "src/domain/types.ts:3",
+      "persistedIn": "sync_status on 22 application tables",
+      "values": ["local", "pending", "synced", "failed"],
+      "default": "local on domain tables; pending on offline_queue",
+      "databaseEnforced": true,
+      "transitionEvidence": "Current writers use local, except checkout queue uses pending; no active synced or failed writer was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "BusinessType",
+      "source": "src/domain/types.ts:5-12",
+      "persistedIn": "businesses.business_type",
+      "values": ["sari-sari store", "karinderia", "street food", "kiosk", "school canteen", "small booth", "other"],
+      "default": null,
+      "databaseEnforced": false,
+      "transitionEvidence": "Created and updated through owner setup and business settings.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "LanguagePreference",
+      "source": "src/domain/types.ts:14",
+      "persistedIn": "businesses.preferred_language",
+      "values": ["Taglish", "Filipino", "English"],
+      "default": "Taglish",
+      "databaseEnforced": false,
+      "transitionEvidence": "Stored as business preference.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "Currency",
+      "source": "src/domain/types.ts:35",
+      "persistedIn": "businesses.currency",
+      "values": ["PHP"],
+      "default": "PHP",
+      "databaseEnforced": false,
+      "transitionEvidence": "No alternate currency calculation path was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "BranchType",
+      "source": "src/domain/types.ts:42",
+      "persistedIn": "branches.branch_type",
+      "values": ["stall", "branch", "kiosk", "booth", "home kitchen", "pop-up"],
+      "default": "stall",
+      "databaseEnforced": false,
+      "transitionEvidence": "Created and updated through branch settings.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "ProductType",
+      "source": "src/domain/types.ts:15",
+      "persistedIn": "products.product_type",
+      "values": ["retail item", "cooked food", "ingredient-based item", "service/other"],
+      "default": "retail item",
+      "databaseEnforced": false,
+      "transitionEvidence": "Controls prepared-stock and cook-upon-order paths together with recipe production mode.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "UnitType",
+      "source": "src/domain/types.ts:16",
+      "persistedIn": "products.unit_type",
+      "values": ["piece", "bottle", "pack", "sachet", "kilo", "serving", "case", "tray", "other"],
+      "default": "piece",
+      "databaseEnforced": false,
+      "transitionEvidence": "Display and product-stock unit; no conversion engine was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "PaymentMethod",
+      "source": "src/domain/types.ts:1",
+      "persistedIn": "sales.payment_method",
+      "values": ["cash", "GCash", "Maya", "bank transfer", "other"],
+      "default": "cash",
+      "databaseEnforced": false,
+      "transitionEvidence": "Selected during checkout and stored on the Sale.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "PaymentStatus",
+      "source": "src/domain/types.ts:17",
+      "persistedIn": "sales.payment_status",
+      "values": ["paid", "unpaid", "pending", "failed"],
+      "default": "paid",
+      "databaseEnforced": false,
+      "transitionEvidence": "Written at sale creation; no later transition service was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "SaleCogsSource",
+      "source": "src/domain/types.ts:77",
+      "persistedIn": "sale_items.cogs_source",
+      "values": ["simple", "production_average", "cook_upon_order_actual", "cook_upon_order_estimated"],
+      "default": null,
+      "databaseEnforced": false,
+      "transitionEvidence": "Assigned by checkout COGS selection and retained as a line snapshot.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "InventoryMovementType",
+      "source": "src/domain/types.ts:98-107",
+      "persistedIn": "inventory_movements.movement_type",
+      "values": ["stock_in", "stock_out_sale", "manual_adjustment", "cooked", "spoilage", "transfer_in", "transfer_out", "return_to_supplier", "customer_return"],
+      "default": null,
+      "databaseEnforced": false,
+      "transitionEvidence": "Append-only movement classification used by inventory reporting.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "IngredientUnit",
+      "source": "src/domain/types.ts:121",
+      "persistedIn": "ingredient, lot, movement, recipe, production, and sale-usage unit columns",
+      "values": ["g", "kg", "ml", "L", "pcs", "pack"],
+      "default": "pcs on most schema columns",
+      "databaseEnforced": false,
+      "transitionEvidence": "Compared for equality in production paths; no general conversion rules were found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "IngredientLotStatus",
+      "source": "src/domain/types.ts:132",
+      "persistedIn": "ingredient_lots.status",
+      "values": ["active", "depleted", "archived"],
+      "default": "active",
+      "databaseEnforced": false,
+      "transitionEvidence": "Remaining quantity operations can deplete; explicit archival is also available.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "IngredientMovementType",
+      "source": "src/domain/types.ts:149",
+      "persistedIn": "ingredient_movements.movement_type",
+      "values": ["purchase", "adjustment", "recipe_usage", "spoilage"],
+      "default": null,
+      "databaseEnforced": false,
+      "transitionEvidence": "Assigned when grocery inventory history is appended.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "RecipeProductionMode",
+      "source": "src/domain/types.ts:163",
+      "persistedIn": "recipes.production_mode",
+      "values": ["prepared_before_selling", "cook_upon_order"],
+      "default": "prepared_before_selling",
+      "databaseEnforced": false,
+      "transitionEvidence": "Selects prepared production versus checkout-time ingredient costing.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "FixedCostCategory",
+      "source": "src/domain/types.ts:219-228",
+      "persistedIn": "fixed_costs.category",
+      "values": ["rent", "wages", "electricity", "water", "transport", "lpg_gas", "market_fee", "internet_load", "other"],
+      "default": "other",
+      "databaseEnforced": false,
+      "transitionEvidence": "Used for fixed-cost classification and reporting.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "FixedCostFrequency",
+      "source": "src/domain/types.ts:230",
+      "persistedIn": "fixed_costs.frequency",
+      "values": ["daily", "weekly", "monthly", "one_time"],
+      "default": "monthly",
+      "databaseEnforced": false,
+      "transitionEvidence": "Drives occurrence generation over a report period.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "FixedCostStatus",
+      "source": "src/domain/types.ts:242",
+      "persistedIn": "fixed_costs.status",
+      "values": ["active", "archived"],
+      "default": "active",
+      "databaseEnforced": false,
+      "transitionEvidence": "Archive changes inclusion in current report queries.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "FixedCostPaymentStatus",
+      "source": "src/domain/types.ts:253",
+      "persistedIn": "fixed_cost_payments.status",
+      "values": ["paid", "skipped"],
+      "default": "paid",
+      "databaseEnforced": false,
+      "transitionEvidence": "The active writer creates paid; skipped is declared and persistable but no skip writer was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "OwnerAlertSeverity",
+      "source": "src/domain/types.ts:257",
+      "persistedIn": "owner_alerts.severity",
+      "values": ["info", "warning", "critical"],
+      "default": "info",
+      "databaseEnforced": false,
+      "transitionEvidence": "Set at alert creation.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "OwnerAlertStatus",
+      "source": "src/domain/types.ts:258 and src/db/migrations/001_initial_schema.ts",
+      "persistedIn": "owner_alerts.status",
+      "values": ["open", "active", "resolved"],
+      "default": "open in SQLite",
+      "databaseEnforced": false,
+      "transitionEvidence": "TypeScript declares active/resolved while the schema defaults to open; repository queries account for legacy open records.",
+      "compatibilityRisk": "Confirmed mismatch between the persisted legacy/default vocabulary and the TypeScript vocabulary.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "AppSettingKey",
+      "source": "src/domain/types.ts:283-291",
+      "persistedIn": "app_settings.key",
+      "values": ["themeMode", "activeBusinessId", "activeBranchId", "activeBranchId:${string}", "hasCompletedFirstRun", "hasSeededDemoData", "favoriteProductIds", "recentProductIds"],
+      "default": null,
+      "databaseEnforced": false,
+      "transitionEvidence": "Keys are upserted; the branch-specific key has a dynamic suffix.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "AppSettingValueType",
+      "source": "src/domain/types.ts:297",
+      "persistedIn": "app_settings.value_type",
+      "values": ["string", "boolean", "number", "json"],
+      "default": "string",
+      "databaseEnforced": false,
+      "transitionEvidence": "Controls repository serialization and parsing.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "ProblemReportMode",
+      "source": "src/db/migrations/010_problem_reports.ts",
+      "persistedIn": "problem_reports.mode",
+      "values": ["owner", "kiosk"],
+      "default": null,
+      "databaseEnforced": true,
+      "transitionEvidence": "Fixed at report creation.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "ProblemReportCategory",
+      "source": "src/db/migrations/010_problem_reports.ts",
+      "persistedIn": "problem_reports.category",
+      "values": ["app_crashed", "app_slow", "button_not_working", "incorrect_information", "confusing_screen", "pin_problem", "other"],
+      "default": null,
+      "databaseEnforced": true,
+      "transitionEvidence": "Selected at report creation.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "ProblemReportStatus",
+      "source": "src/db/migrations/010_problem_reports.ts",
+      "persistedIn": "problem_reports.status",
+      "values": ["open", "resolved"],
+      "default": "open",
+      "databaseEnforced": true,
+      "transitionEvidence": "Current code writes open at creation; resolved is allowed by schema/type but no resolver write path was found.",
+      "confidence": "Confirmed"
+    },
+    {
+      "name": "ThemeMode",
+      "source": "src/state/themeStore.ts and src/services/themePreferences.ts",
+      "persistedIn": "app_settings value for themeMode",
+      "values": ["light", "dark", "system"],
+      "default": "system when no valid stored value exists",
+      "databaseEnforced": false,
+      "transitionEvidence": "Persisted by the theme preference service and mirrored in Zustand.",
+      "confidence": "Confirmed"
+    }
+  ],
+  "untypedPersistedVocabularies": [
+    {
+      "field": "offline_queue.status",
+      "observedValues": ["pending"],
+      "issue": "No complete typed lifecycle or consumer exists."
+    },
+    {
+      "field": "offline_queue.entity_type",
+      "observedValues": ["sale"],
+      "issue": "Polymorphic vocabulary is not centrally declared."
+    },
+    {
+      "field": "offline_queue.operation",
+      "observedValues": ["create"],
+      "issue": "Operation vocabulary is not centrally declared."
+    },
+    {
+      "field": "problem_reports.diagnostics_json breadcrumbs[].kind",
+      "observedValues": ["navigation", "action", "error"],
+      "issue": "Nested diagnostic vocabulary is JSON rather than a database constraint."
+    }
+  ]
+}

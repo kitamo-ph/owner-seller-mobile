@@ -14,7 +14,7 @@ const walkthroughSteps = [
   "I-produce para sa stall mo sa Niluto.",
   "Sa Owner Home, buksan ang stall picker, piliin ang stall, at i-confirm ang Kiosk — subukan ang cash at GCash.",
   "Check Logbook para sa benta, resibo, at stock movements.",
-  "Check Insights para sa kita, puhunan, at low stock.",
+  "Check Kita Report para sa benta, puhunan, bayarin, at tubo.",
   "Add a bayarin (example: Stall rent, ₱3,000 monthly).",
   "Open Kita Report para makita ang tubo per stall at buong negosyo.",
 ];

@@ -24,6 +24,24 @@ export type TransferResult = {
   createdDestinationProduct: boolean;
 };
 
+export async function loadTransferCostPreview(
+  productId: string,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  const status = await loadOwnerSetupStatus(db);
+  const product = await getProductById(productId, db);
+  if (!status.activeBusiness || !product || product.businessId !== status.activeBusiness.id) {
+    throw new Error("Product not found. Refresh and try again.");
+  }
+
+  const averageCosts = await getAverageProducedCostByProduct(status.activeBusiness.id, db);
+  return {
+    unitCost: averageCosts.get(product.id) ?? product.cost,
+    source: averageCosts.has(product.id) ? ("production_average" as const) : ("product_cost" as const),
+  };
+}
+
 export async function recordTransfer(
   input: RecordTransferInput,
   db: RepositoryDatabase = openKitamoDatabase(),

@@ -11,6 +11,7 @@ import { productionMigration } from "./006_production";
 import { sellingCogsMigration } from "./007_selling_cogs";
 import { fixedCostsMigration } from "./008_fixed_costs";
 import { checkoutIdempotencyMigration } from "./009_checkout_idempotency";
+import { problemReportsMigration } from "./010_problem_reports";
 
 export type Migration = {
   id: string;
@@ -27,12 +28,20 @@ const migrations: Migration[] = [
   sellingCogsMigration,
   fixedCostsMigration,
   checkoutIdempotencyMigration,
+  problemReportsMigration,
 ];
 
 type MigrationRow = {
   id: string;
   applied_at: string;
 };
+
+type MigrationResult = {
+  appliedMigrationIds: string[];
+  newlyAppliedMigrationIds: string[];
+};
+
+const migrationQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
 
 async function ensureMigrationTable(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -48,7 +57,7 @@ export async function getAppliedMigrations(db = openKitamoDatabase()) {
   return db.getAllAsync<MigrationRow>("SELECT id, applied_at FROM schema_migrations ORDER BY id ASC");
 }
 
-export async function runMigrations(db = openKitamoDatabase()) {
+async function runMigrationsNow(db: SQLiteDatabase): Promise<MigrationResult> {
   await ensureMigrationTable(db);
 
   const appliedRows = await getAppliedMigrations(db);
@@ -75,4 +84,23 @@ export async function runMigrations(db = openKitamoDatabase()) {
     appliedMigrationIds: [...appliedIds, ...newlyApplied],
     newlyAppliedMigrationIds: newlyApplied,
   };
+}
+
+export function runMigrations(db = openKitamoDatabase()): Promise<MigrationResult> {
+  const previous = migrationQueues.get(db) ?? Promise.resolve();
+  const operation = previous.then(
+    () => runMigrationsNow(db),
+    () => runMigrationsNow(db),
+  );
+
+  // Keep concurrent startup consumers from entering overlapping transactions.
+  migrationQueues.set(
+    db,
+    operation.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+
+  return operation;
 }
