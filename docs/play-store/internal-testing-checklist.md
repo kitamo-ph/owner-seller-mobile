@@ -5,7 +5,10 @@ Goal: get the first internal-testing build into a small trusted tester group's h
 ## Prerequisites
 
 - [ ] Real-phone QA pass complete (see `docs/pilot/android-seller-pilot-checklist.md`).
-- [x] All local checks green: `typecheck`, `lint`, Expo Doctor 18/18, eight regression commands including `check:owner-context` and `check:migrations`, and production Android export.
+- [x] Source validation for the pre-internal baseline is recorded in
+  [`pre-internal-hardening-validation.md`](../release/pre-internal-hardening-validation.md):
+  typecheck, lint, the release regression suite, Expo Doctor, and production
+  export. This is source evidence, not a versionCode 2 install/runtime test.
 - [x] App icon, adaptive icon, splash, Play icon, and feature graphic added and visually checked.
 - [ ] Privacy policy hosted at a public URL (draft: `privacy-policy-draft.md`; Play Console requires a URL, not a document).
 - [ ] Final support email supplied and added to the listing/privacy policy.
@@ -23,8 +26,10 @@ Goal: get the first internal-testing build into a small trusted tester group's h
 ## App signing
 
 - [ ] Use Play App Signing (default; Google holds the app signing key).
-- [ ] Let EAS manage the upload keystore (recommended: accept the default when running the first `eas build`). Record where the credentials live: EAS servers under the Expo account.
-- [ ] Do NOT commit any keystore file to the repo.
+- [x] EAS production upload certificate independently verified against the
+  versionCode 2 signer. Keep the existing EAS-managed credentials; do not
+  regenerate or replace them.
+- [x] No keystore file is committed to the repository.
 
 ## Build artifact (EAS)
 
@@ -32,21 +37,38 @@ One-time setup:
 
 - [x] `eas login` completed as `rawbeans`, with owner access to organization `kitamoandroidapp`.
 - [x] `eas build:configure` and project link completed for `@kitamoandroidapp/kitamo-android`.
-- [x] Confirm `app.json`: name `KitaMo`, package `ph.kitamo.app`, versionCode `1`, version `1.0.0`, backup disabled, release permissions minimized.
+- [x] Confirm `app.json`: name `KitaMo`, package `ph.kitamo.app`,
+  versionCode `2`, version `1.0.0`, backup disabled, release permissions
+  minimized.
 
 Build:
 
 - [x] Standalone preview APK built with the EAS-managed keystore (`f3b64c64-04d0-4f71-ac54-1ceba8029403`).
 - [ ] Download/install that EAS APK and complete the full physical-device regression.
-- [x] Final Internal Play AAB built from `376b2f1` with the EAS-managed upload keystore: `362a9631-f557-4ac4-9b0c-b770c10ea637`.
-- [x] Exact final AAB downloaded to ignored release storage; SHA-256 `51c515df2b9da82687f68fd553e4f4936801c77bea650c44190ae4538fa6efcd`.
-- [x] Verified package/version, merged permissions, backup policy, EAS AAB signature, QA universal-APK v2/v3 signatures and clean install, bundle configuration, and 16 KB alignment for all 40 arm64/x86_64 native libraries.
+- [x] Designate
+  `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab` as the sole
+  Internal Testing upload artifact.
+- [x] Verify its SHA-256:
+  `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`.
+- [x] Verify package/version, merged permissions, backup policy, AAB signature,
+  bundle processing, static offline/cloud boundary, and 16 KB alignment for all
+  40 applicable arm64/x86_64 native libraries.
+- [x] Independently confirm that the AAB signer exactly matches the EAS
+  production upload-certificate SHA-256 fingerprint recorded in the
+  [versionCode 2 verification](../release/versioncode-2-aab-verification.md).
+- [x] Preserve the versionCode 1 artifact, build ID, checksum, and audit as
+  history: **Superseded — do not upload**.
+- [ ] Install/runtime-test the delivered versionCode 2 build through Google Play
+  on the pilot device; local static verification did not perform this step.
 
 ## Upload to internal testing
 
 - [ ] Play Console → Testing → Internal testing → Create new release.
-- [ ] Upload the `.aab`.
-- [ ] Release name: `1.0.0 (1) - pilot`. Release notes: paste from `release-notes-internal.md`.
+- [ ] Recompute the designated AAB's SHA-256 and require the exact value above.
+- [ ] Upload only
+  `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`.
+- [ ] Release name: `1.0.0 (2) - pilot`. Release notes: paste from
+  `release-notes-internal.md`.
 - [ ] Save → Review release → Start rollout to Internal testing.
 
 ## Tester list
@@ -74,6 +96,10 @@ Use the format in `internal-tester-guide.md` (screen, steps, expected, actual, s
 
 ## Next build / rollback
 
-- Next build: bump `version` (e.g. 1.0.1) and `versionCode` (2) in `app.json`, rebuild, upload as a new internal release. versionCode must always increase.
-- Rollback: internal testing has no true rollback; upload a fixed higher-versionCode build instead. Testers get it automatically from the Play Store.
+- Next build: any later or replacement build must use versionCode `3` or higher.
+  Change `version` as appropriate, rebuild only under separate approval, and
+  upload as a new internal release. versionCode must always increase.
+- Rollback: internal testing has no true rollback; upload a fixed build with
+  versionCode `3` or higher instead. Testers get it automatically from the Play
+  Store.
 - Promote to closed testing only after internal feedback is folded in — not part of this phase.

@@ -1,12 +1,14 @@
 # KitaMo Android - Final Release Readiness
 
-Status: release candidate for Google Play Internal Testing. The Android seller app is authoritative; the PWA remains frozen and unchanged. Public rollout is not approved.
+Status: versionCode 2 artifact conditionally verified for Google Play Internal
+Testing; owner actions remain. The Android seller app is authoritative; the PWA
+remains frozen and unchanged. No Play upload or public rollout is approved.
 
 ## Release identity
 
 - App: **KitaMo**
 - Package: **`ph.kitamo.app`**
-- Version: **`1.0.0`** (`versionCode` 1)
+- Version: **`1.0.0`** (`versionCode` 2)
 - Expo SDK 54 / React Native 0.81 / New Architecture
 - Production profile: signed Android App Bundle
 - Branded launcher icon, adaptive icon, splash, Play icon, and feature graphic are present
@@ -22,7 +24,10 @@ Status: release candidate for Google Play Internal Testing. The Android seller a
 
 ## Final QA result
 
-The user approved the redesigned app's manual QA. Codex then reran the release gates on `codex/gabi-redesign` after the measured low-end fix:
+The user approved the redesigned app's manual QA. Codex then reran the release
+gates on `codex/gabi-redesign` after the measured low-end fix. This source and
+versionCode 1 runtime history remains useful evidence, but it is not presented
+as a versionCode 2 install/runtime test:
 
 - `npm run typecheck`: pass
 - `npm run lint`: pass
@@ -71,12 +76,36 @@ Profiling identified two proven bottlenecks and only those were changed:
 - Expected merged permissions: network/Wi-Fi state, vibration, biometric, fingerprint fallback, and an app-local signature receiver permission.
 - Forbidden permissions: Internet, camera, microphone, storage, location, Bluetooth, and system overlay.
 - `allowBackup=false`; Secure Store backup is also disabled.
-- No Supabase/Clerk/OpenAI/Lis runtime, endpoint, key, or EAS environment secret is present.
+- The versionCode 2 AAB static scan found no Supabase/Clerk/OpenAI/Lis client,
+  endpoint, or credential-shaped token. Remote EAS environment state was not
+  rechecked by that binary inspection.
 - `npm audit --omit=dev` reports 13 moderate and 0 high/critical advisories in Expo build/configuration transitive dependencies. The offered remediation requires a breaking Expo 57 upgrade; defer to the next supported SDK upgrade.
-- Final EAS build `362a9631-f557-4ac4-9b0c-b770c10ea637` completed successfully from `376b2f1` with the managed upload keystore.
-- Final AAB SHA-256: `51c515df2b9da82687f68fd553e4f4936801c77bea650c44190ae4538fa6efcd`.
-- Exact final artifact checks passed: bundletool, EAS upload-key signing, package `ph.kitamo.app`, version `1.0.0 (1)`, min API 24, target API 36, `allowBackup=false`, approved permissions with no Internet/camera/microphone/storage/location/Bluetooth permission, QA universal-APK v2/v3 signing and clean install, APK 16 KB zip alignment, and ELF alignment for all 40 arm64/x86_64 libraries.
-- Clean standalone launch reached the Fresh/Demo first-run screen in 1.09 seconds with no focused fatal React Native, SQLite, native-linking, or font error.
+- The designated Internal Testing artifact is
+  `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`.
+- Its SHA-256 is
+  `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`.
+- Its package/version identity is `ph.kitamo.app` / `1.0.0` / versionCode `2`,
+  with minimum API 24 and target API 36.
+- Its signer exactly matches the independently verified EAS production
+  upload-certificate SHA-256 fingerprint
+  `9E:2A:60:C0:C9:28:A2:99:24:50:D8:8D:28:3F:89:1C:58:69:ED:5D:A1:E8:23:53:CB:F3:E8:B8:97:6E:A2:C1`.
+- Bundletool/ZIP processing, the expected permission and backup boundary, static
+  offline/cloud exclusion scans, APK ZIP alignment, and all 40 applicable
+  arm64/x86_64 16 KB ELF checks passed. A versionCode 2 signed APK was not
+  installed; Play analysis remains pending.
+- The complete evidence and limitations are in the
+  [versionCode 2 AAB verification record](versioncode-2-aab-verification.md).
+
+Historical versionCode 1 evidence remains preserved:
+
+- EAS build `362a9631-f557-4ac4-9b0c-b770c10ea637`, source `376b2f1`, artifact
+  `release-artifacts/KitaMo-1.0.0-production-eas-376b2f1.aab`, SHA-256
+  `51c515df2b9da82687f68fd553e4f4936801c77bea650c44190ae4538fa6efcd`.
+- Its earlier bundletool, signature, package/version, permission, backup,
+  universal-APK signing/install, 16 KB, and 1.09-second clean-launch checks remain
+  dated evidence for that binary.
+- That artifact and every instruction to upload it are
+  **Superseded — do not upload**.
 
 ## Known limitations
 
@@ -88,18 +117,23 @@ Profiling identified two proven bottlenecks and only those were changed:
 
 ## Human-owned Play gates
 
-1. Create or grant access to the KitaMo Play Console app for package `ph.kitamo.app`.
-2. Supply a monitored public support email.
-3. Host the approved privacy policy at a public HTTPS URL.
-4. Supply the Internal Testing Google-account email list.
-5. Capture final store screenshots from the signed candidate on a physical phone.
-6. Review the drafted Data Safety, content-rating, app-access, and target-audience answers.
-7. Upload the validated AAB, enable Play App Signing, and start Internal Testing only.
-8. Review the Play pre-launch report before considering any later track.
+1. [ ] Create or grant access to the KitaMo Play Console app for package
+   `ph.kitamo.app`.
+2. [ ] Supply a monitored public support email.
+3. [ ] Host the approved privacy policy at a public HTTPS URL.
+4. [ ] Supply the Internal Testing Google-account email list.
+5. [ ] Capture final store screenshots from the signed candidate on a physical
+   phone.
+6. [ ] Enter and owner-confirm the drafted Data Safety, App Access,
+   content-rating, target-audience, and financial-feature answers.
+7. [ ] Enable Play App Signing and upload only the designated versionCode 2 AAB
+   to Internal Testing.
+8. [ ] Enter the prepared release notes and approve the Internal Testing rollout.
+9. [ ] Review the Play pre-launch report before considering any later track.
 
 No Play upload, tester rollout, pre-launch report, or public release can be claimed until those owner-controlled gates are complete.
 
-## Release commands
+## Verification commands and future-build boundary
 
 ```sh
 npm run typecheck
@@ -114,5 +148,7 @@ npm run check:pilot
 npm run check:migrations
 EXPO_NO_DOTENV=1 npx expo-doctor
 EXPO_NO_DOTENV=1 npx expo export --platform android
-npx eas-cli@20.5.1 build -p android --profile production
 ```
+
+Do not rebuild or replace the designated versionCode 2 artifact. A separately
+approved later build must use versionCode 3 or higher.

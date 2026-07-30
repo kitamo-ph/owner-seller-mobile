@@ -1,4 +1,6 @@
-# Internal Testing Release Notes — KitaMo 1.0.0 (versionCode 1)
+# Internal Testing Release Notes — KitaMo 1.0.0 (versionCode 2)
+
+Prepared for release name `1.0.0 (2) - pilot`; not yet entered in Play Console.
 
 ## What this is
 

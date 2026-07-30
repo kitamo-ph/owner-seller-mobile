@@ -88,6 +88,18 @@ The secret-bearing `.env.local` file was detected but not inspected.
 
 No network request was made to GitHub, so this report verifies configured local authority and upstream tracking metadata, not current server-side branch protection or remote object availability. The AAB was read only to compute SHA-256; no artifact internals, credentials, signing material, physical device, or Play Console state were inspected.
 
+## Later release-verification addendum
+
+On 2026-07-30, a separate, approved release-gate task performed read-only
+content, signing, permission, backup, static cloud-boundary, bundle, and 16 KB
+inspection of the protected versionCode 2 AAB. The independently verified EAS
+production upload-certificate fingerprint exactly matched its signer. See the
+[versionCode 2 AAB verification](../release/versioncode-2-aab-verification.md).
+
+This addendum does not retroactively expand or rewrite the MOB-0 inspection scope
+recorded above. Play Console state, upload, runtime installation, and owner-owned
+release prerequisites remain outside this discovery report.
+
 ## Next approval gate
 
 Recommended MOB-0 disposition: **Conditionally Accept**, subject to explicit Verification Pause A approval and an owner decision on whether the local protected AAB needs an external immutable backup/checksum record. No repository action is required to continue MOB-1 discovery.

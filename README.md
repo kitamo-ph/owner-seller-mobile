@@ -12,7 +12,7 @@ The Android app is the seller-product source of truth. The original PWA is froze
 
 - App name: **KitaMo**
 - Android package: **`ph.kitamo.app`**
-- Version name/code: **`1.0.0` / `1`**
+- Version name/code: **`1.0.0` / `2`**
 - Expo SDK 54 / React Native 0.81 / New Architecture
 - Branded icon, adaptive icon, splash, Play icon, and feature graphic are present.
 - Android backup is disabled because this release has no account, backup, or restore service.
@@ -66,7 +66,10 @@ EXPO_NO_DOTENV=1 npx expo export --platform android
 
 Use Node `20.19.4` or newer. EAS profiles pin Node `20.19.4`.
 
-### Build commands
+### Build commands for later versions
+
+The versionCode 2 Internal Testing AAB is already designated and must not be
+rebuilt or replaced. Any later build must use versionCode 3 or higher.
 
 ```sh
 eas login
@@ -75,13 +78,15 @@ eas build -p android --profile preview
 eas build -p android --profile production
 ```
 
-EAS is authenticated and linked to [`@kitamoandroidapp/kitamo-android`](https://expo.dev/accounts/kitamoandroidapp/projects/kitamo-android). The EAS-managed preview APK is build [`f3b64c64-04d0-4f71-ac54-1ceba8029403`](https://expo.dev/accounts/kitamoandroidapp/projects/kitamo-android/builds/f3b64c64-04d0-4f71-ac54-1ceba8029403). The final signed `1.0.0 (1)` production AAB is build [`362a9631-f557-4ac4-9b0c-b770c10ea637`](https://expo.dev/accounts/kitamoandroidapp/projects/kitamo-android/builds/362a9631-f557-4ac4-9b0c-b770c10ea637), built from `376b2f1`. Its package, version, upload-key signature, permissions, backup policy, installability, and 16 KB alignment have been validated. Play upload still requires the final support email, hosted privacy-policy URL, tester list, and access to KitaMo's Play Console entry.
+EAS remains linked to [`@kitamoandroidapp/kitamo-android`](https://expo.dev/accounts/kitamoandroidapp/projects/kitamo-android). The designated Internal Testing artifact is `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`, version `1.0.0` / versionCode `2`, with SHA-256 `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`. Its signer exactly matches the independently verified EAS production upload certificate. The signing-identity block is cleared; Play upload remains owner-blocked on the privacy URL, support email, tester list, Console declarations, and Play app access. See the [versionCode 2 verification record](docs/release/versioncode-2-aab-verification.md).
 
 Workstation setup, AVDs, EAS ownership, and human-owned prerequisites are recorded in [`docs/release/release-engineering-environment.md`](docs/release/release-engineering-environment.md).
 
 ## Previous Phase
 
 Chapter 2 Phase 7: Google Play Internal Testing Upload Preparation.
+
+Historical versionCode 1 operator guidance: **Superseded — do not upload**.
 
 Upload materials and the manual Play Console path are prepared. Nothing is uploaded or published; no build was run.
 
@@ -140,6 +145,8 @@ If Codex (or another agent) does UI polish next, it must read [`docs/release/cod
 ## Previous Phase
 
 Chapter 2 Phase 3: Play Store Internal Testing Preparation.
+
+Historical versionCode 1 operator guidance: **Superseded — do not upload**.
 
 All materials for Google Play **internal testing** are drafted — nothing has been uploaded or published, and no Play Console action has been taken.
 

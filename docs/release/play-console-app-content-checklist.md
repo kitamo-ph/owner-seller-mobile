@@ -2,6 +2,8 @@
 
 Every item in Play Console → App content must be complete and accurate before a release can roll out. Answers below are drafted from a code/dependency audit of KitaMo; confirm each in the Console. **REVIEW** = a human must verify against Google's current wording and the pre-launch report.
 
+Status: prepared but not entered or owner-confirmed in Play Console.
+
 ## Privacy policy
 
 - [ ] Public URL set (host the content of `docs/play-store/privacy-policy-draft.md`).
@@ -34,10 +36,19 @@ Every item in Play Console → App content must be complete and accurate before 
 
 - Declared in `app.json`: `USE_BIOMETRIC` and `USE_FINGERPRINT` for the optional local Owner unlock.
 - Blocked in `app.json`: `INTERNET`, legacy external storage, and system overlay.
-- Verified final framework permissions: `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, and `VIBRATE` for the local status badge and haptics.
-- The final AAB also contains the expected app-local signature receiver permission; it is not accessible to unrelated apps.
+- Verified versionCode 2 permissions:
+  `android.permission.USE_BIOMETRIC`,
+  `android.permission.USE_FINGERPRINT`, `android.permission.VIBRATE`,
+  `android.permission.ACCESS_WIFI_STATE`,
+  `android.permission.ACCESS_NETWORK_STATE`, and
+  `ph.kitamo.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+- The app-local signature receiver permission is not accessible to unrelated
+  apps. Network/Wi-Fi state permissions do not grant network transport.
 - **None** of: camera, location, contacts, microphone, Bluetooth, broad storage/photos, SMS/Call Log.
-- [x] Local final-AAB permission inspection matches the set above and contains no `INTERNET` permission.
+- [x] Local inspection of
+  `KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab` matches the set above and contains
+  no `INTERNET` permission; see the
+  [versionCode 2 verification](versioncode-2-aab-verification.md).
 - [ ] **REVIEW** Play's detected permission list in the pre-launch report; investigate any difference before submitting. No sensitive-permission declaration form should be required for the verified set.
 
 ## Financial features / regulated category

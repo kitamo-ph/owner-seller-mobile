@@ -26,14 +26,34 @@ How KitaMo reaches testers on Google Play, and why Internal Testing is the corre
 
 The Android **package name is permanent and immutable once the first bundle is uploaded** to any track, and *is* the app's identity across Internal → Closed → Production (one app, one package).
 
-Decision made: `android.package` is now **`ph.kitamo.app`** (a clean, production-ready id — no `.pilot` suffix baked in). This is the package you upload tonight and the one that carries through to production; do not change it again after the first upload.
+Decision made: `android.package` is **`ph.kitamo.app`** (no `.pilot` suffix).
+The designated versionCode 2 candidate uses this protected package, which
+carries through Internal → Closed → Production. Do not change it.
 
 The user-facing app title (`KitaMo`) is separate and editable in the Play Console at any time — only the package id is permanent.
 
 ## Current config snapshot (audited)
 
 - App label: `KitaMo` — editable later; Play listing title is set in the Console.
-- versionName `1.0.0`, versionCode `1` — ready for the first build.
-- `permissions: []`; no camera/location/contacts/microphone/Bluetooth/storage/SMS/ads/analytics/payment. Framework-only INTERNET (unused by features), ACCESS_NETWORK_STATE (online/offline badge), VIBRATE (haptics).
-- Expo SDK 54 / RN 0.81.5 → target API 35 (Android 15) by default, meeting Play's current new-app target requirement. **REVIEW**: confirm the target API in the EAS build output before submitting.
+- versionName `1.0.0`, versionCode `2`.
+- The verified AAB has biometric/fingerprint, vibration, network-state,
+  Wi-Fi-state, and app-local receiver permissions. It has no Internet, camera,
+  microphone, location, Bluetooth, storage, SMS, ads, analytics, or payment
+  permission.
+- Expo SDK 54 / RN 0.81.5; the verified AAB has minimum API 24 and target API 36.
 - `eas.json` `production` profile builds an Android App Bundle (`.aab`) — the required format for Play.
+
+## Current Internal Testing candidate
+
+- Artifact:
+  `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab`.
+- Release name: `1.0.0 (2) - pilot`.
+- SHA-256:
+  `9b94ed36f38e26206564a902d93925c6a7645a5472b3e2e19a23a1546ae020cd`.
+- Signing identity: verified against the EAS production upload certificate.
+- Evidence:
+  [versionCode 2 AAB verification](versioncode-2-aab-verification.md).
+
+No Play upload has occurred. The privacy URL, support email, tester list, Play
+Console declarations, Play App Signing, and owner rollout approval remain
+unresolved. Any later build must use versionCode 3 or higher.

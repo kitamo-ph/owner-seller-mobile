@@ -16,7 +16,9 @@ Play upload or public rollout.
 - Android backup: disabled
 - Internet permission: blocked
 
-The prior signed artifact remains preserved at:
+The prior signed versionCode 1 artifact remains preserved at:
+
+Status: **Superseded — do not upload**.
 
 `release-artifacts/KitaMo-1.0.0-production-eas-376b2f1.aab`
 
@@ -142,7 +144,22 @@ Validate all of the following against the downloaded artifact:
   permissions only are present.
 - Native libraries pass 16 KB page-alignment validation.
 - The AAB passes bundletool validation and receives its own recorded SHA-256.
-- The prior versionCode 1 AAB and checksum remain unchanged.
+- The prior versionCode 1 AAB and checksum remain unchanged; its status is
+  **Superseded — do not upload**.
+
+### Subsequent artifact-verification outcome
+
+On 2026-07-30, the existing
+`release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab` passed the static
+artifact gate. Its signer exactly matches the independently verified EAS
+production upload-certificate fingerprint, clearing the signing-identity release
+block. See the
+[versionCode 2 AAB verification record](versioncode-2-aab-verification.md) for
+the exact checksum, evidence, and limitations.
+
+This later verification did not install the versionCode 2 build or perform a
+Play upload/pre-launch analysis. The remaining owner-controlled gates below are
+still open.
 
 ## Product and privacy boundary
 
@@ -177,7 +194,11 @@ Validate all of the following against the downloaded artifact:
 3. Confirm the Data Safety, App Access, content-rating, target-audience, and
    financial-feature answers in Play Console.
 4. Supply the Internal Testing Gmail tester list.
-5. Upload only the validated versionCode 2 AAB and enable Play App Signing.
+5. Upload only
+   `release-artifacts/KitaMo-1.0.0-vc2-pre-internal-6ed9ace.aab` to Internal
+   Testing and enable Play App Signing.
 6. Add Internal Testing release notes and distribute the opt-in link.
 7. Review the Play pre-launch report before any wider track.
 8. Do not begin public rollout from this branch.
+
+Any later or replacement build must use versionCode 3 or higher.

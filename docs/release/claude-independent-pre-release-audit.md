@@ -1,5 +1,11 @@
 # KitaMo Android — Independent Pre-Release Audit
 
+> Historical versionCode 1 evidence. The artifact and every operator instruction
+> to upload it are **Superseded — do not upload**. The audit findings, hashes,
+> and attestation below remain preserved as dated evidence. Use the
+> [versionCode 2 AAB verification](versioncode-2-aab-verification.md) for the
+> current Internal Testing candidate.
+
 **Auditor:** Claude (independent review, adversarially verified)
 **Date:** 2026-07-16
 **Audit branch:** `codex/gabi-redesign`
