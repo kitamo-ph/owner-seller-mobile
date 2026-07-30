@@ -9,6 +9,7 @@ const {
   applyActualStageYield,
   calculateProductionPlan,
   calculateYieldVariance,
+  partitionProductionPlanLotAllocations,
   recalculateProductionPlan,
   transitionProductionPlanStatus,
 } = require("../node_modules/.cache/kitamo-production-planner-check/productionPlanner.js");
@@ -91,6 +92,9 @@ const versions = [finalProduct, filling, base];
 const preparedStock = [
   {
     itemId: "prepared-base",
+    lotKind: "product",
+    lotId: "prepared-base-lot-1",
+    allocationMode: "recommended_fifo",
     quantity: 5,
     unit: "serving",
     costState: "known",
@@ -98,6 +102,9 @@ const preparedStock = [
   },
   {
     itemId: "prepared-base",
+    lotKind: "product",
+    lotId: "prepared-base-lot-2",
+    allocationMode: "recommended_fifo",
     quantity: 5,
     unit: "serving",
     costState: "known",
@@ -105,6 +112,9 @@ const preparedStock = [
   },
   {
     itemId: "prepared-filling",
+    lotKind: "product",
+    lotId: "prepared-filling-lot-1",
+    allocationMode: "recommended_fefo",
     quantity: 5,
     unit: "serving",
     costState: "known",
@@ -112,9 +122,36 @@ const preparedStock = [
   },
 ];
 const rawStock = [
-  { itemId: "raw-rice", quantity: 1000, unit: "g" },
-  { itemId: "sugar", quantity: 1000, unit: "g" },
-  { itemId: "nori", quantity: 100, unit: "pcs" },
+  {
+    itemId: "raw-rice",
+    lotKind: "ingredient",
+    lotId: "raw-rice-lot-1",
+    allocationMode: "recommended_fifo",
+    quantity: 1000,
+    unit: "g",
+    costState: "known",
+    authoritativeUnitCost: 0.1,
+  },
+  {
+    itemId: "sugar",
+    lotKind: "ingredient",
+    lotId: "sugar-lot-1",
+    allocationMode: "manual",
+    quantity: 1000,
+    unit: "g",
+    costState: "known",
+    authoritativeUnitCost: 0.2,
+  },
+  {
+    itemId: "nori",
+    lotKind: "ingredient",
+    lotId: "nori-lot-1",
+    allocationMode: "recommended_fefo",
+    quantity: 100,
+    unit: "pcs",
+    costState: "known",
+    authoritativeUnitCost: 1,
+  },
 ];
 
 const input = {
@@ -164,7 +201,27 @@ if (planned.ok) {
   check("scaled sugar requirement is exact", sugar?.quantity === 50);
   check("root target remains 30", finalStage?.expectedFreshOutput === 30);
   check("raw requirements remain distinguishable", nori?.quantity === 30);
+  check(
+    "prepared-stock use retains exact lot evidence",
+    plan.preparedStockUses.some(
+      (usage) =>
+        usage.itemId === "prepared-base" &&
+        usage.allocations.length === 2 &&
+        usage.allocations.every(
+          (allocation) =>
+            allocation.lotKind === "product" &&
+            allocation.lotId.startsWith("prepared-base-lot-"),
+        ),
+    ),
+  );
+  check(
+    "raw requirement retains exact lot evidence",
+    rice?.allocations.length === 1 &&
+      rice.allocations[0].lotId === "raw-rice-lot-1" &&
+      rice.allocations[0].normalizedQuantity === 150,
+  );
   check("complete expected cost includes prepared stock", plan.expectedCost === 65, `${plan.expectedCost}`);
+  check("known aggregate cost state is preserved", plan.costState === "known");
   check("sufficient plan reports no stock shortage", plan.missingStockCount === 0);
 
   const ready = transitionProductionPlanStatus(
@@ -219,6 +276,12 @@ if (planned.ok) {
           reduced.plan.targetQuantity === 22,
       );
       check(
+        "recalculation increments only the calculation version",
+        reduced.plan.calculationVersion ===
+          yielded.plan.calculationVersion + 1,
+        `${reduced.plan.calculationVersion}`,
+      );
+      check(
         "recorded actual yield survives recalculation",
         reduced.plan.stages.find((stage) => stage.versionId === "base-v1")
           ?.actualOutput === 7,
@@ -267,30 +330,293 @@ if (fresh.ok) {
   check("prepare-fresh expected cost excludes prepared stock", fresh.plan.expectedCost === 72);
 }
 
-const unknownVersions = [
-  finalProduct,
-  {
-    ...filling,
-    lines: filling.lines.map((line) =>
-      line.id === "filling-sugar"
-        ? { ...line, costState: "unknown", authoritativeUnitCost: null }
-        : line,
-    ),
-  },
-  base,
-];
 const unknownCost = calculateProductionPlan({
   ...input,
   planId: "plan-unknown",
-  versions: unknownVersions,
+  rawStock: rawStock.map((stock) =>
+    stock.itemId === "sugar"
+      ? {
+          ...stock,
+          costState: "unknown",
+          authoritativeUnitCost: null,
+        }
+      : stock,
+  ),
 });
 check(
-  "one unknown required cost propagates incomplete costing",
+  "one unknown exact lot cost propagates incomplete costing",
   unknownCost.ok &&
     !unknownCost.plan.costComplete &&
     unknownCost.plan.expectedCost === null &&
     unknownCost.plan.missingCostCount === 1 &&
     unknownCost.plan.knownCostSubtotal > 0,
+);
+
+const exactLotCostPlan = calculateProductionPlan({
+  planId: "plan-exact-lot-cost",
+  rootVersionId: "exact-lot-cost-v1",
+  targetQuantity: 2,
+  targetUnit: "pcs",
+  mode: "prepare_fresh",
+  versions: [
+    {
+      id: "exact-lot-cost-v1",
+      familyId: "exact-lot-cost-family",
+      outputItemId: "exact-lot-output",
+      label: "Exact lot cost v1",
+      businessId: "business-1",
+      expectedOutputQuantity: 2,
+      outputUnit: "pcs",
+      status: "published",
+      lines: [
+        leaf(
+          "exact-lot-line",
+          "exact-lot-input",
+          "Exact lot input",
+          2,
+          "pcs",
+          "unknown",
+          null,
+        ),
+      ],
+    },
+  ],
+  preparedStock: [],
+  rawStock: [
+    {
+      itemId: "exact-lot-input",
+      lotKind: "ingredient",
+      lotId: "exact-lot-a",
+      allocationMode: "recommended_fifo",
+      quantity: 1,
+      unit: "pcs",
+      costState: "known",
+      authoritativeUnitCost: 2,
+    },
+    {
+      itemId: "exact-lot-input",
+      lotKind: "ingredient",
+      lotId: "exact-lot-b",
+      allocationMode: "recommended_fifo",
+      quantity: 1,
+      unit: "pcs",
+      costState: "known",
+      authoritativeUnitCost: 5,
+    },
+  ],
+  observedAt: "2026-07-26T00:30:00.000Z",
+});
+check(
+  "raw expected cost comes from exact selected lots",
+  exactLotCostPlan.ok &&
+    exactLotCostPlan.plan.costState === "known" &&
+    exactLotCostPlan.plan.expectedCost === 7 &&
+    exactLotCostPlan.plan.knownCostSubtotal === 7 &&
+    exactLotCostPlan.plan.missingCostCount === 0,
+  exactLotCostPlan.ok ? `${exactLotCostPlan.plan.expectedCost}` : "",
+);
+
+if (exactLotCostPlan.ok) {
+  const exactAllocations =
+    exactLotCostPlan.plan.rawRequirements[0].allocations;
+  const partitions = partitionProductionPlanLotAllocations(
+    exactAllocations,
+    [1.5, 0.5],
+  );
+  check(
+    "exact lots are assigned sequentially without proportional spreading",
+    partitions[0].length === 2 &&
+      partitions[0][0].lotId === "exact-lot-a" &&
+      partitions[0][0].normalizedQuantity === 1 &&
+      partitions[0][1].lotId === "exact-lot-b" &&
+      partitions[0][1].normalizedQuantity === 0.5 &&
+      partitions[1].length === 1 &&
+      partitions[1][0].lotId === "exact-lot-b" &&
+      partitions[1][0].normalizedQuantity === 0.5 &&
+      !partitions[1].some(
+        (allocation) => allocation.lotId === "exact-lot-a",
+      ),
+  );
+  check(
+    "partitioned exact-lot costs retain their contributions",
+    partitions[0].reduce(
+      (sum, allocation) => sum + allocation.costContribution,
+      0,
+    ) === 4.5 &&
+      partitions[1].reduce(
+        (sum, allocation) => sum + allocation.costContribution,
+        0,
+      ) === 2.5,
+  );
+}
+
+const mixedExactLotCostPlan = calculateProductionPlan({
+  planId: "plan-mixed-exact-lot-cost",
+  rootVersionId: "mixed-exact-lot-cost-v1",
+  targetQuantity: 2,
+  targetUnit: "pcs",
+  mode: "prepare_fresh",
+  versions: [
+    {
+      id: "mixed-exact-lot-cost-v1",
+      familyId: "mixed-exact-lot-cost-family",
+      outputItemId: "mixed-exact-lot-output",
+      label: "Mixed exact lot cost v1",
+      businessId: "business-1",
+      expectedOutputQuantity: 2,
+      outputUnit: "pcs",
+      status: "published",
+      lines: [
+        leaf(
+          "mixed-exact-lot-line",
+          "mixed-exact-lot-input",
+          "Mixed exact lot input",
+          2,
+          "pcs",
+          "known",
+          99,
+        ),
+      ],
+    },
+  ],
+  preparedStock: [],
+  rawStock: [
+    {
+      itemId: "mixed-exact-lot-input",
+      lotKind: "ingredient",
+      lotId: "mixed-exact-lot-known",
+      allocationMode: "manual",
+      quantity: 1,
+      unit: "pcs",
+      costState: "known",
+      authoritativeUnitCost: 2,
+    },
+    {
+      itemId: "mixed-exact-lot-input",
+      lotKind: "ingredient",
+      lotId: "mixed-exact-lot-unknown",
+      allocationMode: "manual",
+      quantity: 1,
+      unit: "pcs",
+      costState: "unknown",
+      authoritativeUnitCost: null,
+    },
+  ],
+  observedAt: "2026-07-26T00:45:00.000Z",
+});
+check(
+  "unknown selected lot cannot inherit a known Recipe snapshot",
+  mixedExactLotCostPlan.ok &&
+    mixedExactLotCostPlan.plan.costState === "partial" &&
+    mixedExactLotCostPlan.plan.expectedCost === null &&
+    mixedExactLotCostPlan.plan.knownCostSubtotal === 2 &&
+    mixedExactLotCostPlan.plan.missingCostCount === 1,
+);
+
+const notApplicablePlan = calculateProductionPlan({
+  planId: "plan-not-applicable",
+  rootVersionId: "not-applicable-v1",
+  targetQuantity: 10,
+  targetUnit: "pcs",
+  mode: "prepare_fresh",
+  versions: [
+    {
+      id: "not-applicable-v1",
+      familyId: "not-applicable-family",
+      outputItemId: "not-applicable-output",
+      label: "Not applicable v1",
+      businessId: "business-1",
+      expectedOutputQuantity: 10,
+      outputUnit: "pcs",
+      status: "published",
+      lines: [
+        leaf(
+          "not-applicable-line",
+          "free-input",
+          "Free input",
+          10,
+          "pcs",
+          "not_applicable",
+          null,
+        ),
+      ],
+    },
+  ],
+  preparedStock: [],
+  rawStock: [
+    {
+      itemId: "free-input",
+      lotKind: "ingredient",
+      lotId: "free-input-lot",
+      allocationMode: "manual",
+      quantity: 10,
+      unit: "pcs",
+      costState: "not_applicable",
+      authoritativeUnitCost: null,
+    },
+  ],
+  observedAt: "2026-07-26T01:00:00.000Z",
+});
+check(
+  "not-applicable cost is not rewritten as known zero",
+  notApplicablePlan.ok &&
+    notApplicablePlan.plan.costState === "not_applicable" &&
+    notApplicablePlan.plan.expectedCost === null &&
+    notApplicablePlan.plan.costComplete &&
+    notApplicablePlan.plan.missingCostCount === 0,
+);
+
+const legacyCostPlan = calculateProductionPlan({
+  planId: "plan-legacy-cost",
+  rootVersionId: "legacy-cost-v1",
+  targetQuantity: 10,
+  targetUnit: "pcs",
+  mode: "prepare_fresh",
+  versions: [
+    {
+      id: "legacy-cost-v1",
+      familyId: "legacy-cost-family",
+      outputItemId: "legacy-cost-output",
+      label: "Legacy cost v1",
+      businessId: "business-1",
+      expectedOutputQuantity: 10,
+      outputUnit: "pcs",
+      status: "published",
+      lines: [
+        leaf(
+          "legacy-cost-line",
+          "legacy-input",
+          "Legacy input",
+          10,
+          "pcs",
+          "legacy_zero_unresolved",
+          null,
+        ),
+      ],
+    },
+  ],
+  preparedStock: [],
+  rawStock: [
+    {
+      itemId: "legacy-input",
+      lotKind: "ingredient",
+      lotId: "legacy-input-lot",
+      allocationMode: "legacy_balance",
+      quantity: 10,
+      unit: "pcs",
+      costState: "legacy_zero_unresolved",
+      authoritativeUnitCost: null,
+    },
+  ],
+  observedAt: "2026-07-26T01:30:00.000Z",
+});
+check(
+  "legacy unresolved cost state remains explicit",
+  legacyCostPlan.ok &&
+    legacyCostPlan.plan.costState === "legacy_zero_unresolved" &&
+    legacyCostPlan.plan.expectedCost === null &&
+    !legacyCostPlan.plan.costComplete &&
+    legacyCostPlan.plan.missingCostCount === 1,
 );
 
 const missingStock = calculateProductionPlan({

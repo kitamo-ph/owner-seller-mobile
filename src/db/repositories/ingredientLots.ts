@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { CostState } from "@/domain/costState";
 import { makeIngredientLotId, makeIngredientMovementId } from "@/domain/ids";
 import type {
   IngredientLot,
@@ -21,7 +22,10 @@ const createIngredientLotSchema = z.object({
   purchaseDate: z.string().min(1),
   purchasedQuantity: z.number().positive(),
   unit: z.enum(["g", "kg", "ml", "L", "pcs", "pack"]),
-  totalCost: z.number().positive(),
+  totalCost: z.number().nonnegative().nullable().optional(),
+  costState: z
+    .enum(["known", "unknown", "legacy_zero_unresolved", "not_applicable"])
+    .optional(),
   expiryDate: z.string().nullable().optional(),
   supplierId: z.string().nullable().optional(),
   purchaseReceiptId: z.string().nullable().optional(),
@@ -58,6 +62,14 @@ type IngredientLotRow = {
   unit: IngredientUnit;
   total_cost: number;
   cost_per_unit: number;
+  expiry_date: string | null;
+  supplier_id: string | null;
+  purchase_receipt_id: string | null;
+  provenance_state: IngredientLotProvenanceState;
+  cost_state: CostState;
+  recorded_total_cost: number | null;
+  recorded_cost_per_unit: number | null;
+  source_metadata_json: string | null;
   notes: string | null;
   status: IngredientLotStatus;
   created_at: string;
@@ -66,7 +78,23 @@ type IngredientLotRow = {
   deleted_at: string | null;
 };
 
-export type IngredientLotWithName = IngredientLot & {
+export type IngredientLotProvenanceState =
+  | "legacy_unknown"
+  | "purchase_recorded"
+  | "review_required";
+
+export type IngredientLotCostRecord = IngredientLot & {
+  expiryDate: string | null;
+  supplierId: string | null;
+  purchaseReceiptId: string | null;
+  provenanceState: IngredientLotProvenanceState;
+  costState: CostState;
+  recordedTotalCost: number | null;
+  recordedCostPerUnit: number | null;
+  sourceMetadataJson: string | null;
+};
+
+export type IngredientLotWithName = IngredientLotCostRecord & {
   ingredientName: string;
   ingredientLowStockThreshold: number;
   ingredientDefaultUnit: IngredientUnit;
@@ -78,7 +106,7 @@ type IngredientLotWithNameRow = IngredientLotRow & {
   ingredient_default_unit: IngredientUnit;
 };
 
-function mapIngredientLot(row: IngredientLotRow): IngredientLot {
+function mapIngredientLot(row: IngredientLotRow): IngredientLotCostRecord {
   return {
     id: row.id,
     businessId: row.business_id,
@@ -91,6 +119,14 @@ function mapIngredientLot(row: IngredientLotRow): IngredientLot {
     unit: row.unit,
     totalCost: row.total_cost,
     costPerUnit: row.cost_per_unit,
+    expiryDate: row.expiry_date,
+    supplierId: row.supplier_id,
+    purchaseReceiptId: row.purchase_receipt_id,
+    provenanceState: row.provenance_state,
+    costState: row.cost_state,
+    recordedTotalCost: row.recorded_total_cost,
+    recordedCostPerUnit: row.recorded_cost_per_unit,
+    sourceMetadataJson: row.source_metadata_json,
     notes: row.notes,
     status: row.status,
     createdAt: row.created_at,
@@ -113,8 +149,28 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
   const parsed = createIngredientLotSchema.parse(input);
   const database = getRepositoryDatabase(db);
   const createdAt = nowIso();
-  const costPerUnit = parsed.totalCost / parsed.purchasedQuantity;
-  const lot: IngredientLot = {
+  const costState =
+    parsed.costState ?? (parsed.totalCost === null || parsed.totalCost === undefined
+      ? "unknown"
+      : "known");
+  if (
+    (costState === "known" &&
+      (parsed.totalCost === null || parsed.totalCost === undefined)) ||
+    (costState !== "known" &&
+      parsed.totalCost !== null &&
+      parsed.totalCost !== undefined)
+  ) {
+    throw new Error("Ingredient-lot cost evidence is inconsistent.");
+  }
+  const recordedTotalCost =
+    costState === "known" ? (parsed.totalCost as number) : null;
+  const recordedCostPerUnit =
+    recordedTotalCost === null
+      ? null
+      : recordedTotalCost / parsed.purchasedQuantity;
+  const compatibilityTotalCost = recordedTotalCost ?? 0;
+  const compatibilityCostPerUnit = recordedCostPerUnit ?? 0;
+  const lot: IngredientLotCostRecord = {
     id: parsed.id ?? makeIngredientLotId(),
     businessId: parsed.businessId,
     ingredientId: parsed.ingredientId,
@@ -124,8 +180,16 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
     purchasedQuantity: parsed.purchasedQuantity,
     remainingQuantity: parsed.purchasedQuantity,
     unit: parsed.unit,
-    totalCost: parsed.totalCost,
-    costPerUnit,
+    totalCost: compatibilityTotalCost,
+    costPerUnit: compatibilityCostPerUnit,
+    expiryDate: parsed.expiryDate ?? null,
+    supplierId: parsed.supplierId?.trim() || null,
+    purchaseReceiptId: parsed.purchaseReceiptId?.trim() || null,
+    provenanceState: "purchase_recorded",
+    costState,
+    recordedTotalCost,
+    recordedCostPerUnit,
+    sourceMetadataJson: parsed.sourceMetadataJson ?? null,
     notes: parsed.notes?.trim() || null,
     status: "active",
     createdAt,
@@ -133,6 +197,60 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
     syncStatus: "local",
     deletedAt: null,
   };
+
+  const ingredient = await database.getFirstAsync<{ business_id: string }>(
+    `
+      SELECT business_id
+      FROM ingredients
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [lot.ingredientId],
+  );
+  if (!ingredient || ingredient.business_id !== lot.businessId) {
+    throw new Error("Ingredient lot belongs to an unavailable Ingredient.");
+  }
+
+  if (lot.supplierId) {
+    const supplier = await database.getFirstAsync<{
+      business_id: string;
+      status: string;
+    }>(
+      `
+        SELECT business_id, status
+        FROM suppliers
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [lot.supplierId],
+    );
+    if (
+      !supplier ||
+      supplier.business_id !== lot.businessId ||
+      supplier.status !== "active"
+    ) {
+      throw new Error("Ingredient-lot supplier is unavailable.");
+    }
+  }
+
+  if (lot.purchaseReceiptId) {
+    const receipt = await database.getFirstAsync<{
+      business_id: string;
+      supplier_id: string | null;
+    }>(
+      `
+        SELECT business_id, supplier_id
+        FROM purchase_receipts
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [lot.purchaseReceiptId],
+    );
+    if (
+      !receipt ||
+      receipt.business_id !== lot.businessId ||
+      receipt.supplier_id !== lot.supplierId
+    ) {
+      throw new Error("Ingredient lot does not match its purchase receipt.");
+    }
+  }
 
   await database.runAsync(
     `
@@ -143,7 +261,7 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
         expiry_date, supplier_id, purchase_receipt_id, provenance_state,
         cost_state, recorded_total_cost, recorded_cost_per_unit,
         source_metadata_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'purchase_recorded', 'known', ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       lot.id,
@@ -163,12 +281,14 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
       lot.updatedAt,
       lot.syncStatus,
       lot.deletedAt,
-      parsed.expiryDate ?? null,
-      parsed.supplierId ?? null,
-      parsed.purchaseReceiptId ?? null,
-      lot.totalCost,
-      lot.costPerUnit,
-      parsed.sourceMetadataJson ?? null,
+      lot.expiryDate,
+      lot.supplierId,
+      lot.purchaseReceiptId,
+      lot.provenanceState,
+      lot.costState,
+      lot.recordedTotalCost,
+      lot.recordedCostPerUnit,
+      lot.sourceMetadataJson,
     ],
   );
 

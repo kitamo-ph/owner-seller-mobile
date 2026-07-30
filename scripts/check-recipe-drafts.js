@@ -126,6 +126,23 @@ if (firstSave.ok) {
   });
   check("nested draft begins from stable IDs", nested.ok);
 
+  const staleNested = beginNestedDraft({
+    parent: firstSave.draft,
+    parentExpectedRevision: 0,
+    parentLineId: "parent-placeholder",
+    childDraftId: "draft-stale-child",
+    childKind: "recipe_version",
+    returnRoute: "/owner/paluto/draft-parent",
+    now: "2026-07-26T00:05:00.000Z",
+  });
+  check(
+    "stale nested begin leaves parent placeholder unchanged",
+    !staleNested.ok &&
+      staleNested.code === "parent_revision_conflict" &&
+      firstSave.draft.lines[0].sourceKind === "unresolved" &&
+      firstSave.draft.lines[0].sourceId === null,
+  );
+
   if (nested.ok) {
     check(
       "parent placeholder points to child draft",

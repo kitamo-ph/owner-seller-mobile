@@ -416,6 +416,79 @@ export async function recordSupplyUsageProposals(
   await database.withExclusiveTransactionAsync(async (txn) => {
     const timestamp = nowIso();
     for (const proposal of input.proposals) {
+      const supply = await txn.getFirstAsync<{
+        stock_policy: string;
+        binding_status: string;
+        review_required: number;
+        compatibility_mode: string;
+      }>(
+        `
+          SELECT item.stock_policy, binding.binding_status,
+            binding.review_required, binding.compatibility_mode
+          FROM catalog_items item
+          INNER JOIN legacy_item_bindings binding
+            ON binding.catalog_item_id = item.id
+            AND binding.entity_kind = 'ingredient'
+            AND binding.legacy_entity_id = ?
+            AND binding.deleted_at IS NULL
+          WHERE item.id = ? AND item.business_id = ?
+            AND item.classification = 'supply_packaging'
+            AND item.lifecycle_status IN ('ready', 'active')
+            AND item.readiness_state = 'ready'
+            AND item.deleted_at IS NULL
+        `,
+        [
+          proposal.supplyIngredientId,
+          proposal.supplyCatalogItemId,
+          input.businessId,
+        ],
+      );
+      const expectedTracking =
+        supply?.stock_policy === "ingredient_lots" ? "tracked" : "untracked";
+      if (
+        !supply ||
+        supply.binding_status !== "active" ||
+        supply.review_required !== 0 ||
+        !["reviewed_legacy", "native"].includes(
+          supply.compatibility_mode,
+        ) ||
+        proposal.stockTrackingState !== expectedTracking
+      ) {
+        throw new Error("Supply proposal requires an exact reviewed Supply binding.");
+      }
+
+      if (proposal.ruleId) {
+        const rule = await txn.getFirstAsync<{
+          version: number;
+          supply_category: SupplyCategory;
+        }>(
+          `
+            SELECT version, supply_category
+            FROM supply_usage_rules
+            WHERE id = ? AND business_id = ?
+              AND supply_catalog_item_id = ?
+              AND supply_ingredient_id = ?
+              AND consumption_stage = 'checkout'
+              AND status = 'active' AND deleted_at IS NULL
+          `,
+          [
+            proposal.ruleId,
+            input.businessId,
+            proposal.supplyCatalogItemId,
+            proposal.supplyIngredientId,
+          ],
+        );
+        if (
+          !rule ||
+          rule.supply_category !== proposal.supplyCategory ||
+          (proposal.ruleVersionSnapshot !== null &&
+            proposal.ruleVersionSnapshot !== undefined &&
+            proposal.ruleVersionSnapshot !== rule.version)
+        ) {
+          throw new Error("Supply proposal rule snapshot is unavailable.");
+        }
+      }
+
       const prior = await txn.getFirstAsync<{
         id: string;
         status: string;
@@ -569,6 +642,8 @@ export async function confirmSupplyUsageInTransaction(
   }
   const usage = await txn.getFirstAsync<{
     id: string;
+    sale_id: string | null;
+    supply_catalog_item_id: string;
     supply_ingredient_id: string;
     quantity_used: number | null;
     required_minimum: number;
@@ -577,8 +652,8 @@ export async function confirmSupplyUsageInTransaction(
     status: "proposed" | "confirmed" | "void";
   }>(
     `
-      SELECT id, supply_ingredient_id, quantity_used, required_minimum, unit,
-        stock_tracking_state, status
+      SELECT id, sale_id, supply_catalog_item_id, supply_ingredient_id,
+        quantity_used, required_minimum, unit, stock_tracking_state, status
       FROM sale_supply_usages
       WHERE checkout_token = ? AND request_key = ? AND business_id = ?
         AND deleted_at IS NULL
@@ -587,7 +662,10 @@ export async function confirmSupplyUsageInTransaction(
   );
   if (!usage) throw new Error("Supply usage proposal is unavailable.");
   if (usage.status === "confirmed") {
-    if (usage.quantity_used !== input.quantityUsed) {
+    if (
+      usage.sale_id !== input.saleId ||
+      usage.quantity_used !== input.quantityUsed
+    ) {
       throw new Error("Confirmed supply usage differs from retry.");
     }
     return usage.id;
@@ -598,6 +676,45 @@ export async function confirmSupplyUsageInTransaction(
       usage.required_minimum
   ) {
     throw new Error("Reviewed supply usage is below its required minimum.");
+  }
+
+  const supply = await txn.getFirstAsync<{
+    stock_policy: string;
+    binding_status: string;
+    review_required: number;
+    compatibility_mode: string;
+  }>(
+    `
+      SELECT item.stock_policy, binding.binding_status,
+        binding.review_required, binding.compatibility_mode
+      FROM catalog_items item
+      INNER JOIN legacy_item_bindings binding
+        ON binding.catalog_item_id = item.id
+        AND binding.entity_kind = 'ingredient'
+        AND binding.legacy_entity_id = ?
+        AND binding.deleted_at IS NULL
+      WHERE item.id = ? AND item.business_id = ?
+        AND item.classification = 'supply_packaging'
+        AND item.lifecycle_status IN ('ready', 'active')
+        AND item.readiness_state = 'ready'
+        AND item.deleted_at IS NULL
+    `,
+    [
+      usage.supply_ingredient_id,
+      usage.supply_catalog_item_id,
+      input.businessId,
+    ],
+  );
+  const expectedTracking =
+    supply?.stock_policy === "ingredient_lots" ? "tracked" : "untracked";
+  if (
+    !supply ||
+    supply.binding_status !== "active" ||
+    supply.review_required !== 0 ||
+    !["reviewed_legacy", "native"].includes(supply.compatibility_mode) ||
+    usage.stock_tracking_state !== expectedTracking
+  ) {
+    throw new Error("Supply usage binding changed before confirmation.");
   }
 
   const sale = await txn.getFirstAsync<{ id: string }>(
@@ -624,20 +741,17 @@ export async function confirmSupplyUsageInTransaction(
   ) {
     throw new Error("Untracked supply usage cannot deduct lots.");
   }
-  const allocationTotal = input.allocations.reduce(
-    (sum, allocation) => sum + allocation.quantityUsed,
-    0,
-  );
-  if (
-    input.allocations.length > 0 &&
-    Math.abs(allocationTotal - input.quantityUsed) >
-      INVENTORY_QUANTITY_TOLERANCE
-  ) {
-    throw new Error("Supply lot allocations do not match reviewed quantity.");
-  }
 
   const timestamp = nowIso();
-  let firstMovementId: string | null = null;
+  const seenLotIds = new Set<string>();
+  const resolvedAllocations: {
+    allocation: ConfirmSupplyLotAllocation;
+    lotUnit: string;
+    normalizedQuantity: number;
+    conversionFactorSnapshot: number;
+    conversionId: string | null;
+  }[] = [];
+
   for (const allocation of input.allocations) {
     const allocationEvidence = {
       state: allocation.costState,
@@ -648,6 +762,8 @@ export async function confirmSupplyUsageInTransaction(
       !validateCostEvidence(allocationEvidence).ok ||
       !Number.isFinite(allocation.quantityUsed) ||
       allocation.quantityUsed <= 0 ||
+      !allocation.unit.trim() ||
+      seenLotIds.has(allocation.ingredientLotId) ||
       (allocation.costState === "known" &&
         (allocation.unitCostSnapshot === null ||
           allocation.unitCostSnapshot === undefined ||
@@ -659,6 +775,154 @@ export async function confirmSupplyUsageInTransaction(
     ) {
       throw new Error("Supply lot allocation evidence is invalid.");
     }
+    seenLotIds.add(allocation.ingredientLotId);
+
+    const lot = await txn.getFirstAsync<{
+      unit: string;
+      remaining_quantity: number;
+      status: string;
+    }>(
+      `
+        SELECT unit, remaining_quantity, status
+        FROM ingredient_lots
+        WHERE id = ? AND ingredient_id = ? AND business_id = ?
+          AND deleted_at IS NULL
+      `,
+      [
+        allocation.ingredientLotId,
+        usage.supply_ingredient_id,
+        input.businessId,
+      ],
+    );
+    if (
+      !lot ||
+      lot.status !== "active" ||
+      allocation.unit.trim() !== lot.unit ||
+      lot.remaining_quantity + INVENTORY_QUANTITY_TOLERANCE <
+        allocation.quantityUsed
+    ) {
+      throw new Error("Supply lot is unavailable or uses a different unit.");
+    }
+
+    let conversionId: string | null = null;
+    let conversionFactor = 1;
+    if (lot.unit === usage.unit) {
+      if (
+        allocation.conversionId ||
+        (allocation.conversionFactorSnapshot !== null &&
+          allocation.conversionFactorSnapshot !== undefined &&
+          Math.abs(allocation.conversionFactorSnapshot - 1) >
+            INVENTORY_QUANTITY_TOLERANCE)
+      ) {
+        throw new Error("Same-unit supply allocation has invalid conversion evidence.");
+      }
+    } else {
+      if (
+        !allocation.conversionId ||
+        allocation.conversionFactorSnapshot === null ||
+        allocation.conversionFactorSnapshot === undefined ||
+        !Number.isFinite(allocation.conversionFactorSnapshot) ||
+        allocation.conversionFactorSnapshot <= 0
+      ) {
+        throw new Error("Supply allocation requires an exact unit conversion.");
+      }
+      const conversion = await txn.getFirstAsync<{
+        factor: number;
+      }>(
+        `
+          SELECT factor
+          FROM item_unit_conversions
+          WHERE id = ? AND business_id = ? AND catalog_item_id = ?
+            AND from_unit = ? AND to_unit = ? AND status = 'active'
+            AND deleted_at IS NULL
+        `,
+        [
+          allocation.conversionId,
+          input.businessId,
+          usage.supply_catalog_item_id,
+          lot.unit,
+          usage.unit,
+        ],
+      );
+      if (
+        !conversion ||
+        Math.abs(
+          conversion.factor - allocation.conversionFactorSnapshot,
+        ) > INVENTORY_QUANTITY_TOLERANCE
+      ) {
+        throw new Error("Supply allocation conversion changed before confirmation.");
+      }
+      conversionId = allocation.conversionId;
+      conversionFactor = conversion.factor;
+    }
+
+    const normalizedQuantity = allocation.quantityUsed * conversionFactor;
+    if (
+      allocation.normalizedQuantity === null ||
+      allocation.normalizedQuantity === undefined ||
+      !Number.isFinite(allocation.normalizedQuantity) ||
+      Math.abs(allocation.normalizedQuantity - normalizedQuantity) >
+        INVENTORY_QUANTITY_TOLERANCE ||
+      allocation.normalizedUnit?.trim() !== usage.unit
+    ) {
+      throw new Error("Supply allocation normalized quantity is inconsistent.");
+    }
+    if (
+      allocation.costState === "known" &&
+      Math.abs(
+        (allocation.costContribution as number) -
+          allocation.quantityUsed *
+            (allocation.unitCostSnapshot as number),
+      ) > INVENTORY_QUANTITY_TOLERANCE
+    ) {
+      throw new Error("Supply allocation cost contribution is inconsistent.");
+    }
+
+    resolvedAllocations.push({
+      allocation,
+      lotUnit: lot.unit,
+      normalizedQuantity,
+      conversionFactorSnapshot: conversionFactor,
+      conversionId,
+    });
+  }
+
+  const allocationTotal = resolvedAllocations.reduce(
+    (sum, resolved) => sum + resolved.normalizedQuantity,
+    0,
+  );
+  if (
+    resolvedAllocations.length > 0 &&
+    Math.abs(allocationTotal - input.quantityUsed) >
+      INVENTORY_QUANTITY_TOLERANCE
+  ) {
+    throw new Error("Supply lot allocations do not match reviewed quantity.");
+  }
+  if (resolvedAllocations.length > 0) {
+    const allKnown = resolvedAllocations.every(
+      ({ allocation }) => allocation.costState === "known",
+    );
+    const allocationCost = resolvedAllocations.reduce(
+      (sum, { allocation }) =>
+        sum + (allocation.costContribution ?? 0),
+      0,
+    );
+    if (
+      (allKnown &&
+        (input.costState !== "known" ||
+          input.costContribution === null ||
+          input.costContribution === undefined ||
+          Math.abs(input.costContribution - allocationCost) >
+            INVENTORY_QUANTITY_TOLERANCE)) ||
+      (!allKnown && input.costState === "known")
+    ) {
+      throw new Error("Supply usage cost does not match lot evidence.");
+    }
+  }
+
+  let firstMovementId: string | null = null;
+  for (const resolved of resolvedAllocations) {
+    const { allocation } = resolved;
     const lotResult = await txn.runAsync(
       `
         UPDATE ingredient_lots
@@ -703,7 +967,7 @@ export async function confirmSupplyUsageInTransaction(
         usage.supply_ingredient_id,
         allocation.ingredientLotId,
         -allocation.quantityUsed,
-        allocation.unit,
+        resolved.lotUnit,
         allocation.unitCostSnapshot ?? null,
         allocation.costContribution ?? null,
         timestamp,
@@ -727,11 +991,11 @@ export async function confirmSupplyUsageInTransaction(
         allocation.ingredientLotId,
         movementId,
         allocation.quantityUsed,
-        allocation.unit,
-        allocation.normalizedQuantity ?? null,
-        allocation.normalizedUnit ?? null,
-        allocation.conversionId ?? null,
-        allocation.conversionFactorSnapshot ?? null,
+        resolved.lotUnit,
+        resolved.normalizedQuantity,
+        usage.unit,
+        resolved.conversionId,
+        resolved.conversionFactorSnapshot,
         allocation.unitCostSnapshot ?? null,
         allocation.costContribution ?? null,
         allocation.costState,

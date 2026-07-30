@@ -120,6 +120,32 @@ function validateAdjustment(input: PersistStockAdjustmentInput) {
   ) {
     throw new Error("Product adjustment cannot use Ingredient lots.");
   }
+
+  const allocationIds = new Set<string>();
+  for (const allocation of input.allocations) {
+    const lotId =
+      allocation.lotKind === "ingredient"
+        ? allocation.ingredientLotId
+        : allocation.lotKind === "product"
+          ? allocation.productStockLotId
+          : null;
+    if (
+      (allocation.lotKind === "ingredient" &&
+        (!lotId || allocation.productStockLotId)) ||
+      (allocation.lotKind === "product" &&
+        (!lotId || allocation.ingredientLotId)) ||
+      (allocation.lotKind === "scalar_product" &&
+        (allocation.ingredientLotId || allocation.productStockLotId))
+    ) {
+      throw new Error("Stock-adjustment allocation identity is inconsistent.");
+    }
+    if (lotId) {
+      if (allocationIds.has(lotId)) {
+        throw new Error("Stock-adjustment lot allocations must be unique.");
+      }
+      allocationIds.add(lotId);
+    }
+  }
 }
 
 /**
@@ -215,6 +241,37 @@ export async function persistStockAdjustment(
         throw new Error("Product balance/context changed before adjustment.");
       }
 
+      const authority = await txn.getFirstAsync<{
+        stock_policy: "product_scalar" | "product_lots";
+        compatibility_mode: string;
+        review_required: number;
+        binding_status: string;
+      }>(
+        `
+          SELECT
+            item.stock_policy,
+            binding.compatibility_mode,
+            binding.review_required,
+            binding.binding_status
+          FROM catalog_items item
+          INNER JOIN legacy_item_bindings binding
+            ON binding.catalog_item_id = item.id
+            AND binding.entity_kind = 'product'
+            AND binding.legacy_entity_id = ?
+            AND binding.deleted_at IS NULL
+          WHERE item.id = ? AND item.business_id = ?
+            AND item.deleted_at IS NULL
+        `,
+        [
+          input.productId as string,
+          input.catalogItemId,
+          input.businessId,
+        ],
+      );
+      if (!authority || authority.binding_status !== "active") {
+        throw new Error("Product adjustment requires an exact active catalog binding.");
+      }
+
       const usesScalarOnly = input.allocations.every(
         (allocation) => allocation.lotKind === "scalar_product",
       );
@@ -227,6 +284,38 @@ export async function persistStockAdjustment(
       if (usesScalarOnly && input.allocations.length !== 1) {
         throw new Error("Legacy Product scalar adjustment requires one allocation.");
       }
+      const scalarAuthority =
+        authority.stock_policy === "product_scalar" &&
+        authority.compatibility_mode === "legacy_unclassified" &&
+        authority.review_required === 1;
+      const lotAuthority =
+        authority.stock_policy === "product_lots" &&
+        ["reviewed_legacy", "native"].includes(
+          authority.compatibility_mode,
+        ) &&
+        authority.review_required === 0;
+      if (
+        (!scalarAuthority && !lotAuthority) ||
+        (scalarAuthority && !usesScalarOnly) ||
+        (lotAuthority && !usesProductLots)
+      ) {
+        throw new Error(
+          "Product adjustment allocations do not match authoritative stock policy.",
+        );
+      }
+      if (
+        usesScalarOnly &&
+        (!approximatelyEqual(
+          input.allocations[0].beforeQuantity,
+          input.beforeQuantity,
+        ) ||
+          !approximatelyEqual(
+            input.allocations[0].afterQuantity,
+            input.enteredAfterQuantity,
+          ))
+      ) {
+        throw new Error("Legacy Product scalar evidence does not match the adjustment.");
+      }
 
       if (usesProductLots) {
         const lotRows = await txn.getAllAsync<{
@@ -237,9 +326,14 @@ export async function persistStockAdjustment(
           `
             SELECT id, remaining_quantity, status
             FROM product_stock_lots
-            WHERE product_id = ? AND business_id = ? AND deleted_at IS NULL
+            WHERE product_id = ? AND catalog_item_id = ?
+              AND business_id = ? AND deleted_at IS NULL
           `,
-          [input.productId as string, input.businessId],
+          [
+            input.productId as string,
+            input.catalogItemId,
+            input.businessId,
+          ],
         );
         const activeTotal = lotRows
           .filter((lot) => lot.status === "active")
@@ -266,6 +360,7 @@ export async function persistStockAdjustment(
               status = CASE WHEN ? <= ? THEN 'depleted' ELSE 'active' END,
               updated_at = ?, sync_status = 'local'
             WHERE id = ? AND product_id = ? AND business_id = ?
+              AND catalog_item_id = ?
               AND ABS(remaining_quantity - ?) <= ?
               AND deleted_at IS NULL
           `,
@@ -277,12 +372,38 @@ export async function persistStockAdjustment(
             allocation.productStockLotId ?? null,
             input.productId as string,
             input.businessId,
+            input.catalogItemId,
             allocation.beforeQuantity,
             INVENTORY_QUANTITY_TOLERANCE,
           ],
         );
         if (result.changes !== 1) {
           throw new Error("Product lot changed before adjustment.");
+        }
+      }
+
+      if (usesProductLots) {
+        const projectedLots = await txn.getAllAsync<{
+          remaining_quantity: number;
+          status: string;
+        }>(
+          `
+            SELECT remaining_quantity, status
+            FROM product_stock_lots
+            WHERE product_id = ? AND catalog_item_id = ?
+              AND business_id = ? AND deleted_at IS NULL
+          `,
+          [
+            input.productId as string,
+            input.catalogItemId,
+            input.businessId,
+          ],
+        );
+        const projectedTotal = projectedLots
+          .filter((lot) => lot.status === "active")
+          .reduce((sum, lot) => sum + lot.remaining_quantity, 0);
+        if (!approximatelyEqual(projectedTotal, input.enteredAfterQuantity)) {
+          throw new Error("Product lot projection does not match adjusted total.");
         }
       }
 
@@ -359,6 +480,37 @@ export async function persistStockAdjustment(
         );
       }
     } else {
+      const binding = await txn.getFirstAsync<{
+        stock_policy: string;
+        binding_status: string;
+      }>(
+        `
+          SELECT item.stock_policy, binding.binding_status
+          FROM catalog_items item
+          INNER JOIN legacy_item_bindings binding
+            ON binding.catalog_item_id = item.id
+            AND binding.entity_kind = 'ingredient'
+            AND binding.legacy_entity_id = ?
+            AND binding.deleted_at IS NULL
+          WHERE item.id = ? AND item.business_id = ?
+            AND item.deleted_at IS NULL
+        `,
+        [
+          input.ingredientId as string,
+          input.catalogItemId,
+          input.businessId,
+        ],
+      );
+      if (
+        !binding ||
+        binding.binding_status !== "active" ||
+        binding.stock_policy !== "ingredient_lots"
+      ) {
+        throw new Error(
+          "Ingredient adjustment requires an exact lot-backed catalog binding.",
+        );
+      }
+
       const lots = await txn.getAllAsync<{
         id: string;
         remaining_quantity: number;

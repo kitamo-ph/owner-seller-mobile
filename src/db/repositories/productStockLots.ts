@@ -115,6 +115,7 @@ function validateCostState(
   state: CostState,
   totalCost: number | null,
   unitCost: number | null,
+  quantity: number,
 ) {
   if (
     state === "known" &&
@@ -123,15 +124,116 @@ function validateCostState(
       !Number.isFinite(totalCost) ||
       !Number.isFinite(unitCost) ||
       totalCost < 0 ||
-      unitCost < 0)
+      unitCost < 0 ||
+      Math.abs(totalCost - unitCost * quantity) >
+        INVENTORY_QUANTITY_TOLERANCE)
   ) {
-    throw new Error("Known Product-lot cost requires non-negative values.");
+    throw new Error(
+      "Known Product-lot cost requires consistent non-negative values.",
+    );
   }
   if (
     state !== "known" &&
     (totalCost !== null || unitCost !== null)
   ) {
     throw new Error("Unresolved Product-lot cost must remain NULL.");
+  }
+}
+
+async function validateProductLotOrigin(
+  input: AddProductStockLotInput,
+  product: {
+    branch_id: string | null;
+  },
+  db: RepositoryDatabase,
+) {
+  const productionBatchId = input.productionBatchId?.trim() || null;
+  const purchaseReceiptId = input.purchaseReceiptId?.trim() || null;
+  const supplierId = input.supplierId?.trim() || null;
+
+  if (supplierId) {
+    const supplier = await db.getFirstAsync<{
+      business_id: string;
+      status: string;
+    }>(
+      `
+        SELECT business_id, status
+        FROM suppliers
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [supplierId],
+    );
+    if (
+      !supplier ||
+      supplier.business_id !== input.businessId ||
+      supplier.status !== "active"
+    ) {
+      throw new Error("Product-lot supplier is unavailable.");
+    }
+  }
+
+  if (input.originKind === "production") {
+    if (!productionBatchId || purchaseReceiptId || supplierId) {
+      throw new Error(
+        "Production-origin Product lots require only an exact production batch.",
+      );
+    }
+    const batch = await db.getFirstAsync<{
+      business_id: string;
+      branch_id: string | null;
+      output_product_id: string | null;
+    }>(
+      `
+        SELECT business_id, branch_id, output_product_id
+        FROM production_batches
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [productionBatchId],
+    );
+    if (
+      !batch ||
+      batch.business_id !== input.businessId ||
+      batch.branch_id !== product.branch_id ||
+      batch.output_product_id !== input.productId
+    ) {
+      throw new Error("Product lot does not match its production batch.");
+    }
+    return;
+  }
+
+  if (input.originKind === "purchase") {
+    if (!purchaseReceiptId || productionBatchId) {
+      throw new Error(
+        "Purchase-origin Product lots require only an exact purchase receipt.",
+      );
+    }
+    const receipt = await db.getFirstAsync<{
+      business_id: string;
+      branch_id: string | null;
+      supplier_id: string | null;
+    }>(
+      `
+        SELECT business_id, branch_id, supplier_id
+        FROM purchase_receipts
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [purchaseReceiptId],
+    );
+    if (
+      !receipt ||
+      receipt.business_id !== input.businessId ||
+      receipt.branch_id !== product.branch_id ||
+      receipt.supplier_id !== supplierId
+    ) {
+      throw new Error("Product lot does not match its purchase receipt.");
+    }
+    return;
+  }
+
+  if (productionBatchId || purchaseReceiptId || supplierId) {
+    throw new Error(
+      "This Product-lot origin cannot claim purchase or production provenance.",
+    );
   }
 }
 
@@ -427,13 +529,21 @@ export async function addProductStockLotWithScalarProjection(
   input: AddProductStockLotInput,
   db?: RepositoryDatabase,
 ) {
-  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+  if (
+    !input.unit.trim() ||
+    !input.originDate.trim() ||
+    !input.movementType.trim() ||
+    !input.movementReason.trim() ||
+    !Number.isFinite(input.quantity) ||
+    input.quantity <= 0
+  ) {
     throw new Error("Product-lot quantity must be greater than zero.");
   }
   validateCostState(
     input.costState,
     input.recordedTotalCost ?? null,
     input.recordedCostPerUnit ?? null,
+    input.quantity,
   );
   const database = getRepositoryDatabase(db);
   const timestamp = nowIso();
@@ -453,6 +563,12 @@ export async function addProductStockLotWithScalarProjection(
     if (catalogItemId !== input.catalogItemId) {
       throw new Error("Product lot does not match the exact catalog binding.");
     }
+    if (
+      input.unit.trim() !== product.unit_type ||
+      lots.some((lot) => lot.unit !== product.unit_type)
+    ) {
+      throw new Error("Product-lot unit must match the Product stock unit.");
+    }
     const before = reconciliationFromRows(product.stock_qty, lots);
     if (!before.canAllocate) {
       throw new Error(`Product stock reconciliation blocked: ${before.status}.`);
@@ -463,6 +579,7 @@ export async function addProductStockLotWithScalarProjection(
     ) {
       throw new Error("Product lot branch does not match its Product.");
     }
+    await validateProductLotOrigin(input, product, txn);
 
     await txn.runAsync(
       `
@@ -482,14 +599,14 @@ export async function addProductStockLotWithScalarProjection(
         input.productId,
         input.catalogItemId,
         input.originKind,
-        input.productionBatchId ?? null,
-        input.purchaseReceiptId ?? null,
-        input.supplierId ?? null,
+        input.productionBatchId?.trim() || null,
+        input.purchaseReceiptId?.trim() || null,
+        input.supplierId?.trim() || null,
         input.originDate,
         input.expiryDate ?? null,
         input.quantity,
         input.quantity,
-        input.unit,
+        input.unit.trim(),
         input.recordedTotalCost ?? null,
         input.recordedCostPerUnit ?? null,
         input.costState,
@@ -601,6 +718,9 @@ export async function deductProductStockLotsWithScalarProjection(
     );
     if (lots.some((lot) => lot.catalog_item_id !== catalogItemId)) {
       throw new Error("Product lots contain contradictory catalog bindings.");
+    }
+    if (lots.some((lot) => lot.unit !== product.unit_type)) {
+      throw new Error("Product lots contain contradictory stock units.");
     }
     const before = reconciliationFromRows(product.stock_qty, lots);
     if (!before.canAllocate) {

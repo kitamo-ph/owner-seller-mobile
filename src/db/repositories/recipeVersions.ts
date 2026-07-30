@@ -277,6 +277,80 @@ function mapLine(row: RecipeVersionLineRow): RecipeVersionLineRecord {
   };
 }
 
+function getPublicationAuthoritativeUnitCost(
+  line: PublishRecipeVersionLineInput,
+) {
+  if (line.sourceKind === "custom_cost") {
+    return line.costOverride ?? null;
+  }
+  if (line.sourceKind === "catalog_item") {
+    return line.costPerUnitSnapshot ?? null;
+  }
+  if (
+    line.lineCostSnapshot === null ||
+    line.lineCostSnapshot === undefined
+  ) {
+    return null;
+  }
+  return line.lineCostSnapshot / line.quantity;
+}
+
+function validatePublicationLineCostEvidence(
+  line: PublishRecipeVersionLineInput,
+  index: number,
+) {
+  if (
+    (line.sourceKind === "custom_cost" &&
+      line.costPerUnitSnapshot !== null &&
+      line.costPerUnitSnapshot !== undefined) ||
+    (line.sourceKind === "catalog_item" &&
+      line.costOverride !== null &&
+      line.costOverride !== undefined) ||
+    (line.sourceKind === "child_recipe_version" &&
+      ((line.costOverride !== null && line.costOverride !== undefined) ||
+        (line.costPerUnitSnapshot !== null &&
+          line.costPerUnitSnapshot !== undefined)))
+  ) {
+    throw new Error(
+      `Recipe line ${index + 1} cost evidence does not match its source.`,
+    );
+  }
+
+  const authoritativeUnitCost = getPublicationAuthoritativeUnitCost(line);
+  const lineCost = line.lineCostSnapshot ?? null;
+  if (line.costState === "known") {
+    if (
+      authoritativeUnitCost === null ||
+      !Number.isFinite(authoritativeUnitCost) ||
+      authoritativeUnitCost < 0
+    ) {
+      throw new Error(
+        `Recipe line ${index + 1} known cost requires non-negative evidence.`,
+      );
+    }
+    const expectedLineCost =
+      line.sourceKind === "custom_cost"
+        ? authoritativeUnitCost
+        : authoritativeUnitCost * line.quantity;
+    if (
+      lineCost === null ||
+      !Number.isFinite(lineCost) ||
+      Math.abs(lineCost - expectedLineCost) > 1e-9
+    ) {
+      throw new Error(
+        `Recipe line ${index + 1} cost snapshot is inconsistent.`,
+      );
+    }
+    return;
+  }
+
+  if (authoritativeUnitCost !== null || lineCost !== null) {
+    throw new Error(
+      `Recipe line ${index + 1} incomplete cost cannot carry authoritative evidence.`,
+    );
+  }
+}
+
 function validatePublishInput(input: PublishRecipeVersionInput) {
   if (!input.name.trim()) throw new Error("Recipe version name is required.");
   if (
@@ -312,7 +386,28 @@ function validatePublishInput(input: PublishRecipeVersionInput) {
     ) {
       throw new Error(`Recipe line ${index + 1} source kind does not match its source.`);
     }
+    validatePublicationLineCostEvidence(line, index);
   });
+}
+
+function sameOptionalText(
+  left: string | null,
+  right: string | null | undefined,
+) {
+  return left === (right?.trim() || null);
+}
+
+function sameOptionalNumber(
+  left: number | null,
+  right: number | null | undefined,
+) {
+  const normalizedRight = right ?? null;
+  return (
+    (left === null && normalizedRight === null) ||
+    (left !== null &&
+      normalizedRight !== null &&
+      Math.abs(left - normalizedRight) <= 1e-9)
+  );
 }
 
 export async function getRecipeVersionById(
@@ -435,10 +530,11 @@ export async function publishRecipeVersion(
     const recipe = await txn.getFirstAsync<{
       id: string;
       business_id: string;
+      output_product_id: string;
       active_version_id: string | null;
     }>(
       `
-        SELECT id, business_id, active_version_id
+        SELECT id, business_id, output_product_id, active_version_id
         FROM recipes
         WHERE id = ? AND deleted_at IS NULL
       `,
@@ -448,26 +544,62 @@ export async function publishRecipeVersion(
       throw new Error("Recipe does not belong to the active business.");
     }
 
-    const output = await txn.getFirstAsync<{ business_id: string }>(
+    const output = await txn.getFirstAsync<{
+      business_id: string;
+      legacy_entity_id: string;
+      binding_status: string;
+    }>(
       `
-        SELECT business_id
-        FROM catalog_items
-        WHERE id = ? AND deleted_at IS NULL AND lifecycle_status <> 'archived'
+        SELECT item.business_id, binding.legacy_entity_id,
+          binding.binding_status
+        FROM catalog_items item
+        INNER JOIN legacy_item_bindings binding
+          ON binding.catalog_item_id = item.id
+          AND binding.entity_kind = 'product'
+          AND binding.legacy_entity_id = ?
+          AND binding.deleted_at IS NULL
+        WHERE item.id = ? AND item.deleted_at IS NULL
+          AND item.lifecycle_status <> 'archived'
       `,
-      [input.outputCatalogItemId],
+      [recipe.output_product_id, input.outputCatalogItemId],
     );
-    if (!output || output.business_id !== input.businessId) {
-      throw new Error("Output catalog item is unavailable.");
+    if (
+      !output ||
+      output.business_id !== input.businessId ||
+      output.legacy_entity_id !== recipe.output_product_id ||
+      output.binding_status !== "active" ||
+      (input.outputProductIdSnapshot !== undefined &&
+        input.outputProductIdSnapshot !== null &&
+        input.outputProductIdSnapshot !== recipe.output_product_id)
+    ) {
+      throw new Error("Output catalog item is not the Recipe's exact Product binding.");
     }
 
     if (input.sourceDraftId) {
+      if (input.expectedDraftRevision === undefined) {
+        throw new Error("Recipe draft publication requires a revision guard.");
+      }
       const draft = await txn.getFirstAsync<{
         business_id: string;
+        recipe_id: string | null;
+        output_catalog_item_id: string | null;
+        name: string | null;
+        category: string | null;
+        expected_output_quantity: number | null;
+        expected_output_unit: string | null;
+        production_mode: RecipeVersionRecord["productionMode"] | null;
+        suggested_selling_price: number | null;
+        selling_price_state: CostState;
         autosave_revision: number;
         lifecycle_status: string;
+        unresolved_requirement_count: number;
       }>(
         `
-          SELECT business_id, autosave_revision, lifecycle_status
+          SELECT business_id, recipe_id, output_catalog_item_id, name,
+            category, expected_output_quantity, expected_output_unit,
+            production_mode, suggested_selling_price, selling_price_state,
+            autosave_revision, lifecycle_status,
+            unresolved_requirement_count
           FROM recipe_drafts
           WHERE id = ? AND deleted_at IS NULL
         `,
@@ -476,14 +608,184 @@ export async function publishRecipeVersion(
       if (!draft || draft.business_id !== input.businessId) {
         throw new Error("Recipe draft is unavailable.");
       }
-      if (
-        input.expectedDraftRevision !== undefined &&
-        draft.autosave_revision !== input.expectedDraftRevision
-      ) {
+      if (draft.autosave_revision !== input.expectedDraftRevision) {
         throw new Error("Recipe draft changed before publication.");
       }
       if (!["editing", "ready"].includes(draft.lifecycle_status)) {
         throw new Error("Recipe draft is not publishable.");
+      }
+      if (
+        draft.recipe_id !== input.recipeId ||
+        draft.output_catalog_item_id !== input.outputCatalogItemId ||
+        draft.name?.trim() !== input.name.trim() ||
+        !sameOptionalText(draft.category, input.category) ||
+        !sameOptionalNumber(
+          draft.expected_output_quantity,
+          input.expectedOutputQuantity,
+        ) ||
+        draft.expected_output_unit?.trim() !==
+          input.expectedOutputUnit.trim() ||
+        draft.production_mode !== input.productionMode ||
+        !sameOptionalNumber(
+          draft.suggested_selling_price,
+          input.suggestedSellingPriceSnapshot,
+        ) ||
+        draft.selling_price_state !== input.sellingPriceState ||
+        draft.unresolved_requirement_count !== 0
+      ) {
+        throw new Error("Recipe publication does not match the saved draft.");
+      }
+
+      const draftLines = await txn.getAllAsync<{
+        source_kind: string;
+        catalog_item_id: string | null;
+        child_recipe_version_id: string | null;
+        custom_name: string | null;
+        quantity: number | null;
+        unit: string | null;
+        normalized_quantity: number | null;
+        normalized_unit: string | null;
+        conversion_id: string | null;
+        conversion_factor_snapshot: number | null;
+        role: RecipeLineRole;
+        is_optional: number;
+        cost_override: number | null;
+        cost_state: RecipeVersionCostState;
+        allocation_mode: RecipeAllocationMode;
+      }>(
+        `
+          SELECT source_kind, catalog_item_id, child_recipe_version_id,
+            custom_name, quantity, unit, normalized_quantity, normalized_unit,
+            conversion_id, conversion_factor_snapshot, role, is_optional,
+            cost_override, cost_state, allocation_mode
+          FROM recipe_draft_lines
+          WHERE recipe_draft_id = ? AND deleted_at IS NULL
+          ORDER BY sort_order ASC, id ASC
+        `,
+        [input.sourceDraftId],
+      );
+      if (draftLines.length !== input.lines.length) {
+        throw new Error("Recipe publication lines do not match the saved draft.");
+      }
+      for (const [index, draftLine] of draftLines.entries()) {
+        const line = input.lines[index];
+        const publicationCost = getPublicationAuthoritativeUnitCost(line);
+        if (
+          draftLine.source_kind !== line.sourceKind ||
+          draftLine.catalog_item_id !== (line.catalogItemId ?? null) ||
+          draftLine.child_recipe_version_id !==
+            (line.childRecipeVersionId ?? null) ||
+          !sameOptionalText(draftLine.custom_name, line.customName) ||
+          !sameOptionalNumber(draftLine.quantity, line.quantity) ||
+          draftLine.unit?.trim() !== line.unit.trim() ||
+          !sameOptionalNumber(
+            draftLine.normalized_quantity,
+            line.normalizedQuantity,
+          ) ||
+          !sameOptionalText(
+            draftLine.normalized_unit,
+            line.normalizedUnit,
+          ) ||
+          draftLine.conversion_id !== (line.conversionId ?? null) ||
+          !sameOptionalNumber(
+            draftLine.conversion_factor_snapshot,
+            line.conversionFactorSnapshot,
+          ) ||
+          draftLine.role !== (line.role ?? "unset") ||
+          draftLine.is_optional !== toInteger(line.isOptional ?? false) ||
+          !sameOptionalNumber(draftLine.cost_override, publicationCost) ||
+          draftLine.cost_state !== line.costState ||
+          draftLine.allocation_mode !== (line.allocationMode ?? "none")
+        ) {
+          throw new Error(
+            `Recipe publication line ${index + 1} does not match the saved draft.`,
+          );
+        }
+      }
+    }
+
+    const catalogItemIds = [
+      ...new Set(
+        input.lines
+          .filter((line) => line.sourceKind === "catalog_item")
+          .map((line) => line.catalogItemId as string),
+      ),
+    ];
+    for (const catalogItemId of catalogItemIds) {
+      const item = await txn.getFirstAsync<{ business_id: string }>(
+        `
+          SELECT business_id
+          FROM catalog_items
+          WHERE id = ? AND deleted_at IS NULL
+            AND lifecycle_status <> 'archived'
+        `,
+        [catalogItemId],
+      );
+      if (item?.business_id !== input.businessId) {
+        throw new Error("Recipe input catalog item is unavailable.");
+      }
+    }
+
+    const childVersionIds = [
+      ...new Set(
+        input.lines
+          .filter((line) => line.sourceKind === "child_recipe_version")
+          .map((line) => line.childRecipeVersionId as string),
+      ),
+    ];
+    for (const childVersionId of childVersionIds) {
+      const child = await txn.getFirstAsync<{
+        business_id: string;
+        status: RecipeVersionStatus;
+      }>(
+        `
+          SELECT business_id, status
+          FROM recipe_versions
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [childVersionId],
+      );
+      if (
+        child?.business_id !== input.businessId ||
+        child.status === "archived"
+      ) {
+        throw new Error("Pinned child Recipe version is unavailable.");
+      }
+    }
+
+    for (const line of input.lines) {
+      if (!line.conversionId) continue;
+      if (
+        line.sourceKind !== "catalog_item" ||
+        !line.normalizedUnit?.trim() ||
+        line.conversionFactorSnapshot === null ||
+        line.conversionFactorSnapshot === undefined
+      ) {
+        throw new Error("Recipe line conversion evidence is incomplete.");
+      }
+      const conversion = await txn.getFirstAsync<{
+        business_id: string;
+        catalog_item_id: string;
+        from_unit: string;
+        to_unit: string;
+        factor: number;
+      }>(
+        `
+          SELECT business_id, catalog_item_id, from_unit, to_unit, factor
+          FROM item_unit_conversions
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [line.conversionId],
+      );
+      if (
+        !conversion ||
+        conversion.business_id !== input.businessId ||
+        conversion.catalog_item_id !== line.catalogItemId ||
+        conversion.from_unit !== line.unit.trim() ||
+        conversion.to_unit !== line.normalizedUnit.trim() ||
+        Math.abs(conversion.factor - line.conversionFactorSnapshot) > 1e-9
+      ) {
+        throw new Error("Recipe line conversion evidence is unavailable.");
       }
     }
 
@@ -506,7 +808,7 @@ export async function publishRecipeVersion(
       name: input.name.trim(),
       category: input.category?.trim() || null,
       outputCatalogItemId: input.outputCatalogItemId,
-      outputProductIdSnapshot: input.outputProductIdSnapshot ?? null,
+      outputProductIdSnapshot: recipe.output_product_id,
       expectedOutputQuantity: input.expectedOutputQuantity,
       expectedOutputUnit: input.expectedOutputUnit.trim(),
       productionMode: input.productionMode,
@@ -611,17 +913,20 @@ export async function publishRecipeVersion(
     }
 
     if (recipe.active_version_id) {
-      await txn.runAsync(
+      const supersedeResult = await txn.runAsync(
         `
           UPDATE recipe_versions
           SET status = 'superseded', updated_at = ?, sync_status = 'local'
-          WHERE id = ? AND status = 'published'
+          WHERE id = ? AND recipe_id = ? AND status = 'published'
         `,
-        [timestamp, recipe.active_version_id],
+        [timestamp, recipe.active_version_id, input.recipeId],
       );
+      if (supersedeResult.changes !== 1) {
+        throw new Error("Active Recipe version changed before publication.");
+      }
     }
 
-    await txn.runAsync(
+    const recipeResult = await txn.runAsync(
       `
         UPDATE recipes
         SET active_version_id = ?, versioning_state = 'native',
@@ -643,6 +948,9 @@ export async function publishRecipeVersion(
         input.businessId,
       ],
     );
+    if (recipeResult.changes !== 1) {
+      throw new Error("Recipe changed before version publication.");
+    }
 
     if (input.role) {
       await txn.runAsync(
@@ -691,19 +999,22 @@ export async function publishRecipeVersion(
           UPDATE recipe_drafts
           SET lifecycle_status = 'published', published_version_id = ?,
             updated_at = ?, last_saved_at = ?, sync_status = 'local'
-          WHERE id = ? AND lifecycle_status IN ('editing', 'ready')
+          WHERE id = ? AND business_id = ? AND recipe_id = ?
+            AND output_catalog_item_id = ?
+            AND lifecycle_status IN ('editing', 'ready')
+            AND autosave_revision = ?
             AND deleted_at IS NULL
-            ${input.expectedDraftRevision === undefined ? "" : "AND autosave_revision = ?"}
         `,
-        input.expectedDraftRevision === undefined
-          ? [version.id, timestamp, timestamp, input.sourceDraftId]
-          : [
-              version.id,
-              timestamp,
-              timestamp,
-              input.sourceDraftId,
-              input.expectedDraftRevision,
-            ],
+        [
+          version.id,
+          timestamp,
+          timestamp,
+          input.sourceDraftId,
+          input.businessId,
+          input.recipeId,
+          input.outputCatalogItemId,
+          input.expectedDraftRevision as number,
+        ],
       );
       if (result.changes !== 1) {
         throw new Error("Recipe draft publication lost its revision guard.");

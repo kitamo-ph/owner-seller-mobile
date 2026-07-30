@@ -158,6 +158,8 @@ async function publicationContext(
         label: input.label,
         quantity: input.quantity,
         unit: input.unit,
+        canonicalQuantity: input.normalizedQuantity ?? undefined,
+        canonicalUnit: input.normalizedUnit ?? undefined,
         role: input.role,
         optional: input.optional,
       };
@@ -225,12 +227,19 @@ export async function publishValidatedRecipeDraft(
   input: {
     draft: RecipeVersionDraft;
     outputProductIdSnapshot?: string | null;
-    expectedStoredDraftRevision?: number;
+    expectedStoredDraftRevision: number;
     role?: "default" | "alternative";
   },
   db: RepositoryDatabase = openKitamoDatabase(),
 ) {
   await runMigrations(db);
+  if (
+    !Number.isInteger(input.expectedStoredDraftRevision) ||
+    input.expectedStoredDraftRevision < 0 ||
+    input.draft.revision !== input.expectedStoredDraftRevision
+  ) {
+    throw new Error("Recipe draft revision does not match persisted publication.");
+  }
   const { context, graphState } = await publicationContext(input.draft, db);
   const validation = validateRecipeVersionDraft(input.draft, context);
   if (!validation.valid) {
@@ -252,6 +261,10 @@ export async function publishValidatedRecipeDraft(
       customName: line.sourceKind === "custom_cost" ? line.label : null,
       quantity: line.quantity,
       unit: line.unit,
+      normalizedQuantity: line.normalizedQuantity ?? null,
+      normalizedUnit: line.normalizedUnit ?? null,
+      conversionId: line.conversionId ?? null,
+      conversionFactorSnapshot: line.conversionFactorSnapshot ?? null,
       role: line.role,
       isOptional: line.optional,
       costOverride:

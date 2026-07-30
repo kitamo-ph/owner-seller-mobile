@@ -1,6 +1,11 @@
 import { openKitamoDatabase } from "@/db/client";
 import { runMigrations } from "@/db/migrations";
-import { getAverageProducedCostByProduct, getProductById, type RepositoryDatabase } from "@/db/repositories";
+import {
+  createProduct,
+  getAverageProducedCostByProduct,
+  getProductById,
+  type RepositoryDatabase,
+} from "@/db/repositories";
 import { makeMovementId, makeProductId, makeTransferId } from "@/domain/ids";
 import type { Product } from "@/domain/types";
 
@@ -131,35 +136,25 @@ export async function recordTransfer(
       );
     } else {
       destinationProductId = newDestinationProductId as string;
-      await txn.runAsync(
-        `
-          INSERT INTO products (
-            id, business_id, branch_id, name, category, price, cost, stock_qty,
-            unit_type, low_stock_threshold, bundle_quantity, bundle_price,
-            bundle_label, active, product_type, created_at, updated_at, sync_status, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          destinationProductId,
-          business.id,
-          toBranch.id,
-          product.name,
-          product.category,
-          product.price,
-          product.cost,
-          input.quantity,
-          product.unitType,
-          product.lowStockThreshold,
-          product.bundleQuantity,
-          product.bundlePrice,
-          product.bundleLabel,
-          1,
-          product.productType,
-          timestamp,
-          timestamp,
-          "local",
-          null,
-        ],
+      await createProduct(
+        {
+          id: destinationProductId,
+          businessId: business.id,
+          branchId: toBranch.id,
+          name: product.name,
+          category: product.category,
+          price: product.price,
+          cost: product.cost,
+          stockQty: input.quantity,
+          unitType: product.unitType,
+          lowStockThreshold: product.lowStockThreshold,
+          bundleQuantity: product.bundleQuantity,
+          bundlePrice: product.bundlePrice,
+          bundleLabel: product.bundleLabel,
+          active: true,
+          productType: product.productType,
+        },
+        txn,
       );
     }
 

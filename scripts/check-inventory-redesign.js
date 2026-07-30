@@ -19,6 +19,7 @@ const checks = [
   "check:recipe-versioning",
   "check:recipe-drafts",
   "check:production-planner",
+  "check:production-plan-lot-guards",
   "check:inventory-redesign-migrations",
   "check:inventory-redesign-transactions",
 ];

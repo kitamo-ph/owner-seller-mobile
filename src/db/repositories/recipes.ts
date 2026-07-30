@@ -98,6 +98,31 @@ export async function createRecipe(input: CreateRecipeInput, db?: RepositoryData
     deletedAt: null,
   };
 
+  const output = await database.getFirstAsync<{
+    business_id: string;
+    catalog_item_id: string;
+    binding_status: string;
+  }>(
+    `
+      SELECT product.business_id, binding.catalog_item_id,
+        binding.binding_status
+      FROM products product
+      INNER JOIN legacy_item_bindings binding
+        ON binding.entity_kind = 'product'
+        AND binding.legacy_entity_id = product.id
+        AND binding.deleted_at IS NULL
+      WHERE product.id = ? AND product.deleted_at IS NULL
+    `,
+    [recipe.outputProductId],
+  );
+  if (
+    output?.business_id !== recipe.businessId ||
+    output.binding_status !== "active" ||
+    !output.catalog_item_id
+  ) {
+    throw new Error("Recipe output requires an exact active Product binding.");
+  }
+
   await database.runAsync(
     `
       INSERT INTO recipes (

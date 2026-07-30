@@ -1,25 +1,161 @@
 import { openKitamoDatabase } from "@/db/client";
 import { runMigrations } from "@/db/migrations";
 import {
+  loadRecipeVersionGraph,
   saveProductionPlan,
-  type PlanCostState,
   type ProductionRequirementKind,
+  type RecipeVersionCostState,
+  type RecipeVersionLineRecord,
+  type RecipeVersionRecord,
   type RepositoryDatabase,
+  type SaveProductionPlanAllocationInput,
   type SaveProductionPlanStageInput,
 } from "@/db/repositories";
 import {
   calculateProductionPlan,
+  partitionProductionPlanLotAllocations,
+  type ProductionPlanLotAllocation,
   type ProductionPlan,
   type ProductionPlannerInput,
   type ProductionPlannerResult,
 } from "@/domain/productionPlanner";
+import type {
+  RecipeGraphCostState,
+  RecipeGraphLine,
+  RecipeGraphVersion,
+} from "@/domain/recipeGraph";
 
-function planCostState(plan: ProductionPlan): PlanCostState {
-  if (plan.costComplete) return "known";
-  return plan.knownCostSubtotal > 0 ? "partial" : "unknown";
+function persistenceCostToGraph(
+  state: RecipeVersionCostState,
+): RecipeGraphCostState {
+  return state === "known" ||
+    state === "legacy_zero_unresolved" ||
+    state === "not_applicable"
+    ? state
+    : "unknown";
+}
+
+function mapPersistedLine(line: RecipeVersionLineRecord): RecipeGraphLine {
+  const base = {
+    id: line.id,
+    label:
+      line.sourceLabelSnapshot ??
+      line.customName ??
+      line.catalogItemId ??
+      line.childRecipeVersionId ??
+      "Recipe input",
+    quantity: line.quantity,
+    unit: line.unit,
+    canonicalQuantity: line.normalizedQuantity ?? undefined,
+    canonicalUnit: line.normalizedUnit ?? undefined,
+    role: line.role,
+    optional: line.isOptional,
+  };
+  if (line.sourceKind === "child_recipe_version") {
+    return {
+      ...base,
+      sourceKind: "child_recipe_version",
+      childVersionId: line.childRecipeVersionId as string,
+    };
+  }
+  if (line.sourceKind === "custom_cost") {
+    return {
+      ...base,
+      sourceKind: "custom_cost",
+      costBasis: "per_recipe_line",
+      costState: persistenceCostToGraph(line.costState),
+      authoritativeUnitCost:
+        line.lineCostSnapshot ?? line.costOverride ?? null,
+    };
+  }
+  return {
+    ...base,
+    sourceKind: "catalog_item",
+    itemId: line.catalogItemId as string,
+    costState: persistenceCostToGraph(line.costState),
+    authoritativeUnitCost: line.costPerUnitSnapshot,
+  };
+}
+
+function mapPersistedGraph(
+  versions: RecipeVersionRecord[],
+  lines: RecipeVersionLineRecord[],
+): RecipeGraphVersion[] {
+  const linesByVersion = new Map<string, RecipeVersionLineRecord[]>();
+  for (const line of lines) {
+    const current = linesByVersion.get(line.recipeVersionId);
+    if (current) current.push(line);
+    else linesByVersion.set(line.recipeVersionId, [line]);
+  }
+  return versions.map((version) => ({
+    id: version.id,
+    familyId: version.recipeId,
+    outputItemId: version.outputCatalogItemId,
+    label: version.name,
+    businessId: version.businessId,
+    expectedOutputQuantity: version.expectedOutputQuantity,
+    outputUnit: version.expectedOutputUnit,
+    status: version.status,
+    lines: (linesByVersion.get(version.id) ?? []).map(mapPersistedLine),
+  }));
+}
+
+function aggregateCostState(
+  states: readonly RecipeGraphCostState[],
+): ProductionPlan["costState"] {
+  const applicable = states.filter((state) => state !== "not_applicable");
+  if (applicable.length === 0) return "not_applicable";
+  const hasKnown = applicable.includes("known");
+  const hasUnknown = applicable.includes("unknown");
+  const hasLegacy = applicable.includes("legacy_zero_unresolved");
+  if (!hasUnknown && !hasLegacy) return "known";
+  if (hasKnown) return "partial";
+  return hasUnknown ? "unknown" : "legacy_zero_unresolved";
+}
+
+function lineExpectedCost(line: RecipeGraphLine, quantity: number) {
+  if (line.sourceKind === "child_recipe_version") return 0;
+  if (line.costState !== "known") return 0;
+  if (
+    line.authoritativeUnitCost === null ||
+    line.authoritativeUnitCost === undefined
+  ) {
+    throw new Error("Published Recipe line has incomplete known-cost evidence.");
+  }
+  if (
+    line.sourceKind === "custom_cost" &&
+    (line.costBasis ?? "per_recipe_line") === "per_recipe_line"
+  ) {
+    const configuredQuantity = line.canonicalQuantity ?? line.quantity;
+    return (quantity / configuredQuantity) * line.authoritativeUnitCost;
+  }
+  return quantity * line.authoritativeUnitCost;
+}
+
+function assertExactStockEvidence(planner: ProductionPlannerInput) {
+  const seen = new Set<string>();
+  for (const stock of [...planner.preparedStock, ...planner.rawStock]) {
+    if (stock.quantity <= 0) continue;
+    if (
+      !stock.lotKind ||
+      !stock.lotId?.trim() ||
+      !stock.allocationMode ||
+      stock.costState === undefined
+    ) {
+      throw new Error(
+        "Persisted production plans require exact lot, allocation, and cost evidence.",
+      );
+    }
+    const key = `${stock.lotKind}:${stock.lotId.trim()}`;
+    if (seen.has(key)) {
+      throw new Error("A stock lot occurs more than once in the plan snapshot.");
+    }
+    seen.add(key);
+  }
 }
 
 async function catalogRequirementKinds(
+  businessId: string,
   itemIds: string[],
   db: RepositoryDatabase,
 ) {
@@ -32,11 +168,15 @@ async function catalogRequirementKinds(
     `
       SELECT id, classification
       FROM catalog_items
-      WHERE id IN (${unique.map(() => "?").join(", ")})
+      WHERE business_id = ?
+        AND id IN (${unique.map(() => "?").join(", ")})
         AND deleted_at IS NULL
     `,
-    unique,
+    [businessId, ...unique],
   );
+  if (rows.length !== unique.length) {
+    throw new Error("Production plan contains unavailable catalog items.");
+  }
   return new Map(
     rows.map((row) => [
       row.id,
@@ -50,7 +190,35 @@ async function catalogRequirementKinds(
   );
 }
 
+function mapAllocation(
+  allocation: ProductionPlanLotAllocation,
+): SaveProductionPlanAllocationInput {
+  return {
+    lotKind: allocation.lotKind,
+    ingredientLotId:
+      allocation.lotKind === "ingredient" ? allocation.lotId : null,
+    productStockLotId:
+      allocation.lotKind === "product" ? allocation.lotId : null,
+    allocationMode: allocation.allocationMode,
+    quantity: allocation.quantity,
+    unit: allocation.unit,
+    normalizedQuantity: allocation.normalizedQuantity,
+    normalizedUnit: allocation.normalizedUnit,
+    conversionId: allocation.conversionId,
+    conversionFactorSnapshot: allocation.conversionFactorSnapshot,
+    unitCostSnapshot: allocation.unitCostSnapshot,
+    costContribution:
+      allocation.costContribution === null
+        ? null
+        : allocation.costContribution,
+    costState: allocation.costState,
+    selectionState:
+      allocation.allocationMode === "manual" ? "manual" : "recommended",
+  };
+}
+
 async function mapPlanForPersistence(
+  businessId: string,
   plan: ProductionPlan,
   input: ProductionPlannerInput,
   db: RepositoryDatabase,
@@ -70,8 +238,11 @@ async function mapPlanForPersistence(
     input.versions.map((version) => [version.id, version]),
   );
   const kinds = await catalogRequirementKinds(
-    plan.rawRequirements
-      .map((requirement) => requirement.itemId)
+    businessId,
+    [
+      ...plan.rawRequirements.map((requirement) => requirement.itemId),
+      ...plan.preparedStockUses.map((usage) => usage.itemId),
+    ]
       .filter((id): id is string => id !== null),
     db,
   );
@@ -92,19 +263,76 @@ async function mapPlanForPersistence(
       if (entries) entries.push(provenance);
       else grouped.set(provenance.versionId, [provenance]);
     }
-    const totalProvenance = requirement.provenance.reduce(
-      (sum, provenance) => sum + provenance.quantity,
-      0,
+    const groupedEntries = [...grouped.entries()];
+    const allocationPartitions = partitionProductionPlanLotAllocations(
+      requirement.allocations,
+      groupedEntries.map(([, provenance]) =>
+        provenance.reduce((sum, entry) => sum + entry.quantity, 0),
+      ),
     );
-    for (const [versionId, provenance] of grouped) {
+    for (const [
+      groupIndex,
+      [versionId, provenance],
+    ] of groupedEntries.entries()) {
       const stage = stageByVersion.get(versionId);
-      if (!stage) continue;
+      const version = versionById.get(versionId);
+      if (!stage || !version) {
+        throw new Error("Requirement provenance has no pinned production stage.");
+      }
       const groupQuantity = provenance.reduce(
         (sum, entry) => sum + entry.quantity,
         0,
       );
-      const ratio =
-        totalProvenance > 0 ? groupQuantity / totalProvenance : 1;
+      const lines = provenance.map((entry) => {
+        const line = version.lines.find(
+          (candidate) => candidate.id === entry.lineId,
+        );
+        if (!line || line.sourceKind === "child_recipe_version") {
+          throw new Error("Requirement provenance has no pinned Recipe line.");
+        }
+        return line;
+      });
+      const groupCostState = aggregateCostState(
+        lines.map((line) => line.costState),
+      );
+      const groupAllocations = allocationPartitions[groupIndex] ?? [];
+      const allocatedQuantity = groupAllocations.reduce(
+        (sum, allocation) => sum + allocation.normalizedQuantity,
+        0,
+      );
+      const exactCostStates = groupAllocations.map(
+        (allocation) => allocation.costState,
+      );
+      if (
+        requirement.itemId !== null &&
+        allocatedQuantity + 1e-9 < groupQuantity &&
+        groupCostState !== "not_applicable"
+      ) {
+        exactCostStates.push("unknown");
+      }
+      if (requirement.itemId !== null && exactCostStates.length === 0) {
+        exactCostStates.push(
+          groupCostState === "not_applicable"
+            ? "not_applicable"
+            : "unknown",
+        );
+      }
+      const persistedGroupCostState =
+        requirement.itemId === null
+          ? groupCostState
+          : aggregateCostState(exactCostStates);
+      const groupKnownCostSubtotal =
+        requirement.itemId === null
+          ? provenance.reduce(
+              (sum, entry, index) =>
+                sum + lineExpectedCost(lines[index], entry.quantity),
+              0,
+            )
+          : groupAllocations.reduce(
+              (sum, allocation) =>
+                sum + (allocation.costContribution ?? 0),
+              0,
+            );
       const stageRequirements = requirementsByStage.get(stage.id) ?? [];
       stageRequirements.push({
         catalogItemId: requirement.itemId,
@@ -112,23 +340,48 @@ async function mapPlanForPersistence(
           requirement.itemId === null
             ? "custom"
             : kinds.get(requirement.itemId) ?? "ingredient",
-        rawQuantity: requirement.quantity * ratio,
+        rawQuantity: groupQuantity,
         rawUnit: requirement.unit,
         provenanceJson: JSON.stringify(provenance),
         isRequired: true,
         expectedCost:
-          requirement.expectedCost === null
-            ? null
-            : requirement.expectedCost * ratio,
-        costState: requirement.costComplete
-          ? "known"
-          : requirement.knownCostSubtotal > 0
-            ? "partial"
-            : "unknown",
-        allocations: [],
+          persistedGroupCostState === "known"
+            ? groupKnownCostSubtotal
+            : null,
+        costState: persistedGroupCostState,
+        allocations: groupAllocations.map(mapAllocation),
       });
       requirementsByStage.set(stage.id, stageRequirements);
     }
+  }
+
+  for (const usage of plan.preparedStockUses) {
+    const stage = stageByVersion.get(usage.versionId);
+    if (!stage) {
+      throw new Error("Prepared-stock use has no matching production stage.");
+    }
+    const stageRequirements = requirementsByStage.get(stage.id) ?? [];
+    stageRequirements.push({
+      catalogItemId: usage.itemId,
+      requirementKind: "prepared_product",
+      rawQuantity: usage.quantity,
+      rawUnit: usage.unit,
+      provenanceJson: JSON.stringify([
+        {
+          kind: "prepared_stock",
+          versionId: usage.versionId,
+          quantity: usage.quantity,
+          unit: usage.unit,
+        },
+      ]),
+      isRequired: true,
+      expectedCost: usage.expectedCost,
+      costState: usage.costState,
+      allocations: usage.allocations.map((allocation) =>
+        mapAllocation(allocation),
+      ),
+    });
+    requirementsByStage.set(stage.id, stageRequirements);
   }
 
   return plan.stages.map<SaveProductionPlanStageInput>((stage) => {
@@ -154,8 +407,9 @@ async function mapPlanForPersistence(
 }
 
 /**
- * Calculates from detached graph/stock snapshots and persists only the plan
- * snapshot. The repository assertion contains no inventory mutation SQL.
+ * Replaces caller-authored recipe content with the exact persisted graph,
+ * validates exact stock evidence, and persists a read-only plan snapshot.
+ * Neither this service nor the repository mutates inventory.
  */
 export async function calculateAndSaveProductionPlan(
   input: {
@@ -174,9 +428,38 @@ export async function calculateAndSaveProductionPlan(
   | { ok: false; error: Exclude<ProductionPlannerResult, { ok: true }> }
 > {
   await runMigrations(db);
-  const result = calculateProductionPlan(input.planner);
+  assertExactStockEvidence(input.planner);
+  const persisted = await loadRecipeVersionGraph(
+    input.planner.rootVersionId,
+    500,
+    db,
+  );
+  const versions = mapPersistedGraph(persisted.versions, persisted.lines);
+  const root = versions.find(
+    (version) => version.id === input.planner.rootVersionId,
+  );
+  if (
+    !root ||
+    root.familyId !== input.rootRecipeId ||
+    root.businessId !== input.businessId ||
+    root.status !== "published"
+  ) {
+    throw new Error(
+      "Production-plan root must be the active business's published Recipe version.",
+    );
+  }
+  const trustedPlanner: ProductionPlannerInput = {
+    ...input.planner,
+    versions,
+  };
+  const result = calculateProductionPlan(trustedPlanner);
   if (!result.ok) return { ok: false, error: result };
-  const stages = await mapPlanForPersistence(result.plan, input.planner, db);
+  const stages = await mapPlanForPersistence(
+    input.businessId,
+    result.plan,
+    trustedPlanner,
+    db,
+  );
   const saved = await saveProductionPlan(
     {
       id: result.plan.id,
@@ -195,7 +478,7 @@ export async function calculateAndSaveProductionPlan(
       calculationVersion: result.plan.calculationVersion,
       stockObservedAt: result.plan.observedAt,
       expectedTotalCost: result.plan.expectedCost,
-      costState: planCostState(result.plan),
+      costState: result.plan.costState,
       missingCostCount: result.plan.missingCostCount,
       stages,
     },

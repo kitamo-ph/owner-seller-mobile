@@ -30,20 +30,41 @@ export type ProductionPlanStatus =
   | "cancelled"
   | "stale";
 
+export type ProductionPlanCostState = RecipeGraphCostState | "partial";
+export type ProductionPlanLotKind = "ingredient" | "product";
+export type ProductionPlanAllocationMode =
+  | "legacy_selected"
+  | "manual"
+  | "recommended_fefo"
+  | "recommended_fifo"
+  | "legacy_balance";
+
+type ExactLotSnapshot = {
+  lotKind?: ProductionPlanLotKind;
+  lotId?: string;
+  allocationMode?: ProductionPlanAllocationMode;
+  normalizedQuantity?: number;
+  normalizedUnit?: string;
+  conversionId?: string | null;
+  conversionFactorSnapshot?: number;
+};
+
 export type PreparedStockSnapshot = {
   itemId: string;
   quantity: number;
   unit: string;
   costState: RecipeGraphCostState;
   authoritativeUnitCost: number | null;
-};
+} & ExactLotSnapshot;
 
 export type RawStockSnapshot = {
   itemId: string;
   stockScope?: string;
   quantity: number;
   unit: string;
-};
+  costState?: RecipeGraphCostState;
+  authoritativeUnitCost?: number | null;
+} & ExactLotSnapshot;
 
 export type ProductionPlannerInput = {
   planId: string;
@@ -58,6 +79,7 @@ export type ProductionPlannerInput = {
   limits?: Partial<RecipeGraphLimits>;
   originalTargetQuantity?: number;
   revision?: number;
+  calculationVersion?: number;
   actualStageOutputs?: Readonly<Record<string, number>>;
 };
 
@@ -85,6 +107,7 @@ export type ProductionPlanStage = {
   shortfallQuantity: number;
   expectedDirectCost: number | null;
   knownDirectCostSubtotal: number;
+  costState: ProductionPlanCostState;
   costComplete: boolean;
   dependencies: readonly ProductionStageDependency[];
   yieldVariance: YieldVariance | null;
@@ -99,9 +122,11 @@ export type ProductionRawRequirement = {
   unit: string;
   availableQuantity: number;
   missingQuantity: number;
+  costState: ProductionPlanCostState;
   costComplete: boolean;
   expectedCost: number | null;
   knownCostSubtotal: number;
+  allocations: readonly ProductionPlanLotAllocation[];
   provenance: readonly {
     versionId: string;
     versionLabel: string;
@@ -116,10 +141,103 @@ export type ProductionPreparedStockUse = {
   versionId: string;
   quantity: number;
   unit: string;
+  costState: ProductionPlanCostState;
   costComplete: boolean;
   expectedCost: number | null;
   knownCostSubtotal: number;
+  allocations: readonly ProductionPlanLotAllocation[];
 };
+
+export type ProductionPlanLotAllocation = {
+  lotKind: ProductionPlanLotKind;
+  lotId: string;
+  allocationMode: ProductionPlanAllocationMode;
+  quantity: number;
+  unit: string;
+  normalizedQuantity: number;
+  normalizedUnit: string;
+  conversionId: string | null;
+  conversionFactorSnapshot: number;
+  costState: RecipeGraphCostState;
+  unitCostSnapshot: number | null;
+  costContribution: number | null;
+};
+
+/**
+ * Assigns exact lot segments to ordered requirement quantities without
+ * spreading every lot proportionally across every requirement. An allocation
+ * is split only when one requirement ends inside that exact lot segment.
+ */
+export function partitionProductionPlanLotAllocations(
+  allocations: readonly ProductionPlanLotAllocation[],
+  normalizedRequirementQuantities: readonly number[],
+): readonly (readonly ProductionPlanLotAllocation[])[] {
+  const partitions: ProductionPlanLotAllocation[][] = [];
+  let allocationIndex = 0;
+  let consumedFromAllocation = 0;
+
+  for (const requiredQuantity of normalizedRequirementQuantities) {
+    if (!isNonNegativeFinite(requiredQuantity)) {
+      throw new Error(
+        "Production requirement quantities must be finite and non-negative.",
+      );
+    }
+
+    const partition: ProductionPlanLotAllocation[] = [];
+    let remainingRequirement = requiredQuantity;
+    while (
+      remainingRequirement > QUANTITY_EPSILON &&
+      allocationIndex < allocations.length
+    ) {
+      const allocation = allocations[allocationIndex];
+      if (
+        !isPositiveFinite(allocation.quantity) ||
+        !isPositiveFinite(allocation.normalizedQuantity)
+      ) {
+        throw new Error(
+          "Production lot allocations must contain positive quantities.",
+        );
+      }
+
+      const availableNormalized =
+        allocation.normalizedQuantity - consumedFromAllocation;
+      if (availableNormalized <= QUANTITY_EPSILON) {
+        allocationIndex += 1;
+        consumedFromAllocation = 0;
+        continue;
+      }
+
+      const usedNormalized = Math.min(
+        availableNormalized,
+        remainingRequirement,
+      );
+      const allocationRatio =
+        usedNormalized / allocation.normalizedQuantity;
+      partition.push({
+        ...allocation,
+        quantity: allocation.quantity * allocationRatio,
+        normalizedQuantity: usedNormalized,
+        costContribution:
+          allocation.costContribution === null
+            ? null
+            : allocation.costContribution * allocationRatio,
+      });
+
+      consumedFromAllocation += usedNormalized;
+      remainingRequirement -= usedNormalized;
+      if (
+        allocation.normalizedQuantity - consumedFromAllocation <=
+        QUANTITY_EPSILON
+      ) {
+        allocationIndex += 1;
+        consumedFromAllocation = 0;
+      }
+    }
+    partitions.push(partition);
+  }
+
+  return partitions;
+}
 
 export type YieldVariance = {
   expectedOutput: number;
@@ -134,7 +252,7 @@ export type ProductionPlan = {
   id: string;
   status: ProductionPlanStatus;
   revision: number;
-  calculationVersion: 1;
+  calculationVersion: number;
   rootVersionId: string;
   targetQuantity: number;
   originalTargetQuantity: number;
@@ -146,6 +264,7 @@ export type ProductionPlan = {
   rawRequirements: readonly ProductionRawRequirement[];
   preparedStockUses: readonly ProductionPreparedStockUse[];
   preparationOrder: readonly string[];
+  costState: ProductionPlanCostState;
   costComplete: boolean;
   expectedCost: number | null;
   knownCostSubtotal: number;
@@ -183,8 +302,10 @@ type MutableStage = Omit<
 
 type MutableRawRequirement = Omit<
   ProductionRawRequirement,
-  "provenance"
+  "allocations" | "provenance"
 > & {
+  costStates: RecipeGraphCostState[];
+  allocations: ProductionPlanLotAllocation[];
   provenance: {
     versionId: string;
     versionLabel: string;
@@ -199,9 +320,27 @@ type PreparedPool = {
   unit: string;
   segments: {
     remaining: number;
+    lotUnit: string;
+    normalizedRemaining: number;
+    normalizedUnit: string;
+    conversionFactor: number;
     costState: RecipeGraphCostState;
     authoritativeUnitCost: number | null;
+    exactLot: {
+      lotKind: ProductionPlanLotKind;
+      lotId: string;
+      allocationMode: ProductionPlanAllocationMode;
+      conversionId: string | null;
+    } | null;
   }[];
+};
+
+type RawPool = {
+  itemId: string;
+  unit: string;
+  stockScope: string;
+  totalNormalizedQuantity: number;
+  segments: PreparedPool["segments"];
 };
 
 const isNonNegativeFinite = (value: number) =>
@@ -210,14 +349,34 @@ const isNonNegativeFinite = (value: number) =>
 const isPositiveFinite = (value: number) =>
   Number.isFinite(value) && value > 0;
 
+function costEvidenceIsValid(
+  state: RecipeGraphCostState,
+  cost: number | null,
+) {
+  return state === "known"
+    ? cost !== null && Number.isFinite(cost) && cost >= 0
+    : cost === null;
+}
+
 function costIsComplete(state: RecipeGraphCostState, cost: number | null) {
-  if (state === "not_applicable") return true;
   return (
-    state === "known" &&
-    cost !== null &&
-    Number.isFinite(cost) &&
-    cost >= 0
+    costEvidenceIsValid(state, cost) &&
+    (state === "known" || state === "not_applicable")
   );
+}
+
+function aggregateCostState(
+  states: readonly RecipeGraphCostState[],
+): ProductionPlanCostState {
+  const applicable = states.filter((state) => state !== "not_applicable");
+  if (applicable.length === 0) return "not_applicable";
+
+  const hasKnown = applicable.includes("known");
+  const hasUnknown = applicable.includes("unknown");
+  const hasLegacyUnresolved = applicable.includes("legacy_zero_unresolved");
+  if (!hasUnknown && !hasLegacyUnresolved) return "known";
+  if (hasKnown) return "partial";
+  return hasUnknown ? "unknown" : "legacy_zero_unresolved";
 }
 
 function stockKey(itemId: string, unit: string, stockScope = "default") {
@@ -228,63 +387,151 @@ function indexVersions(versions: readonly RecipeGraphVersion[]) {
   return new Map(versions.map((version) => [version.id, version]));
 }
 
+function resolveStockSnapshot(
+  stock: PreparedStockSnapshot | RawStockSnapshot,
+): {
+  normalizedQuantity: number;
+  normalizedUnit: string;
+  conversionFactor: number;
+  costState: RecipeGraphCostState;
+  authoritativeUnitCost: number | null;
+  exactLot: PreparedPool["segments"][number]["exactLot"];
+} | null {
+  if (
+    !stock.itemId.trim() ||
+    !stock.unit.trim() ||
+    !isNonNegativeFinite(stock.quantity)
+  ) {
+    return null;
+  }
+
+  const normalizedUnit = stock.normalizedUnit?.trim() || stock.unit;
+  const conversionFactor = stock.conversionFactorSnapshot ?? 1;
+  const normalizedQuantity =
+    stock.normalizedQuantity ?? stock.quantity * conversionFactor;
+  if (
+    !normalizedUnit ||
+    !isPositiveFinite(conversionFactor) ||
+    !isNonNegativeFinite(normalizedQuantity) ||
+    Math.abs(normalizedQuantity - stock.quantity * conversionFactor) >
+      QUANTITY_EPSILON
+  ) {
+    return null;
+  }
+  if (
+    (normalizedUnit === stock.unit &&
+      (stock.conversionId ||
+        Math.abs(conversionFactor - 1) > QUANTITY_EPSILON)) ||
+    (normalizedUnit !== stock.unit && !stock.conversionId)
+  ) {
+    return null;
+  }
+
+  const exactFields = [
+    stock.lotKind,
+    stock.lotId?.trim() || undefined,
+    stock.allocationMode,
+  ];
+  const exactFieldCount = exactFields.filter(Boolean).length;
+  if (exactFieldCount !== 0 && exactFieldCount !== exactFields.length) {
+    return null;
+  }
+
+  const costState = stock.costState ?? "unknown";
+  const authoritativeUnitCost = stock.authoritativeUnitCost ?? null;
+  if (!costEvidenceIsValid(costState, authoritativeUnitCost)) {
+    return null;
+  }
+
+  return {
+    normalizedQuantity,
+    normalizedUnit,
+    conversionFactor,
+    costState,
+    authoritativeUnitCost,
+    exactLot:
+      exactFieldCount === exactFields.length
+        ? {
+            lotKind: stock.lotKind as ProductionPlanLotKind,
+            lotId: stock.lotId?.trim() as string,
+            allocationMode:
+              stock.allocationMode as ProductionPlanAllocationMode,
+            conversionId: stock.conversionId ?? null,
+          }
+        : null,
+  };
+}
+
 function buildPreparedPools(
   stocks: readonly PreparedStockSnapshot[],
 ): { ok: true; pools: Map<string, PreparedPool> } | { ok: false } {
   const pools = new Map<string, PreparedPool>();
   for (const stock of stocks) {
-    if (
-      !stock.itemId.trim() ||
-      !stock.unit.trim() ||
-      !isNonNegativeFinite(stock.quantity) ||
-      (stock.costState === "known" &&
-        (stock.authoritativeUnitCost === null ||
-          !isNonNegativeFinite(stock.authoritativeUnitCost)))
-    ) {
-      return { ok: false };
-    }
-
-    const key = stockKey(stock.itemId, stock.unit);
+    const resolved = resolveStockSnapshot(stock);
+    if (!resolved) return { ok: false };
+    const key = stockKey(stock.itemId, resolved.normalizedUnit);
+    const segment: PreparedPool["segments"][number] = {
+      remaining: stock.quantity,
+      lotUnit: stock.unit,
+      normalizedRemaining: resolved.normalizedQuantity,
+      normalizedUnit: resolved.normalizedUnit,
+      conversionFactor: resolved.conversionFactor,
+      costState: resolved.costState,
+      authoritativeUnitCost: resolved.authoritativeUnitCost,
+      exactLot: resolved.exactLot,
+    };
     const existing = pools.get(key);
     if (existing) {
-      existing.segments.push({
-        remaining: stock.quantity,
-        costState: stock.costState,
-        authoritativeUnitCost: stock.authoritativeUnitCost,
-      });
+      existing.segments.push(segment);
     } else {
       pools.set(key, {
         itemId: stock.itemId,
-        unit: stock.unit,
-        segments: [
-          {
-            remaining: stock.quantity,
-            costState: stock.costState,
-            authoritativeUnitCost: stock.authoritativeUnitCost,
-          },
-        ],
+        unit: resolved.normalizedUnit,
+        segments: [segment],
       });
     }
   }
   return { ok: true, pools };
 }
 
-function buildRawAvailability(
+function buildRawPools(
   stocks: readonly RawStockSnapshot[],
-): { ok: true; availability: Map<string, number> } | { ok: false } {
-  const availability = new Map<string, number>();
+): { ok: true; pools: Map<string, RawPool> } | { ok: false } {
+  const pools = new Map<string, RawPool>();
   for (const stock of stocks) {
-    if (
-      !stock.itemId.trim() ||
-      !stock.unit.trim() ||
-      !isNonNegativeFinite(stock.quantity)
-    ) {
-      return { ok: false };
+    const resolved = resolveStockSnapshot(stock);
+    if (!resolved) return { ok: false };
+    const stockScope = stock.stockScope ?? "default";
+    const key = stockKey(
+      stock.itemId,
+      resolved.normalizedUnit,
+      stockScope,
+    );
+    const segment: PreparedPool["segments"][number] = {
+      remaining: stock.quantity,
+      lotUnit: stock.unit,
+      normalizedRemaining: resolved.normalizedQuantity,
+      normalizedUnit: resolved.normalizedUnit,
+      conversionFactor: resolved.conversionFactor,
+      costState: resolved.costState,
+      authoritativeUnitCost: resolved.authoritativeUnitCost,
+      exactLot: resolved.exactLot,
+    };
+    const existing = pools.get(key);
+    if (existing) {
+      existing.totalNormalizedQuantity += resolved.normalizedQuantity;
+      existing.segments.push(segment);
+    } else {
+      pools.set(key, {
+        itemId: stock.itemId,
+        unit: resolved.normalizedUnit,
+        stockScope,
+        totalNormalizedQuantity: resolved.normalizedQuantity,
+        segments: [segment],
+      });
     }
-    const key = stockKey(stock.itemId, stock.unit, stock.stockScope);
-    availability.set(key, (availability.get(key) ?? 0) + stock.quantity);
   }
-  return { ok: true, availability };
+  return { ok: true, pools };
 }
 
 function addRawRequirement(
@@ -328,10 +575,15 @@ function addRawRequirement(
 
   if (existing) {
     existing.quantity += quantity;
-    existing.costComplete = existing.costComplete && complete;
+    existing.costStates.push(line.costState);
+    existing.costState = aggregateCostState(existing.costStates);
+    existing.costComplete =
+      existing.costState === "known" ||
+      existing.costState === "not_applicable";
     existing.knownCostSubtotal += knownCost;
     existing.provenance.push(provenance);
   } else {
+    const costState = aggregateCostState([line.costState]);
     aggregate.set(key, {
       key,
       itemId,
@@ -341,14 +593,82 @@ function addRawRequirement(
       unit: normalized.unit,
       availableQuantity: 0,
       missingQuantity: 0,
-      costComplete: complete,
+      costState,
+      costStates: [line.costState],
+      costComplete:
+        costState === "known" || costState === "not_applicable",
       expectedCost: null,
       knownCostSubtotal: knownCost,
+      allocations: [],
       provenance: [provenance],
     });
   }
 
   return { complete, knownCost };
+}
+
+function allocatePoolSegments(
+  segments: PreparedPool["segments"],
+  requiredNormalizedQuantity: number,
+): {
+  usedNormalizedQuantity: number;
+  costStates: RecipeGraphCostState[];
+  knownCostSubtotal: number;
+  allocations: ProductionPlanLotAllocation[];
+} {
+  let remainingNeed = requiredNormalizedQuantity;
+  let usedNormalizedQuantity = 0;
+  let knownCostSubtotal = 0;
+  const costStates: RecipeGraphCostState[] = [];
+  const allocations: ProductionPlanLotAllocation[] = [];
+
+  for (const segment of segments) {
+    if (remainingNeed <= QUANTITY_EPSILON) break;
+    const usedNormalized = Math.min(
+      segment.normalizedRemaining,
+      remainingNeed,
+    );
+    if (usedNormalized <= QUANTITY_EPSILON) continue;
+
+    const usedInLotUnit = usedNormalized / segment.conversionFactor;
+    segment.normalizedRemaining -= usedNormalized;
+    segment.remaining -= usedInLotUnit;
+    remainingNeed -= usedNormalized;
+    usedNormalizedQuantity += usedNormalized;
+    costStates.push(segment.costState);
+
+    const costContribution =
+      segment.costState === "known"
+        ? usedInLotUnit * (segment.authoritativeUnitCost as number)
+        : null;
+    knownCostSubtotal += costContribution ?? 0;
+    if (segment.exactLot) {
+      allocations.push({
+        lotKind: segment.exactLot.lotKind,
+        lotId: segment.exactLot.lotId,
+        allocationMode: segment.exactLot.allocationMode,
+        quantity: usedInLotUnit,
+        unit: segment.lotUnit,
+        normalizedQuantity: usedNormalized,
+        normalizedUnit: segment.normalizedUnit,
+        conversionId: segment.exactLot.conversionId,
+        conversionFactorSnapshot: segment.conversionFactor,
+        costState: segment.costState,
+        unitCostSnapshot:
+          segment.costState === "known"
+            ? segment.authoritativeUnitCost
+            : null,
+        costContribution,
+      });
+    }
+  }
+
+  return {
+    usedNormalizedQuantity,
+    costStates,
+    knownCostSubtotal,
+    allocations,
+  };
 }
 
 function cloneStage(stage: ProductionPlanStage): MutableStage {
@@ -465,7 +785,7 @@ export function calculateProductionPlan(
       message: "Prepared-stock snapshot contains an invalid quantity, unit, or cost.",
     };
   }
-  const raw = buildRawAvailability(input.rawStock);
+  const raw = buildRawPools(input.rawStock);
   if (!raw.ok) {
     return {
       ok: false,
@@ -481,8 +801,6 @@ export function calculateProductionPlan(
   const mutableStages = new Map<string, MutableStage>();
   const rawAggregate = new Map<string, MutableRawRequirement>();
   const preparedUses: ProductionPreparedStockUse[] = [];
-  let preparedKnownCostSubtotal = 0;
-  let preparedCostsComplete = true;
 
   for (const versionId of parentBeforeChild) {
     const version = versionsById.get(versionId) as RecipeGraphVersion;
@@ -498,42 +816,28 @@ export function calculateProductionPlan(
         stockKey(version.outputItemId, version.outputUnit),
       );
       if (pool) {
-        let remainingNeed = requiredOutput;
-        let complete = true;
-        let knownCost = 0;
-
-        for (const segment of pool.segments) {
-          if (remainingNeed <= QUANTITY_EPSILON) break;
-          const used = Math.min(segment.remaining, remainingNeed);
-          if (used <= QUANTITY_EPSILON) continue;
-
-          segment.remaining -= used;
-          remainingNeed -= used;
-          preparedStockUsed += used;
-          const segmentComplete = costIsComplete(
-            segment.costState,
-            segment.authoritativeUnitCost,
-          );
-          complete = complete && segmentComplete;
-          if (
-            segmentComplete &&
-            segment.costState !== "not_applicable"
-          ) {
-            knownCost += used * (segment.authoritativeUnitCost as number);
-          }
-        }
-
-        preparedKnownCostSubtotal += knownCost;
-        preparedCostsComplete = preparedCostsComplete && complete;
+        const allocation = allocatePoolSegments(
+          pool.segments,
+          requiredOutput,
+        );
+        preparedStockUsed = allocation.usedNormalizedQuantity;
         if (preparedStockUsed > QUANTITY_EPSILON) {
+          const costState = aggregateCostState(allocation.costStates);
+          const costComplete =
+            costState === "known" || costState === "not_applicable";
           preparedUses.push({
             itemId: version.outputItemId,
             versionId,
             quantity: preparedStockUsed,
             unit: version.outputUnit,
-            costComplete: complete,
-            expectedCost: complete ? knownCost : null,
-            knownCostSubtotal: knownCost,
+            costState,
+            costComplete,
+            expectedCost:
+              costState === "known"
+                ? allocation.knownCostSubtotal
+                : null,
+            knownCostSubtotal: allocation.knownCostSubtotal,
+            allocations: allocation.allocations,
           });
         }
       }
@@ -543,7 +847,7 @@ export function calculateProductionPlan(
     const multiplier = expectedFreshOutput / version.expectedOutputQuantity;
     const dependencies = new Map<string, ProductionStageDependency>();
     let knownDirectCostSubtotal = 0;
-    let directCostComplete = true;
+    const directCostStates: RecipeGraphCostState[] = [];
 
     for (const line of version.lines) {
       const scaledQuantity = line.quantity * multiplier;
@@ -570,7 +874,7 @@ export function calculateProductionPlan(
           line,
           scaledQuantity,
         );
-        directCostComplete = directCostComplete && cost.complete;
+        directCostStates.push(line.costState);
         knownDirectCostSubtotal += cost.knownCost;
       }
     }
@@ -581,6 +885,7 @@ export function calculateProductionPlan(
         ? actualOutput
         : null;
 
+    const directCostState = aggregateCostState(directCostStates);
     mutableStages.set(versionId, {
       id: `${input.planId}:stage:${versionId}`,
       sequence: 0,
@@ -596,9 +901,13 @@ export function calculateProductionPlan(
       availableOutput: requiredOutput,
       fulfillmentRatio: 1,
       shortfallQuantity: 0,
-      expectedDirectCost: directCostComplete ? knownDirectCostSubtotal : null,
+      expectedDirectCost:
+        directCostState === "known" ? knownDirectCostSubtotal : null,
       knownDirectCostSubtotal,
-      costComplete: directCostComplete,
+      costState: directCostState,
+      costComplete:
+        directCostState === "known" ||
+        directCostState === "not_applicable",
       dependencies: [...dependencies.values()],
       yieldVariance:
         safeActual === null
@@ -614,31 +923,90 @@ export function calculateProductionPlan(
   const stages = recomputeStageAvailability(orderedStages, graph.preparationOrder);
 
   const rawRequirements = [...rawAggregate.values()].map((requirement) => {
+    const pool =
+      requirement.itemId === null
+        ? null
+        : raw.pools.get(requirement.key) ?? null;
+    const allocation =
+      pool === null
+        ? {
+            usedNormalizedQuantity: 0,
+            costStates: [] as RecipeGraphCostState[],
+            knownCostSubtotal: 0,
+            allocations: [] as ProductionPlanLotAllocation[],
+          }
+        : allocatePoolSegments(pool.segments, requirement.quantity);
     const availableQuantity =
       requirement.itemId === null
         ? requirement.quantity
-        : raw.availability.get(requirement.key) ?? 0;
+        : pool?.totalNormalizedQuantity ?? 0;
     const missingQuantity =
       requirement.itemId === null
         ? 0
         : Math.max(0, requirement.quantity - availableQuantity);
+    const exactCostStates: RecipeGraphCostState[] = [
+      ...allocation.costStates,
+    ];
+    if (
+      requirement.itemId !== null &&
+      allocation.usedNormalizedQuantity + QUANTITY_EPSILON <
+        requirement.quantity &&
+      requirement.costState !== "not_applicable"
+    ) {
+      exactCostStates.push("unknown");
+    }
+    if (exactCostStates.length === 0) {
+      exactCostStates.push(
+        requirement.costState === "not_applicable"
+          ? "not_applicable"
+          : "unknown",
+      );
+    }
+    const exactCostState =
+      requirement.itemId === null
+        ? requirement.costState
+        : aggregateCostState(exactCostStates);
+    const exactKnownCostSubtotal =
+      requirement.itemId === null
+        ? requirement.knownCostSubtotal
+        : allocation.knownCostSubtotal;
+    const { costStates: _costStates, ...persistable } = requirement;
     return {
-      ...requirement,
+      ...persistable,
       availableQuantity,
       missingQuantity,
-      expectedCost: requirement.costComplete
-        ? requirement.knownCostSubtotal
-        : null,
+      costState: exactCostState,
+      costComplete:
+        exactCostState === "known" ||
+        exactCostState === "not_applicable",
+      expectedCost:
+        exactCostState === "known" ? exactKnownCostSubtotal : null,
+      knownCostSubtotal: exactKnownCostSubtotal,
+      allocations: allocation.allocations,
     };
   });
   const rawKnownCostSubtotal = rawRequirements.reduce(
     (sum, requirement) => sum + requirement.knownCostSubtotal,
     0,
   );
-  const rawCostsComplete = rawRequirements.every(
-    (requirement) => requirement.costComplete,
+  const preparedKnownCostSubtotal = preparedUses.reduce(
+    (sum, usage) => sum + usage.knownCostSubtotal,
+    0,
   );
-  const costComplete = rawCostsComplete && preparedCostsComplete;
+  const costState = aggregateCostState([
+    ...rawRequirements.flatMap((requirement) =>
+      requirement.costState === "partial"
+        ? (["known", "unknown"] as const)
+        : [requirement.costState],
+    ),
+    ...preparedUses.flatMap((usage) =>
+      usage.costState === "partial"
+        ? (["known", "unknown"] as const)
+        : [usage.costState],
+    ),
+  ]);
+  const costComplete =
+    costState === "known" || costState === "not_applicable";
   const knownCostSubtotal =
     rawKnownCostSubtotal + preparedKnownCostSubtotal;
   const rootStage = stages.find(
@@ -651,7 +1019,7 @@ export function calculateProductionPlan(
       id: input.planId,
       status: "draft",
       revision: input.revision ?? 0,
-      calculationVersion: 1,
+      calculationVersion: input.calculationVersion ?? 1,
       rootVersionId: input.rootVersionId,
       targetQuantity: input.targetQuantity,
       originalTargetQuantity:
@@ -664,13 +1032,21 @@ export function calculateProductionPlan(
       rawRequirements,
       preparedStockUses: preparedUses,
       preparationOrder: graph.preparationOrder,
+      costState,
       costComplete,
-      expectedCost: costComplete ? knownCostSubtotal : null,
+      expectedCost: costState === "known" ? knownCostSubtotal : null,
       knownCostSubtotal,
       missingCostCount:
-        rawRequirements.filter((requirement) => !requirement.costComplete)
-          .length +
-        preparedUses.filter((usage) => !usage.costComplete).length,
+        rawRequirements.filter(
+          (requirement) =>
+            requirement.costState !== "known" &&
+            requirement.costState !== "not_applicable",
+        ).length +
+        preparedUses.filter(
+          (usage) =>
+            usage.costState !== "known" &&
+            usage.costState !== "not_applicable",
+        ).length,
       missingStockCount: rawRequirements.filter(
         (requirement) => requirement.missingQuantity > QUANTITY_EPSILON,
       ).length,
@@ -687,7 +1063,11 @@ export function recalculateProductionPlan(
   previous: ProductionPlan,
   input: Omit<
     ProductionPlannerInput,
-    "planId" | "originalTargetQuantity" | "revision" | "actualStageOutputs"
+    | "planId"
+    | "originalTargetQuantity"
+    | "revision"
+    | "calculationVersion"
+    | "actualStageOutputs"
   >,
 ): ProductionPlannerResult {
   const actualStageOutputs = Object.fromEntries(
@@ -700,6 +1080,7 @@ export function recalculateProductionPlan(
     planId: previous.id,
     originalTargetQuantity: previous.originalTargetQuantity,
     revision: previous.revision + 1,
+    calculationVersion: previous.calculationVersion + 1,
     actualStageOutputs,
   });
 
@@ -803,9 +1184,17 @@ export function transitionProductionPlanStatus(
       stages: plan.stages.map(cloneStage),
       rawRequirements: plan.rawRequirements.map((requirement) => ({
         ...requirement,
+        allocations: requirement.allocations.map((allocation) => ({
+          ...allocation,
+        })),
         provenance: requirement.provenance.map((item) => ({ ...item })),
       })),
-      preparedStockUses: plan.preparedStockUses.map((usage) => ({ ...usage })),
+      preparedStockUses: plan.preparedStockUses.map((usage) => ({
+        ...usage,
+        allocations: usage.allocations.map((allocation) => ({
+          ...allocation,
+        })),
+      })),
     },
   };
 }

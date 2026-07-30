@@ -26,6 +26,7 @@
     "check:recipe-versioning": "tsc src/domain/recipeVersioning.ts --outDir node_modules/.cache/kitamo-recipe-versioning-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-recipe-versioning.js",
     "check:recipe-drafts": "tsc src/domain/recipeDrafts.ts --outDir node_modules/.cache/kitamo-recipe-draft-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-recipe-drafts.js",
     "check:production-planner": "tsc src/domain/recipeGraph.ts src/domain/productionPlanner.ts --outDir node_modules/.cache/kitamo-production-planner-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-production-planner.js",
+    "check:production-plan-lot-guards": "node scripts/check-production-plan-lot-guards.js",
     "check:inventory-redesign-migrations": "node scripts/check-inventory-redesign-migrations.js",
     "check:inventory-redesign-transactions": "node scripts/check-inventory-redesign-transactions.js",
     "check:inventory-redesign": "node scripts/check-inventory-redesign.js"

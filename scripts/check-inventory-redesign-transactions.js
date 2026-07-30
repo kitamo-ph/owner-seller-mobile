@@ -3,6 +3,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const ts = require("typescript");
 
 const workspace = process.cwd();
 const migrationDirectory = path.join(workspace, "src/db/migrations");
@@ -79,6 +80,345 @@ function count(tableName, whereClause = "1 = 1") {
   return Number(scalar(`SELECT COUNT(*) FROM ${tableName} WHERE ${whereClause};`));
 }
 
+function loadRepositoryModule(relativePath) {
+  const absolutePath = path.join(workspace, relativePath);
+  const output = ts.transpileModule(fs.readFileSync(absolutePath, "utf8"), {
+    fileName: absolutePath,
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      strict: true,
+    },
+  }).outputText;
+  const loaded = { exports: {} };
+  const ids = {
+    makeRecipeDraftId: () => "generated-draft",
+    makeRecipeDraftLineId: () => "generated-draft-line",
+    makeRecipeRoleId: () => "generated-role",
+    makeRecipeVersionId: () => "generated-version",
+    makeRecipeVersionLineId: () => "generated-version-line",
+  };
+  const shared = {
+    getRepositoryDatabase: (db) => db,
+    nowIso: () => "2026-07-26T06:00:00.000Z",
+    toBoolean: (value) => value === 1,
+    toInteger: (value) => (value ? 1 : 0),
+  };
+  const localRequire = (request) => {
+    if (request === "@/domain/ids") return ids;
+    if (request === "./shared") return shared;
+    throw new Error(`Unexpected repository-check import: ${request}`);
+  };
+  const execute = new Function(
+    "exports",
+    "require",
+    "module",
+    "__filename",
+    "__dirname",
+    output,
+  );
+  execute(
+    loaded.exports,
+    localRequire,
+    loaded,
+    absolutePath,
+    path.dirname(absolutePath),
+  );
+  return loaded.exports;
+}
+
+function createNestedDraftFake({ failParentRevisionUpdate = false } = {}) {
+  let state = {
+    parent: {
+      id: "parent-draft",
+      business_id: "business-1",
+      lifecycle_status: "editing",
+      autosave_revision: 4,
+    },
+    line: {
+      id: "parent-line",
+      recipe_draft_id: "parent-draft",
+      source_kind: "unresolved",
+      catalog_item_id: null,
+      child_recipe_version_id: null,
+      child_draft_id: null,
+    },
+    children: {},
+  };
+  const database = {
+    async withExclusiveTransactionAsync(operation) {
+      const snapshot = JSON.parse(JSON.stringify(state));
+      try {
+        return await operation(database);
+      } catch (error) {
+        state = snapshot;
+        throw error;
+      }
+    },
+    async getFirstAsync(statement, parameters) {
+      if (
+        statement.includes(
+          "SELECT business_id, lifecycle_status, autosave_revision",
+        )
+      ) {
+        return parameters[0] === state.parent.id ? { ...state.parent } : null;
+      }
+      if (
+        statement.includes(
+          "SELECT source_kind, catalog_item_id, child_recipe_version_id",
+        )
+      ) {
+        return parameters[0] === state.line.id &&
+          parameters[1] === state.parent.id
+          ? { ...state.line }
+          : null;
+      }
+      if (statement.includes("SELECT * FROM recipe_drafts")) {
+        return state.children[parameters[0]]
+          ? { ...state.children[parameters[0]] }
+          : null;
+      }
+      throw new Error(`Unexpected nested-draft query: ${statement}`);
+    },
+    async runAsync(statement, parameters) {
+      if (statement.includes("INSERT INTO recipe_drafts")) {
+        const [
+          id,
+          businessId,
+          branchId,
+          recipeId,
+          sourceVersionId,
+          outputCatalogItemId,
+          name,
+          timestamp,
+          parentDraftId,
+          parentLineId,
+          returnRoute,
+          createdAt,
+          updatedAt,
+        ] = parameters;
+        state.children[id] = {
+          id,
+          business_id: businessId,
+          branch_id: branchId,
+          recipe_id: recipeId,
+          source_version_id: sourceVersionId,
+          output_catalog_item_id: outputCatalogItemId,
+          name,
+          category: null,
+          expected_output_quantity: null,
+          expected_output_unit: null,
+          production_mode: null,
+          suggested_selling_price: null,
+          classification_proposal: null,
+          selling_price_state: "unknown",
+          sellable: 0,
+          kiosk_enabled: 0,
+          editor_step: "definition",
+          lifecycle_status: "editing",
+          autosave_revision: 0,
+          last_saved_at: timestamp,
+          unresolved_requirement_count: 0,
+          parent_draft_id: parentDraftId,
+          parent_line_id: parentLineId,
+          return_route: returnRoute,
+          published_version_id: null,
+          created_at: createdAt,
+          updated_at: updatedAt,
+          deleted_at: null,
+        };
+        return { changes: 1 };
+      }
+      if (statement.includes("SET source_kind = 'child_draft'")) {
+        if (
+          state.line.source_kind !== "unresolved" ||
+          state.line.child_draft_id !== null
+        ) {
+          return { changes: 0 };
+        }
+        state.line.source_kind = "child_draft";
+        state.line.child_draft_id = parameters[0];
+        return { changes: 1 };
+      }
+      if (
+        statement.includes(
+          "SET autosave_revision = autosave_revision + 1",
+        )
+      ) {
+        if (
+          failParentRevisionUpdate ||
+          state.parent.id !== parameters[2] ||
+          state.parent.autosave_revision !== parameters[4]
+        ) {
+          return { changes: 0 };
+        }
+        state.parent.autosave_revision += 1;
+        return { changes: 1 };
+      }
+      throw new Error(`Unexpected nested-draft write: ${statement}`);
+    },
+  };
+  return {
+    database,
+    snapshot: () => JSON.parse(JSON.stringify(state)),
+  };
+}
+
+async function checkAtomicNestedDraftRepository() {
+  const { beginNestedRecipeDraft } = loadRepositoryModule(
+    "src/db/repositories/recipeDrafts.ts",
+  );
+  const input = {
+    id: "child-draft",
+    businessId: "business-1",
+    parentDraftId: "parent-draft",
+    parentLineId: "parent-line",
+    parentExpectedRevision: 4,
+    returnRoute: "/owner/recipes/parent-draft",
+  };
+
+  const success = createNestedDraftFake();
+  const child = await beginNestedRecipeDraft(input, success.database);
+  const saved = success.snapshot();
+  assert.equal(child.parentDraftId, "parent-draft");
+  assert.equal(child.parentLineId, "parent-line");
+  assert.equal(saved.parent.autosave_revision, 5);
+  assert.equal(saved.line.source_kind, "child_draft");
+  assert.equal(saved.line.child_draft_id, "child-draft");
+
+  const rollback = createNestedDraftFake({
+    failParentRevisionUpdate: true,
+  });
+  await assert.rejects(
+    beginNestedRecipeDraft(input, rollback.database),
+    /Parent Recipe draft changed before nested save/,
+  );
+  const rolledBack = rollback.snapshot();
+  assert.equal(rolledBack.parent.autosave_revision, 4);
+  assert.equal(rolledBack.line.source_kind, "unresolved");
+  assert.equal(rolledBack.line.child_draft_id, null);
+  assert.equal(rolledBack.children["child-draft"], undefined);
+}
+
+function createPublicationFake(persistedLine) {
+  let writes = 0;
+  const database = {
+    async withExclusiveTransactionAsync(operation) {
+      return operation(database);
+    },
+    async getFirstAsync(statement) {
+      if (statement.includes("FROM recipes")) {
+        return {
+          id: "recipe-1",
+          business_id: "business-1",
+          output_product_id: "product-1",
+          active_version_id: null,
+        };
+      }
+      if (statement.includes("FROM catalog_items item")) {
+        return {
+          business_id: "business-1",
+          legacy_entity_id: "product-1",
+          binding_status: "active",
+        };
+      }
+      if (statement.includes("FROM recipe_drafts")) {
+        return {
+          business_id: "business-1",
+          recipe_id: "recipe-1",
+          output_catalog_item_id: "catalog-product-1",
+          name: "Native Recipe",
+          category: null,
+          expected_output_quantity: 1,
+          expected_output_unit: "pcs",
+          production_mode: "prepared_before_selling",
+          suggested_selling_price: null,
+          selling_price_state: "unknown",
+          autosave_revision: 3,
+          lifecycle_status: "ready",
+          unresolved_requirement_count: 0,
+        };
+      }
+      throw new Error(`Unexpected publication query: ${statement}`);
+    },
+    async getAllAsync(statement) {
+      if (statement.includes("FROM recipe_draft_lines")) {
+        return [{ ...persistedLine }];
+      }
+      throw new Error(`Unexpected publication list query: ${statement}`);
+    },
+    async runAsync() {
+      writes += 1;
+      return { changes: 1 };
+    },
+  };
+  return { database, writes: () => writes };
+}
+
+async function checkPersistedDraftCostEvidence() {
+  const { publishRecipeVersion } = loadRepositoryModule(
+    "src/db/repositories/recipeVersions.ts",
+  );
+  const persistedLine = {
+    source_kind: "catalog_item",
+    catalog_item_id: "catalog-supply-1",
+    child_recipe_version_id: null,
+    custom_name: null,
+    quantity: 1,
+    unit: "pcs",
+    normalized_quantity: null,
+    normalized_unit: null,
+    conversion_id: null,
+    conversion_factor_snapshot: null,
+    role: "main",
+    is_optional: 0,
+    cost_override: null,
+    cost_state: "known",
+    allocation_mode: "none",
+  };
+  const fixture = createPublicationFake(persistedLine);
+  await assert.rejects(
+    publishRecipeVersion(
+      {
+        id: "version-cost-mismatch",
+        businessId: "business-1",
+        recipeId: "recipe-1",
+        outputCatalogItemId: "catalog-product-1",
+        name: "Native Recipe",
+        expectedOutputQuantity: 1,
+        expectedOutputUnit: "pcs",
+        productionMode: "prepared_before_selling",
+        sellingPriceState: "unknown",
+        sourceDraftId: "draft-1",
+        graphState: "complete",
+        costState: "known",
+        expectedDraftRevision: 3,
+        lines: [
+          {
+            sourceKind: "catalog_item",
+            catalogItemId: "catalog-supply-1",
+            quantity: 1,
+            unit: "pcs",
+            role: "main",
+            isOptional: false,
+            costPerUnitSnapshot: 6,
+            lineCostSnapshot: 6,
+            costState: "known",
+            allocationMode: "none",
+          },
+        ],
+      },
+      fixture.database,
+    ),
+    /Recipe publication line 1 does not match the saved draft/,
+  );
+  assert.equal(
+    fixture.writes(),
+    0,
+    "cost mismatch must abort before immutable publication writes",
+  );
+}
+
 function applyMigrations(migrations) {
   sqlite(
     "CREATE TABLE schema_migrations (id TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL);",
@@ -92,6 +432,93 @@ function applyMigrations(migrations) {
        COMMIT;`,
     );
   }
+}
+
+function checkCatalogWriterBoundary() {
+  const transferSource = fs.readFileSync(
+    path.join(workspace, "src/services/transfers.ts"),
+    "utf8",
+  );
+  const productRepositorySource = fs.readFileSync(
+    path.join(workspace, "src/db/repositories/products.ts"),
+    "utf8",
+  );
+
+  assert.equal(
+    /INSERT\s+INTO\s+products/i.test(transferSource),
+    false,
+    "transfer-created Products must not bypass the catalog-aware repository",
+  );
+  assert.match(
+    transferSource,
+    /await createProduct\([\s\S]*?\n\s*txn,\n\s*\);/,
+    "destination Product creation must use createProduct in the transfer transaction",
+  );
+  assert.match(
+    productRepositorySource,
+    /INSERT INTO catalog_items/,
+    "createProduct must create catalog identity",
+  );
+  assert.match(
+    productRepositorySource,
+    /INSERT INTO legacy_item_bindings/,
+    "createProduct must create an exact legacy binding",
+  );
+}
+
+function checkRepositoryIntegrityBoundaries() {
+  const sources = Object.fromEntries(
+    [
+      "src/db/repositories/stockAdjustments.ts",
+      "src/db/repositories/recipeVersions.ts",
+      "src/db/repositories/recipeDrafts.ts",
+      "src/db/repositories/supplies.ts",
+      "src/db/repositories/itemLifecycle.ts",
+    ].map((relativePath) => [
+      relativePath,
+      fs.readFileSync(path.join(workspace, relativePath), "utf8"),
+    ]),
+  );
+
+  const stockAdjustments =
+    sources["src/db/repositories/stockAdjustments.ts"];
+  assert.match(stockAdjustments, /item\.stock_policy/);
+  assert.match(stockAdjustments, /binding\.compatibility_mode/);
+  assert.match(
+    stockAdjustments,
+    /allocations do not match authoritative stock policy/,
+  );
+
+  const recipeVersions = sources["src/db/repositories/recipeVersions.ts"];
+  assert.match(recipeVersions, /binding\.legacy_entity_id = \?/);
+  assert.match(recipeVersions, /publication does not match the saved draft/);
+  assert.match(recipeVersions, /Recipe input catalog item is unavailable/);
+
+  const recipeDrafts = sources["src/db/repositories/recipeDrafts.ts"];
+  assert.match(recipeDrafts, /Parent draft is no longer eligible/);
+  assert.match(recipeDrafts, /parentLine\.source_kind === "child_recipe_version"/);
+  assert.match(recipeDrafts, /autosave_revision = \?/);
+
+  const supplies = sources["src/db/repositories/supplies.ts"];
+  assert.match(supplies, /FROM item_unit_conversions/);
+  assert.match(supplies, /normalized quantity is inconsistent/);
+  assert.match(supplies, /allocationTotal - input\.quantityUsed/);
+
+  const lifecycle = sources["src/db/repositories/itemLifecycle.ts"];
+  for (const requiredReferenceTable of [
+    "production_plan_requirements",
+    "catalog_item_recipe_roles",
+    "recipe_drafts",
+    "recipe_draft_lines",
+    "item_unit_conversions",
+  ]) {
+    assert.match(
+      lifecycle,
+      new RegExp(`FROM ${requiredReferenceTable}`),
+      `${requiredReferenceTable} must participate in delete eligibility`,
+    );
+  }
+  assert.match(lifecycle, /Catalog item is unavailable for reference checks/);
 }
 
 function expectRejected(statement, message) {
@@ -174,6 +601,25 @@ function seedFoundation() {
          'packaging cup', 'native', 'supply_packaging', 'active', 'ready',
          0, 0, 0, 'known', 'not_applicable', 'ingredient_lots',
          '2026-07-26T00:00:00.000Z', '2026-07-26T00:00:00.000Z', 'local'
+       );
+     INSERT INTO legacy_item_bindings (
+       id, business_id, catalog_item_id, entity_kind, legacy_entity_id,
+       projection_role, binding_status, compatibility_mode, review_required,
+       legacy_active_snapshot, migration_provenance, reviewed_at,
+       native_activated_at, created_at, updated_at, sync_status
+     ) VALUES
+       (
+         'binding-product-1', 'business-1', 'catalog-product-1', 'product',
+         'product-1', 'sale_product', 'active', 'native', 0, 1, 'native',
+         '2026-07-26T00:00:00.000Z', '2026-07-26T00:00:00.000Z',
+         '2026-07-26T00:00:00.000Z', '2026-07-26T00:00:00.000Z', 'local'
+       ),
+       (
+         'binding-supply-1', 'business-1', 'catalog-supply-1', 'ingredient',
+         'ingredient-1', 'supply_ingredient', 'active', 'native', 0, 1,
+         'native', '2026-07-26T00:00:00.000Z',
+         '2026-07-26T00:00:00.000Z', '2026-07-26T00:00:00.000Z',
+         '2026-07-26T00:00:00.000Z', 'local'
        );
      INSERT INTO product_stock_lots (
        id, business_id, branch_id, product_id, catalog_item_id, origin_kind,
@@ -512,26 +958,41 @@ function checkCheckoutSupplyRollback() {
   );
 }
 
-try {
-  compileMigrations();
-  const migrations = loadMigrations();
-  applyMigrations(migrations);
-  seedFoundation();
-  checkSchemaConstraints();
-  checkProductAuthorityRollback();
-  checkAdjustmentRollback();
-  checkRecipePublishRollback();
-  checkCheckoutSupplyRollback();
+async function main() {
+  try {
+    compileMigrations();
+    const migrations = loadMigrations();
+    applyMigrations(migrations);
+    seedFoundation();
+    checkCatalogWriterBoundary();
+    checkRepositoryIntegrityBoundaries();
+    checkSchemaConstraints();
+    checkProductAuthorityRollback();
+    checkAdjustmentRollback();
+    checkRecipePublishRollback();
+    checkCheckoutSupplyRollback();
+    await checkAtomicNestedDraftRepository();
+    await checkPersistedDraftCostEvidence();
 
-  assert.equal(scalar("PRAGMA integrity_check;"), "ok");
-  assert.equal(scalar("PRAGMA foreign_key_check;"), "");
-  console.log("inventory redesign schema constraints: passed");
-  console.log("Product lot and scalar authority rollback: passed");
-  console.log("stock-adjustment transaction rollback: passed");
-  console.log("recipe-version publication rollback: passed");
-  console.log("checkout-supply persistence rollback: passed");
-  console.log("integrity_check and foreign_key_check: passed");
-  console.log("ALL INVENTORY REDESIGN TRANSACTION CHECKS PASSED");
-} finally {
-  fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+    assert.equal(scalar("PRAGMA integrity_check;"), "ok");
+    assert.equal(scalar("PRAGMA foreign_key_check;"), "");
+    console.log("transfer-created Product catalog binding boundary: passed");
+    console.log("repository authority and identity boundaries: passed");
+    console.log("inventory redesign schema constraints: passed");
+    console.log("Product lot and scalar authority rollback: passed");
+    console.log("stock-adjustment transaction rollback: passed");
+    console.log("recipe-version publication rollback: passed");
+    console.log("checkout-supply persistence rollback: passed");
+    console.log("atomic nested Recipe draft begin and rollback: passed");
+    console.log("persisted Recipe draft cost publication guard: passed");
+    console.log("integrity_check and foreign_key_check: passed");
+    console.log("ALL INVENTORY REDESIGN TRANSACTION CHECKS PASSED");
+  } finally {
+    fs.rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
 }
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

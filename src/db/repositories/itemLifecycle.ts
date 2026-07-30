@@ -37,6 +37,18 @@ export async function getCatalogItemReferenceCounts(
   db?: RepositoryDatabase,
 ): Promise<ItemReferenceCounts> {
   const database = getRepositoryDatabase(db);
+  const itemCount = await count(
+    database,
+    `
+      SELECT COUNT(*) AS count
+      FROM catalog_items
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [catalogItemId],
+  );
+  if (itemCount !== 1) {
+    throw new Error("Catalog item is unavailable for reference checks.");
+  }
   const parameter = [catalogItemId];
   const [
     purchase,
@@ -49,6 +61,7 @@ export async function getCatalogItemReferenceCounts(
     supplyRuleReference,
     orderSupplyUsage,
     adjustment,
+    configurationReference,
   ] = await Promise.all([
     count(
       database,
@@ -140,15 +153,33 @@ export async function getCatalogItemReferenceCounts(
         ) + (
           SELECT COUNT(*) FROM recipe_version_lines
           WHERE catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*) FROM catalog_item_recipe_roles
+          WHERE output_catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*) FROM recipe_drafts
+          WHERE output_catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*) FROM recipe_draft_lines
+          WHERE catalog_item_id = ?
         ) AS count
       `,
-      [catalogItemId, catalogItemId],
+      [
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+      ],
     ),
     count(
       database,
       `
         SELECT (
           SELECT COUNT(*) FROM production_input_allocations
+          WHERE catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*) FROM production_plan_requirements
           WHERE catalog_item_id = ?
         ) + (
           SELECT COUNT(*)
@@ -160,7 +191,7 @@ export async function getCatalogItemReferenceCounts(
           WHERE binding.catalog_item_id = ?
         ) AS count
       `,
-      [catalogItemId, catalogItemId],
+      [catalogItemId, catalogItemId, catalogItemId],
     ),
     count(
       database,
@@ -185,8 +216,13 @@ export async function getCatalogItemReferenceCounts(
         SELECT COUNT(*) AS count
         FROM supply_usage_rules
         WHERE supply_catalog_item_id = ?
+          OR target_product_id IN (
+            SELECT legacy_entity_id
+            FROM legacy_item_bindings
+            WHERE catalog_item_id = ? AND entity_kind = 'product'
+          )
       `,
-      parameter,
+      [catalogItemId, catalogItemId],
     ),
     count(
       database,
@@ -206,13 +242,27 @@ export async function getCatalogItemReferenceCounts(
       `,
       parameter,
     ),
+    count(
+      database,
+      `
+        SELECT COUNT(*) AS count
+        FROM item_unit_conversions
+        WHERE catalog_item_id = ?
+      `,
+      parameter,
+    ),
   ]);
 
   // The current schema has no normalized bundle-component relationship. This
   // zero records the completed schema check; it is not a missing result.
   const bundleReference = 0;
   const historicalReportDependency =
-    movement + recipeReference + recipeVersionReference + production + sale;
+    movement +
+    recipeReference +
+    recipeVersionReference +
+    production +
+    sale +
+    configurationReference;
 
   return {
     purchase,

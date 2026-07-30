@@ -28,6 +28,10 @@ type RecipeVersionInputBase = {
   label: string;
   quantity: number;
   unit: string;
+  normalizedQuantity?: number | null;
+  normalizedUnit?: string | null;
+  conversionId?: string | null;
+  conversionFactorSnapshot?: number | null;
   role: VersionInputRole;
   optional: boolean;
   costState: VersionCostState;
@@ -131,6 +135,7 @@ export type RecipeVersionValidationErrorCode =
   | "unresolved_input"
   | "invalid_input_quantity"
   | "invalid_input_unit"
+  | "invalid_unit_conversion"
   | "missing_catalog_item"
   | "missing_child_version"
   | "archived_child_version"
@@ -308,6 +313,42 @@ export function validateRecipeVersionDraft(
         inputId: input.id,
         message: `${input.label} must have a unit.`,
       });
+    }
+    const hasConversionEvidence =
+      input.conversionId !== undefined ||
+      input.conversionFactorSnapshot !== undefined ||
+      input.normalizedQuantity !== undefined ||
+      input.normalizedUnit !== undefined;
+    if (hasConversionEvidence) {
+      const conversionFactor = input.conversionFactorSnapshot ?? 1;
+      const normalizedQuantity = input.normalizedQuantity;
+      const normalizedUnit = input.normalizedUnit?.trim();
+      const sameUnitEvidence =
+        !input.conversionId &&
+        normalizedUnit === input.unit.trim() &&
+        normalizedQuantity !== null &&
+        normalizedQuantity !== undefined &&
+        Number.isFinite(normalizedQuantity) &&
+        Math.abs(normalizedQuantity - input.quantity) <= 1e-9 &&
+        Number.isFinite(conversionFactor) &&
+        Math.abs(conversionFactor - 1) <= 1e-9;
+      const convertedEvidence =
+        Boolean(input.conversionId?.trim()) &&
+        Boolean(normalizedUnit) &&
+        normalizedQuantity !== null &&
+        normalizedQuantity !== undefined &&
+        Number.isFinite(normalizedQuantity) &&
+        Number.isFinite(conversionFactor) &&
+        conversionFactor > 0 &&
+        Math.abs(normalizedQuantity - input.quantity * conversionFactor) <=
+          1e-9;
+      if (!sameUnitEvidence && !convertedEvidence) {
+        errors.push({
+          code: "invalid_unit_conversion",
+          inputId: input.id,
+          message: `${input.label} has inconsistent unit-conversion evidence.`,
+        });
+      }
     }
     if (!hasValidKnownCost(input.costState, input.authoritativeUnitCost)) {
       errors.push({

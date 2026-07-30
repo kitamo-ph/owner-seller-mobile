@@ -70,6 +70,82 @@ check(
   !validation.errors.some((error) => error.code === "selling_price_required"),
 );
 
+const knownZeroCost = validateRecipeVersionDraft({
+  ...draft,
+  id: "draft-known-zero",
+  inputs: [
+    {
+      ...draft.inputs[0],
+      costState: "known",
+      authoritativeUnitCost: 0,
+    },
+  ],
+});
+check(
+  "explicit known-zero input cost remains complete",
+  knownZeroCost.valid && knownZeroCost.costComplete,
+);
+
+const fabricatedKnownCost = validateRecipeVersionDraft({
+  ...draft,
+  id: "draft-fabricated-known",
+  inputs: [
+    {
+      ...draft.inputs[0],
+      costState: "known",
+      authoritativeUnitCost: null,
+    },
+  ],
+});
+check(
+  "known cost without evidence is rejected",
+  !fabricatedKnownCost.valid &&
+    fabricatedKnownCost.errors.some(
+      (error) => error.code === "invalid_known_cost",
+    ),
+);
+
+const invalidConversion = validateRecipeVersionDraft({
+  ...draft,
+  id: "draft-invalid-conversion",
+  inputs: [
+    {
+      ...draft.inputs[0],
+      conversionId: "conversion-kg-g",
+      conversionFactorSnapshot: 1000,
+      normalizedQuantity: 400,
+      normalizedUnit: "g",
+    },
+  ],
+});
+check(
+  "inconsistent conversion snapshot cannot publish",
+  !invalidConversion.valid &&
+    invalidConversion.errors.some(
+      (error) => error.code === "invalid_unit_conversion",
+    ),
+);
+
+const convertedDraft = {
+  ...draft,
+  id: "draft-converted",
+  inputs: [
+    {
+      ...draft.inputs[0],
+      quantity: 0.5,
+      unit: "kg",
+      conversionId: "conversion-kg-g",
+      conversionFactorSnapshot: 1000,
+      normalizedQuantity: 500,
+      normalizedUnit: "g",
+    },
+  ],
+};
+check(
+  "exact conversion snapshot validates",
+  validateRecipeVersionDraft(convertedDraft).valid,
+);
+
 const publication = publishRecipeVersion(
   draft,
   {},
