@@ -17,6 +17,7 @@ import type {
   RecipeLineRole,
   RecipeVersionCostState,
 } from "./recipeVersions";
+import type { RecipeLineCostSource } from "./catalogCostProfiles";
 
 export type RecipeDraftLifecycle =
   | "editing"
@@ -39,6 +40,7 @@ export type RecipeDraftRecord = {
   outputCatalogItemId: string | null;
   name: string | null;
   category: string | null;
+  notes: string | null;
   expectedOutputQuantity: number | null;
   expectedOutputUnit: string | null;
   productionMode: "prepared_before_selling" | "cook_upon_order" | null;
@@ -84,6 +86,8 @@ export type RecipeDraftLineRecord = {
   isOptional: boolean;
   costOverride: number | null;
   costState: RecipeVersionCostState;
+  costSource: RecipeLineCostSource;
+  costProfileId: string | null;
   allocationMode: RecipeAllocationMode;
   legacyIngredientLotId: string | null;
   notes: string | null;
@@ -98,6 +102,7 @@ type RecipeDraftRow = {
   output_catalog_item_id: string | null;
   name: string | null;
   category: string | null;
+  notes: string | null;
   expected_output_quantity: number | null;
   expected_output_unit: string | null;
   production_mode: RecipeDraftRecord["productionMode"];
@@ -140,6 +145,8 @@ type RecipeDraftLineRow = {
   is_optional: number;
   cost_override: number | null;
   cost_state: RecipeVersionCostState;
+  cost_source: RecipeLineCostSource;
+  cost_profile_id: string | null;
   allocation_mode: RecipeAllocationMode;
   legacy_ingredient_lot_id: string | null;
   notes: string | null;
@@ -153,6 +160,7 @@ export type CreateRecipeDraftInput = {
   sourceVersionId?: string | null;
   outputCatalogItemId?: string | null;
   name?: string | null;
+  notes?: string | null;
   parentDraftId?: string | null;
   parentLineId?: string | null;
   parentExpectedRevision?: number;
@@ -168,8 +176,17 @@ export type BeginNestedRecipeDraftInput = CreateRecipeDraftInput & {
 
 export type SaveRecipeDraftLineInput = Omit<
   RecipeDraftLineRecord,
-  "id" | "businessId" | "recipeDraftId" | "sortOrder"
-> & { id?: string };
+  | "id"
+  | "businessId"
+  | "recipeDraftId"
+  | "sortOrder"
+  | "costSource"
+  | "costProfileId"
+> & {
+  id?: string;
+  costSource?: RecipeLineCostSource;
+  costProfileId?: string | null;
+};
 
 export type SaveRecipeDraftInput = {
   draftId: string;
@@ -179,6 +196,7 @@ export type SaveRecipeDraftInput = {
   outputCatalogItemId?: string | null;
   name?: string | null;
   category?: string | null;
+  notes?: string | null;
   expectedOutputQuantity?: number | null;
   expectedOutputUnit?: string | null;
   productionMode?: RecipeDraftRecord["productionMode"];
@@ -203,6 +221,7 @@ function mapDraft(row: RecipeDraftRow): RecipeDraftRecord {
     outputCatalogItemId: row.output_catalog_item_id,
     name: row.name,
     category: row.category,
+    notes: row.notes,
     expectedOutputQuantity: row.expected_output_quantity,
     expectedOutputUnit: row.expected_output_unit,
     productionMode: row.production_mode,
@@ -247,13 +266,74 @@ function mapLine(row: RecipeDraftLineRow): RecipeDraftLineRecord {
     isOptional: toBoolean(row.is_optional),
     costOverride: row.cost_override,
     costState: row.cost_state,
+    costSource: row.cost_source,
+    costProfileId: row.cost_profile_id,
     allocationMode: row.allocation_mode,
     legacyIngredientLotId: row.legacy_ingredient_lot_id,
     notes: row.notes,
   };
 }
 
+function normalizedDraftLineCostSource(
+  line: SaveRecipeDraftLineInput,
+): RecipeLineCostSource {
+  if (line.costSource) return line.costSource;
+  if (line.sourceKind === "custom_cost") return "custom";
+  if (line.legacyIngredientLotId) return "purchase_lot";
+  if (line.costState === "not_applicable") return "not_applicable";
+  if (line.costState === "known") return "legacy_snapshot";
+  return "unknown";
+}
+
+type RecipeLineConversionEvidence = {
+  business_id: string;
+  catalog_item_id: string;
+  from_unit: string;
+  to_unit: string;
+  factor: number;
+};
+
+function normalizedUnit(unit: string) {
+  return unit.trim().toLowerCase();
+}
+
+function standardQuantityFactor(fromUnit: string, toUnit: string) {
+  const from = normalizedUnit(fromUnit);
+  const to = normalizedUnit(toUnit);
+  if (from === to) return 1;
+  if (from === "g" && to === "kg") return 1 / 1_000;
+  if (from === "kg" && to === "g") return 1_000;
+  if (from === "ml" && to === "l") return 1 / 1_000;
+  if (from === "l" && to === "ml") return 1_000;
+  return null;
+}
+
+function quantityFactorFromUsageUnit(
+  usageUnit: string,
+  evidenceUnit: string,
+  conversion: RecipeLineConversionEvidence | null,
+) {
+  const standardFactor = standardQuantityFactor(usageUnit, evidenceUnit);
+  if (standardFactor !== null) return standardFactor;
+  if (!conversion) return null;
+  const normalizedToEvidence = standardQuantityFactor(
+    conversion.to_unit,
+    evidenceUnit,
+  );
+  return normalizedToEvidence === null
+    ? null
+    : conversion.factor * normalizedToEvidence;
+}
+
+function sameCost(left: number, right: number) {
+  return (
+    Math.abs(left - right) <=
+    1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
+  );
+}
+
 function validateDraftLine(line: SaveRecipeDraftLineInput, index: number) {
+  const costSource = normalizedDraftLineCostSource(line);
   const expectedSource = {
     catalog_item: Boolean(line.catalogItemId),
     child_recipe_version: Boolean(line.childRecipeVersionId),
@@ -284,6 +364,296 @@ function validateDraftLine(line: SaveRecipeDraftLineInput, index: number) {
       `Draft line ${index + 1} incomplete cost cannot carry authoritative evidence.`,
     );
   }
+  if (
+    (costSource === "owner_estimate" ||
+      costSource === "recipe_version") &&
+    (!line.costProfileId || line.costState !== "known")
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} ${costSource} cost requires an exact profile and known snapshot.`,
+    );
+  }
+  if (
+    line.costProfileId &&
+    costSource !== "owner_estimate" &&
+    costSource !== "recipe_version"
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} cost profile does not match its provenance.`,
+    );
+  }
+  if (
+    (costSource === "owner_estimate" &&
+      line.sourceKind !== "catalog_item") ||
+    (costSource === "recipe_version" &&
+      line.sourceKind !== "child_recipe_version") ||
+    (costSource === "custom" && line.sourceKind !== "custom_cost") ||
+    (costSource === "purchase_lot" &&
+      (line.sourceKind !== "catalog_item" ||
+        !line.legacyIngredientLotId)) ||
+    (line.legacyIngredientLotId && costSource !== "purchase_lot")
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} cost provenance does not match its source.`,
+    );
+  }
+}
+
+/**
+ * Verifies mutable Recipe-first cost evidence against the exact persisted
+ * source inside the same transaction that replaces the draft snapshot.
+ */
+export async function validateRecipeDraftLineCostEvidenceInTransaction(
+  line: SaveRecipeDraftLineInput,
+  index: number,
+  businessId: string,
+  db: RepositoryDatabase,
+) {
+  const costSource = normalizedDraftLineCostSource(line);
+  let conversion: RecipeLineConversionEvidence | null = null;
+  if (line.conversionId) {
+    let conversionCatalogItemId = line.catalogItemId;
+    if (line.sourceKind === "child_recipe_version") {
+      const child = await db.getFirstAsync<{
+        business_id: string;
+        output_catalog_item_id: string;
+      }>(
+        `
+          SELECT business_id, output_catalog_item_id
+          FROM recipe_versions
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [line.childRecipeVersionId as string],
+      );
+      conversionCatalogItemId =
+        child?.business_id === businessId
+          ? child.output_catalog_item_id
+          : null;
+    }
+    if (
+      (line.sourceKind !== "catalog_item" &&
+        line.sourceKind !== "child_recipe_version") ||
+      !conversionCatalogItemId ||
+      !line.normalizedUnit?.trim() ||
+      line.conversionFactorSnapshot === null ||
+      line.conversionFactorSnapshot === undefined
+    ) {
+      throw new Error(`Draft line ${index + 1} conversion is incomplete.`);
+    }
+    conversion =
+      await db.getFirstAsync<RecipeLineConversionEvidence>(
+        `
+          SELECT business_id, catalog_item_id, from_unit, to_unit, factor
+          FROM item_unit_conversions
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [line.conversionId],
+      );
+    if (
+      !conversion ||
+      conversion.business_id !== businessId ||
+      conversion.catalog_item_id !== conversionCatalogItemId ||
+      conversion.from_unit !== line.unit?.trim() ||
+      conversion.to_unit !== line.normalizedUnit.trim() ||
+      !sameCost(conversion.factor, line.conversionFactorSnapshot)
+    ) {
+      throw new Error(`Draft line ${index + 1} conversion is unavailable.`);
+    }
+    if (
+      line.quantity !== null &&
+      line.quantity !== undefined &&
+      line.normalizedQuantity !== null &&
+      line.normalizedQuantity !== undefined &&
+      !sameCost(
+        line.normalizedQuantity,
+        line.quantity * conversion.factor,
+      )
+    ) {
+      throw new Error(
+        `Draft line ${index + 1} conversion quantity is inconsistent.`,
+      );
+    }
+  } else if (
+    line.conversionFactorSnapshot !== null &&
+    line.conversionFactorSnapshot !== undefined
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} conversion snapshot is not persisted.`,
+    );
+  }
+
+  if (costSource === "purchase_lot") {
+    const legacyLot = await db.getFirstAsync<{
+      business_id: string;
+      catalog_item_id: string;
+      unit: string;
+      purchased_quantity: number;
+      cost_state: CostState;
+      recorded_total_cost: number | null;
+      recorded_cost_per_unit: number | null;
+    }>(
+      `
+        SELECT lot.business_id, binding.catalog_item_id, lot.unit,
+          lot.purchased_quantity, lot.cost_state, lot.recorded_total_cost,
+          lot.recorded_cost_per_unit
+        FROM ingredient_lots lot
+        INNER JOIN legacy_item_bindings binding
+          ON binding.entity_kind = 'ingredient'
+          AND binding.legacy_entity_id = lot.ingredient_id
+          AND binding.deleted_at IS NULL
+        WHERE lot.id = ? AND lot.deleted_at IS NULL
+      `,
+      [line.legacyIngredientLotId],
+    );
+    if (
+      legacyLot?.business_id !== businessId ||
+      legacyLot.catalog_item_id !== line.catalogItemId
+    ) {
+      throw new Error(
+        `Draft line ${index + 1} legacy lot is not an exact item binding.`,
+      );
+    }
+    if (legacyLot.cost_state !== "known") {
+      if (line.costState === "known" || line.costOverride !== null) {
+        throw new Error(
+          `Draft line ${index + 1} unknown lot cost must remain unknown.`,
+        );
+      }
+      return;
+    }
+    if (
+      legacyLot.recorded_total_cost === null ||
+      legacyLot.recorded_cost_per_unit === null ||
+      !Number.isFinite(legacyLot.recorded_total_cost) ||
+      !Number.isFinite(legacyLot.recorded_cost_per_unit) ||
+      legacyLot.recorded_total_cost < 0 ||
+      legacyLot.recorded_cost_per_unit < 0 ||
+      !Number.isFinite(legacyLot.purchased_quantity) ||
+      legacyLot.purchased_quantity <= 0 ||
+      !sameCost(
+        legacyLot.recorded_cost_per_unit,
+        legacyLot.recorded_total_cost / legacyLot.purchased_quantity,
+      )
+    ) {
+      throw new Error(
+        `Draft line ${index + 1} lot cost evidence is inconsistent.`,
+      );
+    }
+    const usageUnit = line.unit?.trim();
+    const quantityFactor = usageUnit
+      ? quantityFactorFromUsageUnit(
+          usageUnit,
+          legacyLot.unit,
+          conversion,
+        )
+      : null;
+    const expectedCost =
+      quantityFactor === null
+        ? null
+        : legacyLot.recorded_cost_per_unit * quantityFactor;
+    if (
+      line.costState !== "known" ||
+      line.costOverride === null ||
+      expectedCost === null ||
+      !sameCost(line.costOverride, expectedCost)
+    ) {
+      throw new Error(
+        `Draft line ${index + 1} cost does not match its exact lot evidence.`,
+      );
+    }
+    return;
+  }
+
+  if (costSource !== "owner_estimate" && costSource !== "recipe_version") {
+    return;
+  }
+  const profile = await db.getFirstAsync<{
+    business_id: string;
+    catalog_item_id: string;
+    source_kind: "owner_estimate" | "recipe_version";
+    source_recipe_version_id: string | null;
+    total_cost: number;
+    reference_quantity: number;
+    reference_unit: string;
+  }>(
+    `
+      SELECT business_id, catalog_item_id, source_kind,
+        source_recipe_version_id, total_cost, reference_quantity,
+        reference_unit
+      FROM catalog_cost_profiles
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [line.costProfileId as string],
+  );
+  if (
+    !profile ||
+    profile.business_id !== businessId ||
+    profile.source_kind !== costSource
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} cost profile is unavailable.`,
+    );
+  }
+  if (
+    (costSource === "owner_estimate" &&
+      (line.sourceKind !== "catalog_item" ||
+        profile.catalog_item_id !== line.catalogItemId ||
+        profile.source_recipe_version_id !== null)) ||
+    (costSource === "recipe_version" &&
+      (line.sourceKind !== "child_recipe_version" ||
+        profile.source_recipe_version_id !== line.childRecipeVersionId))
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} cost profile does not match its exact source.`,
+    );
+  }
+  if (costSource === "recipe_version") {
+    const child = await db.getFirstAsync<{
+      business_id: string;
+      output_catalog_item_id: string;
+    }>(
+      `
+        SELECT business_id, output_catalog_item_id
+        FROM recipe_versions
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [line.childRecipeVersionId as string],
+    );
+    if (
+      child?.business_id !== businessId ||
+      child.output_catalog_item_id !== profile.catalog_item_id
+    ) {
+      throw new Error(
+        `Draft line ${index + 1} profile is not the pinned child Recipe.`,
+      );
+    }
+  }
+  const usageUnit = line.unit?.trim();
+  const quantityFactor = usageUnit
+    ? quantityFactorFromUsageUnit(
+        usageUnit,
+        profile.reference_unit,
+        conversion,
+      )
+    : null;
+  const expectedCost =
+    quantityFactor === null
+      ? null
+      : (profile.total_cost / profile.reference_quantity) * quantityFactor;
+  if (
+    line.costState !== "known" ||
+    line.costOverride === null ||
+    !Number.isFinite(profile.total_cost) ||
+    profile.total_cost < 0 ||
+    !Number.isFinite(profile.reference_quantity) ||
+    profile.reference_quantity <= 0 ||
+    expectedCost === null ||
+    !sameCost(line.costOverride, expectedCost)
+  ) {
+    throw new Error(
+      `Draft line ${index + 1} cost does not match its exact profile.`,
+    );
+  }
 }
 
 async function insertDraftLine(
@@ -301,9 +671,10 @@ async function insertDraftLine(
         catalog_item_id, child_recipe_version_id, child_draft_id, custom_name,
         quantity, unit, normalized_quantity, normalized_unit, conversion_id,
         conversion_factor_snapshot, role, is_optional, cost_override,
-        cost_state, allocation_mode, legacy_ingredient_lot_id, notes,
+        cost_state, cost_source, cost_profile_id, allocation_mode,
+        legacy_ingredient_lot_id, notes,
         created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL)
     `,
     [
       line.id ?? makeRecipeDraftLineId(),
@@ -325,6 +696,8 @@ async function insertDraftLine(
       toInteger(line.isOptional),
       line.costOverride ?? null,
       line.costState,
+      normalizedDraftLineCostSource(line),
+      line.costProfileId ?? null,
       line.allocationMode,
       line.legacyIngredientLotId ?? null,
       line.notes?.trim() || null,
@@ -504,14 +877,15 @@ export async function createRecipeDraft(
       `
         INSERT INTO recipe_drafts (
           id, business_id, branch_id, recipe_id, source_version_id,
-          output_catalog_item_id, name, category, expected_output_quantity,
+          output_catalog_item_id, name, category, notes,
+          expected_output_quantity,
           expected_output_unit, production_mode, suggested_selling_price,
           classification_proposal, selling_price_state, sellable, kiosk_enabled,
           editor_step, lifecycle_status, autosave_revision, last_saved_at,
           unresolved_requirement_count, parent_draft_id, parent_line_id,
           return_route, published_version_id, created_at, updated_at, sync_status,
           deleted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, 'unknown', 0, 0, 'definition', 'editing', 0, ?, 0, ?, ?, ?, NULL, ?, ?, 'local', NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL, 'unknown', 0, 0, 'definition', 'editing', 0, ?, 0, ?, ?, ?, NULL, ?, ?, 'local', NULL)
       `,
       [
         draftId,
@@ -521,6 +895,7 @@ export async function createRecipeDraft(
         input.sourceVersionId ?? null,
         input.outputCatalogItemId ?? null,
         input.name?.trim() || null,
+        input.notes?.trim() || null,
         timestamp,
         nestedContext?.parentDraftId ?? null,
         nestedContext?.parentLineId ?? null,
@@ -861,74 +1236,19 @@ export async function saveRecipeDraft(
           throw new Error(`Draft line ${index + 1} child draft is unavailable.`);
         }
       }
-      if (line.conversionId) {
-        if (
-          line.sourceKind !== "catalog_item" ||
-          !line.normalizedUnit?.trim() ||
-          line.conversionFactorSnapshot === null ||
-          line.conversionFactorSnapshot === undefined
-        ) {
-          throw new Error(`Draft line ${index + 1} conversion is incomplete.`);
-        }
-        const conversion = await txn.getFirstAsync<{
-          business_id: string;
-          catalog_item_id: string;
-          from_unit: string;
-          to_unit: string;
-          factor: number;
-        }>(
-          `
-            SELECT business_id, catalog_item_id, from_unit, to_unit, factor
-            FROM item_unit_conversions
-            WHERE id = ? AND deleted_at IS NULL
-          `,
-          [line.conversionId],
-        );
-        if (
-          !conversion ||
-          conversion.business_id !== input.businessId ||
-          conversion.catalog_item_id !== line.catalogItemId ||
-          conversion.from_unit !== line.unit?.trim() ||
-          conversion.to_unit !== line.normalizedUnit.trim() ||
-          Math.abs(
-            conversion.factor - line.conversionFactorSnapshot,
-          ) > 1e-9
-        ) {
-          throw new Error(`Draft line ${index + 1} conversion is unavailable.`);
-        }
-      }
-      if (line.legacyIngredientLotId) {
-        const legacyLot = await txn.getFirstAsync<{
-          business_id: string;
-          catalog_item_id: string;
-        }>(
-          `
-            SELECT lot.business_id, binding.catalog_item_id
-            FROM ingredient_lots lot
-            INNER JOIN legacy_item_bindings binding
-              ON binding.entity_kind = 'ingredient'
-              AND binding.legacy_entity_id = lot.ingredient_id
-              AND binding.deleted_at IS NULL
-            WHERE lot.id = ? AND lot.deleted_at IS NULL
-          `,
-          [line.legacyIngredientLotId],
-        );
-        if (
-          legacyLot?.business_id !== input.businessId ||
-          legacyLot.catalog_item_id !== line.catalogItemId
-        ) {
-          throw new Error(
-            `Draft line ${index + 1} legacy lot is not an exact item binding.`,
-          );
-        }
-      }
+      await validateRecipeDraftLineCostEvidenceInTransaction(
+        line,
+        index,
+        input.businessId,
+        txn,
+      );
     }
 
     const result = await txn.runAsync(
       `
         UPDATE recipe_drafts
         SET output_catalog_item_id = COALESCE(?, output_catalog_item_id),
-          name = ?, category = ?, expected_output_quantity = ?,
+          name = ?, category = ?, notes = ?, expected_output_quantity = ?,
           expected_output_unit = ?, production_mode = ?,
           suggested_selling_price = ?, classification_proposal = ?,
           selling_price_state = COALESCE(?, selling_price_state),
@@ -950,6 +1270,7 @@ export async function saveRecipeDraft(
           : input.outputCatalogItemId,
         input.name?.trim() || null,
         input.category?.trim() || null,
+        input.notes?.trim() || null,
         input.expectedOutputQuantity ?? null,
         input.expectedOutputUnit?.trim() || null,
         input.productionMode ?? null,

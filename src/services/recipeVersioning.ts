@@ -3,6 +3,9 @@ import { runMigrations } from "@/db/migrations";
 import {
   loadRecipeVersionGraph,
   publishRecipeVersion as persistRecipeVersion,
+  publishRecipeVersionInTransaction as persistRecipeVersionInTransaction,
+  type PublishRecipeVersionInput,
+  type RecipeLineCostSource,
   type RecipeVersionCostState,
   type RecipeVersionLineRecord,
   type RecipeVersionRecord,
@@ -223,16 +226,27 @@ async function publicationContext(
  * Validates the proposed immutable definition and bounded exact-version graph,
  * then delegates the all-or-nothing insert/pointer advance to the repository.
  */
-export async function publishValidatedRecipeDraft(
-  input: {
-    draft: RecipeVersionDraft;
-    outputProductIdSnapshot?: string | null;
-    expectedStoredDraftRevision: number;
-    role?: "default" | "alternative";
-  },
-  db: RepositoryDatabase = openKitamoDatabase(),
+export type ValidatedRecipeDraftPublicationInput = {
+  draft: RecipeVersionDraft;
+  versionId?: string;
+  outputProductIdSnapshot?: string | null;
+  expectedStoredDraftRevision: number;
+  role?: "default" | "alternative";
+  lineCostEvidence?: Readonly<
+    Record<
+      string,
+      {
+        costSource: RecipeLineCostSource;
+        costProfileId: string | null;
+      }
+    >
+  >;
+};
+
+async function prepareValidatedRecipePublication(
+  input: ValidatedRecipeDraftPublicationInput,
+  db: RepositoryDatabase,
 ) {
-  await runMigrations(db);
   if (
     !Number.isInteger(input.expectedStoredDraftRevision) ||
     input.expectedStoredDraftRevision < 0 ||
@@ -283,44 +297,73 @@ export async function publishValidatedRecipeDraft(
             : line.authoritativeUnitCost * line.quantity
           : null,
       costState,
+      costSource: input.lineCostEvidence?.[line.id]?.costSource,
+      costProfileId:
+        input.lineCostEvidence?.[line.id]?.costProfileId ?? null,
       allocationMode: "none" as const,
       sourceLabelSnapshot: line.label,
     };
   });
 
-  const version = await persistRecipeVersion(
-    {
-      businessId: input.draft.businessId,
-      recipeId: input.draft.familyId,
-      outputCatalogItemId: input.draft.outputCatalogItemId as string,
-      outputProductIdSnapshot: input.outputProductIdSnapshot ?? null,
-      name: input.draft.name,
-      category: input.draft.category,
-      expectedOutputQuantity: input.draft.expectedOutputQuantity as number,
-      expectedOutputUnit: input.draft.outputUnit as string,
-      productionMode: input.draft.productionMode,
-      suggestedSellingPriceSnapshot: input.draft.suggestedSellingPrice,
-      sellingPriceState: input.draft.sellingPriceState,
-      notes: input.draft.notes,
-      sourceKind: input.draft.duplicatedFromVersionId
-        ? "duplicate"
-        : "native_publish",
-      sourceDraftId: input.draft.id,
-      duplicatedFromVersionId: input.draft.duplicatedFromVersionId,
-      graphState,
-      costState: validation.costComplete ? "known" : "partial",
-      expectedDraftRevision: input.expectedStoredDraftRevision,
-      role:
-        input.role === "default"
-          ? "primary"
-          : input.role === "alternative"
-            ? "alternate"
-            : undefined,
-      lines,
-    },
+  const publication: PublishRecipeVersionInput = {
+    id: input.versionId,
+    businessId: input.draft.businessId,
+    recipeId: input.draft.familyId,
+    outputCatalogItemId: input.draft.outputCatalogItemId as string,
+    outputProductIdSnapshot: input.outputProductIdSnapshot ?? null,
+    name: input.draft.name,
+    category: input.draft.category,
+    expectedOutputQuantity: input.draft.expectedOutputQuantity as number,
+    expectedOutputUnit: input.draft.outputUnit as string,
+    productionMode: input.draft.productionMode,
+    suggestedSellingPriceSnapshot: input.draft.suggestedSellingPrice,
+    sellingPriceState: input.draft.sellingPriceState,
+    notes: input.draft.notes,
+    sourceKind: input.draft.duplicatedFromVersionId
+      ? "duplicate"
+      : "native_publish",
+    sourceDraftId: input.draft.id,
+    duplicatedFromVersionId: input.draft.duplicatedFromVersionId,
+    graphState,
+    costState: validation.costComplete ? "known" : "partial",
+    expectedDraftRevision: input.expectedStoredDraftRevision,
+    role:
+      input.role === "default"
+        ? "primary"
+        : input.role === "alternative"
+          ? "alternate"
+          : undefined,
+    lines,
+  };
+  return { ok: true as const, publication, validation };
+}
+
+export async function publishValidatedRecipeDraftInTransaction(
+  input: ValidatedRecipeDraftPublicationInput,
+  db: RepositoryDatabase,
+) {
+  const prepared = await prepareValidatedRecipePublication(input, db);
+  if (!prepared.ok) return prepared;
+  const version = await persistRecipeVersionInTransaction(
+    prepared.publication,
     db,
   );
-  return { ok: true as const, version, validation };
+  return {
+    ok: true as const,
+    version,
+    validation: prepared.validation,
+  };
+}
+
+export async function publishValidatedRecipeDraft(
+  input: ValidatedRecipeDraftPublicationInput,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  const prepared = await prepareValidatedRecipePublication(input, db);
+  if (!prepared.ok) return prepared;
+  const version = await persistRecipeVersion(prepared.publication, db);
+  return { ok: true as const, version, validation: prepared.validation };
 }
 
 export function mapPersistenceCostStateToVersionCost(

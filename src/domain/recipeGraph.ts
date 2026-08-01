@@ -341,7 +341,6 @@ function validateVersionShape(
     }
 
     if (
-      line.sourceKind !== "child_recipe_version" &&
       line.canonicalUnit &&
       line.canonicalUnit !== line.unit &&
       !isPositiveFinite(line.canonicalQuantity ?? Number.NaN)
@@ -566,11 +565,12 @@ export function validateRecipeGraph(
       );
     }
 
-    if (line.unit !== child.outputUnit) {
+    const childUsageUnit = line.canonicalUnit ?? line.unit;
+    if (childUsageUnit !== child.outputUnit) {
       return error(
         "incompatible_child_unit",
         rootVersionId,
-        `${line.label} requires ${line.unit}, but ${child.label} outputs ${child.outputUnit}.`,
+        `${line.label} requires ${childUsageUnit}, but ${child.label} outputs ${child.outputUnit}.`,
         {
           offendingVersionId: child.id,
           offendingLineId: line.id,
@@ -775,7 +775,9 @@ export function expandRecipeLeaves(
     for (const line of version.lines) {
       if (line.sourceKind === "child_recipe_version") {
         const childContributions = memo.get(line.childVersionId) ?? [];
-        const childScale = line.quantity / version.expectedOutputQuantity;
+        const childScale =
+          (line.canonicalQuantity ?? line.quantity) /
+          version.expectedOutputQuantity;
 
         for (const childContribution of childContributions) {
           if (contributions.length >= limits.maxProvenancePaths) {

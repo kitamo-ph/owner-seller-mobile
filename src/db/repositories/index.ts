@@ -2,6 +2,7 @@ export * from "./appSettings";
 export * from "./branches";
 export * from "./businesses";
 export * from "./catalogItems";
+export * from "./catalogCostProfiles";
 export * from "./fixedCosts";
 export * from "./ingredientLots";
 export * from "./ingredients";

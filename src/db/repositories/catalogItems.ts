@@ -259,13 +259,11 @@ export async function listCatalogItemsMissingPrices(
 }
 
 /**
- * Compatibility-aware Product reader for later Kiosk integration.
+ * Compatibility-aware Product reader used by the Phase C1 Kiosk safety gate.
  *
- * This repository is intentionally not wired into the current Kiosk service
- * in Phase B. Unreviewed legacy Products retain the exact current
- * business/branch/shared predicate. Native and reviewed rows must satisfy the
- * explicit catalog readiness gate and, when producible, have an active exact
- * recipe role.
+ * Unreviewed legacy Products retain the exact prior business/branch/shared
+ * predicate. Native and reviewed rows must satisfy explicit catalog readiness
+ * and, when producible, have an active exact recipe role.
  */
 export async function listKioskEligibleCatalogProducts(
   businessId: string,

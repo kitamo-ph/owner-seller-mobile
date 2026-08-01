@@ -43,7 +43,9 @@ export type LocalIdKind =
   | "stock_adjustment_allocation"
   | "supply_rule"
   | "sale_supply_usage"
-  | "sale_supply_lot_usage";
+  | "sale_supply_lot_usage"
+  | "catalog_cost_profile"
+  | "recipe_version_cost_summary";
 
 function shortRandom() {
   return Math.random().toString(36).slice(2, 8);
@@ -98,3 +100,6 @@ export const makeStockAdjustmentAllocationId = () => makeLocalId("stock_adjustme
 export const makeSupplyRuleId = () => makeLocalId("supply_rule");
 export const makeSaleSupplyUsageId = () => makeLocalId("sale_supply_usage");
 export const makeSaleSupplyLotUsageId = () => makeLocalId("sale_supply_lot_usage");
+export const makeCatalogCostProfileId = () => makeLocalId("catalog_cost_profile");
+export const makeRecipeVersionCostSummaryId = () =>
+  makeLocalId("recipe_version_cost_summary");

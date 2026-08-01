@@ -19,6 +19,15 @@ export type ItemUnitConversionRecord = {
   effectiveAt: string;
 };
 
+export type CreateItemUnitConversionInput = {
+  id?: string;
+  businessId: string;
+  catalogItemId: string;
+  fromUnit: string;
+  toUnit: string;
+  factor: number;
+};
+
 type ItemUnitConversionRow = {
   id: string;
   business_id: string;
@@ -49,17 +58,10 @@ function mapConversion(
   };
 }
 
-export async function createItemUnitConversion(
-  input: {
-    id?: string;
-    businessId: string;
-    catalogItemId: string;
-    fromUnit: string;
-    toUnit: string;
-    factor: number;
-  },
-  db?: RepositoryDatabase,
-) {
+export async function createItemUnitConversionInTransaction(
+  input: CreateItemUnitConversionInput,
+  database: RepositoryDatabase,
+): Promise<ItemUnitConversionRecord> {
   const fromUnit = input.fromUnit.trim();
   const toUnit = input.toUnit.trim();
   if (
@@ -71,80 +73,90 @@ export async function createItemUnitConversion(
   ) {
     throw new Error("Item-specific unit conversion is invalid.");
   }
-  const database = getRepositoryDatabase(db);
   const id = input.id ?? makeUnitConversionId();
+  const item = await database.getFirstAsync<{ business_id: string }>(
+    `
+      SELECT business_id
+      FROM catalog_items
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [input.catalogItemId],
+  );
+  if (!item || item.business_id !== input.businessId) {
+    throw new Error("Catalog item is unavailable for conversion.");
+  }
+  const active = await database.getFirstAsync<ItemUnitConversionRow>(
+    `
+      SELECT *
+      FROM item_unit_conversions
+      WHERE catalog_item_id = ? AND from_unit = ? AND to_unit = ?
+        AND status = 'active' AND deleted_at IS NULL
+    `,
+    [input.catalogItemId, fromUnit, toUnit],
+  );
+  const versionRow = await database.getFirstAsync<{ next_version: number }>(
+    `
+      SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+      FROM item_unit_conversions
+      WHERE catalog_item_id = ? AND from_unit = ? AND to_unit = ?
+    `,
+    [input.catalogItemId, fromUnit, toUnit],
+  );
+  const timestamp = nowIso();
+  if (active) {
+    const superseded = await database.runAsync(
+      `
+        UPDATE item_unit_conversions
+        SET status = 'superseded', updated_at = ?, sync_status = 'local'
+        WHERE id = ? AND status = 'active'
+      `,
+      [timestamp, active.id],
+    );
+    if (superseded.changes !== 1) {
+      throw new Error("Unit conversion changed before supersession.");
+    }
+  }
+  await database.runAsync(
+    `
+      INSERT INTO item_unit_conversions (
+        id, business_id, catalog_item_id, from_unit, to_unit, factor,
+        version, status, supersedes_conversion_id, effective_at, created_at,
+        updated_at, sync_status, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'local', NULL)
+    `,
+    [
+      id,
+      input.businessId,
+      input.catalogItemId,
+      fromUnit,
+      toUnit,
+      input.factor,
+      versionRow?.next_version ?? 1,
+      active?.id ?? null,
+      timestamp,
+      timestamp,
+      timestamp,
+    ],
+  );
+  const row = await database.getFirstAsync<ItemUnitConversionRow>(
+    "SELECT * FROM item_unit_conversions WHERE id = ?",
+    [id],
+  );
+  if (!row) throw new Error("Unit conversion could not be reloaded.");
+  return mapConversion(row);
+}
+
+export async function createItemUnitConversion(
+  input: CreateItemUnitConversionInput,
+  db?: RepositoryDatabase,
+): Promise<ItemUnitConversionRecord> {
+  const database = getRepositoryDatabase(db);
   let record: ItemUnitConversionRecord | null = null;
   await database.withExclusiveTransactionAsync(async (txn) => {
-    const item = await txn.getFirstAsync<{ business_id: string }>(
-      `
-        SELECT business_id
-        FROM catalog_items
-        WHERE id = ? AND deleted_at IS NULL
-      `,
-      [input.catalogItemId],
-    );
-    if (!item || item.business_id !== input.businessId) {
-      throw new Error("Catalog item is unavailable for conversion.");
-    }
-    const active = await txn.getFirstAsync<ItemUnitConversionRow>(
-      `
-        SELECT *
-        FROM item_unit_conversions
-        WHERE catalog_item_id = ? AND from_unit = ? AND to_unit = ?
-          AND status = 'active' AND deleted_at IS NULL
-      `,
-      [input.catalogItemId, fromUnit, toUnit],
-    );
-    const versionRow = await txn.getFirstAsync<{ next_version: number }>(
-      `
-        SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-        FROM item_unit_conversions
-        WHERE catalog_item_id = ? AND from_unit = ? AND to_unit = ?
-      `,
-      [input.catalogItemId, fromUnit, toUnit],
-    );
-    const timestamp = nowIso();
-    if (active) {
-      await txn.runAsync(
-        `
-          UPDATE item_unit_conversions
-          SET status = 'superseded', updated_at = ?, sync_status = 'local'
-          WHERE id = ? AND status = 'active'
-        `,
-        [timestamp, active.id],
-      );
-    }
-    await txn.runAsync(
-      `
-        INSERT INTO item_unit_conversions (
-          id, business_id, catalog_item_id, from_unit, to_unit, factor,
-          version, status, supersedes_conversion_id, effective_at, created_at,
-          updated_at, sync_status, deleted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'local', NULL)
-      `,
-      [
-        id,
-        input.businessId,
-        input.catalogItemId,
-        fromUnit,
-        toUnit,
-        input.factor,
-        versionRow?.next_version ?? 1,
-        active?.id ?? null,
-        timestamp,
-        timestamp,
-        timestamp,
-      ],
-    );
-    const row = await txn.getFirstAsync<ItemUnitConversionRow>(
-      "SELECT * FROM item_unit_conversions WHERE id = ?",
-      [id],
-    );
-    if (!row) throw new Error("Unit conversion could not be reloaded.");
-    record = mapConversion(row);
+    record = await createItemUnitConversionInTransaction(input, txn);
   });
   if (!record) throw new Error("Unit conversion creation failed.");
-  return record;
+  return record as ItemUnitConversionRecord;
 }
 
 export async function getActiveItemUnitConversion(

@@ -4,6 +4,7 @@ import type { LocalDataCounts } from "@/db/schema";
 import {
   getAverageProducedCostByProduct,
   listIngredientLotsForBusiness,
+  listKioskEligibleCatalogProducts,
   listRecipeLinesForRecipe,
   type RepositoryDatabase,
 } from "@/db/repositories";
@@ -151,8 +152,19 @@ async function findCompletedCheckout(checkoutToken: string, db: RepositoryDataba
 export async function loadKioskContext(db: RepositoryDatabase = openKitamoDatabase()): Promise<KioskContext> {
   const status = await loadOwnerSetupStatus(db);
   const activeBranchId = status.activeBranch?.id ?? null;
-  const products = activeBranchId
-    ? status.products.filter((product) => product.branchId === activeBranchId || product.branchId === null)
+  const eligibleCatalogProducts =
+    status.activeBusiness && activeBranchId
+      ? await listKioskEligibleCatalogProducts(
+          status.activeBusiness.id,
+          activeBranchId,
+          db,
+        )
+      : [];
+  const eligibleProductIds = new Set(
+    eligibleCatalogProducts.map((item) => item.productId),
+  );
+  const products = status.activeBusiness && activeBranchId
+    ? status.products.filter((product) => eligibleProductIds.has(product.id))
     : [];
 
   let setupMessage: string | null = null;
@@ -346,6 +358,23 @@ export async function completeKioskSale(
 
   try {
     await db.withExclusiveTransactionAsync(async (txn) => {
+    const eligibleAtCheckout = await listKioskEligibleCatalogProducts(
+      activeBusiness.id,
+      activeBranch.id,
+      txn,
+    );
+    const eligibleProductIds = new Set(
+      eligibleAtCheckout.map((item) => item.productId),
+    );
+    const unavailableItem = input.cartItems.find(
+      (item) => !eligibleProductIds.has(item.productId),
+    );
+    if (unavailableItem) {
+      throw new Error(
+        `${unavailableItem.name} is no longer ready for Kiosk checkout. Refresh the order and try again.`,
+      );
+    }
+
     await txn.runAsync(
       `
         INSERT INTO sales (

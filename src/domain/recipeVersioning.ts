@@ -446,9 +446,10 @@ export function validateRecipeVersionDraft(
 
   const costComplete = draft.inputs.every(
     (input) =>
-      input.sourceKind !== "unresolved" &&
-      !isIncompleteCost(input.costState) &&
-      hasValidKnownCost(input.costState, input.authoritativeUnitCost),
+      input.optional ||
+      (input.sourceKind !== "unresolved" &&
+        !isIncompleteCost(input.costState) &&
+        hasValidKnownCost(input.costState, input.authoritativeUnitCost)),
   );
 
   return {

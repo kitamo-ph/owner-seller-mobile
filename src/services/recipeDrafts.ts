@@ -4,6 +4,8 @@ import {
   abandonUnusedRecipeDraft,
   beginNestedRecipeDraft,
   createRecipeDraft,
+  getRecipeDraftById,
+  listRecipeDraftLines,
   listResumableRecipeDrafts,
   resolvePublishedNestedDraft,
   saveRecipeDraft,
@@ -35,6 +37,19 @@ export async function savePersistentRecipeDraft(
 ) {
   await runMigrations(db);
   return saveRecipeDraft(input, db);
+}
+
+export async function loadPersistentRecipeDraft(
+  draftId: string,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  const draft = await getRecipeDraftById(draftId, db);
+  if (!draft) return null;
+  return {
+    draft,
+    lines: await listRecipeDraftLines(draftId, db),
+  };
 }
 
 export async function loadResumableRecipeDrafts(

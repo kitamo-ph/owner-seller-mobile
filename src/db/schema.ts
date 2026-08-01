@@ -1,4 +1,4 @@
-export const schemaVersion = 14;
+export const schemaVersion = 15;
 
 export const syncStatusValues = ["local", "pending", "synced", "failed"] as const;
 
@@ -28,7 +28,9 @@ export const resettableTables = [
   "production_ingredient_usages",
   "product_stock_lots",
   "production_batches",
+  "recipe_version_cost_summaries",
   "recipe_version_lines",
+  "catalog_cost_profiles",
   "recipe_versions",
   "recipe_batches",
   "recipe_ingredient_lines",
