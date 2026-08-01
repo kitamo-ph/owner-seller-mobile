@@ -132,6 +132,75 @@ if (expanded.ok) {
   check("pinned graph has complete cost", expanded.costComplete);
 }
 
+const packagedPrepared = {
+  ...cookedRice,
+  id: "packaged-prepared-v1",
+  familyId: "packaged-prepared-family",
+  outputItemId: "packaged-prepared-output",
+  label: "Packaged Prepared v1",
+  expectedOutputQuantity: 1,
+  outputUnit: "kg",
+  lines: [
+    leaf("packaged-prepared-rice", "raw-rice", "Raw Rice", 500, "g", 0.08),
+  ],
+};
+const packagedParent = {
+  ...musubi,
+  id: "packaged-parent-v1",
+  familyId: "packaged-parent-family",
+  outputItemId: "packaged-parent-output",
+  label: "Packaged Parent v1",
+  expectedOutputQuantity: 1,
+  outputUnit: "pcs",
+  lines: [
+    {
+      ...child(
+        "packaged-parent-child",
+        packagedPrepared.id,
+        "Prepared package",
+        1,
+        "pack",
+      ),
+      canonicalQuantity: 0.5,
+      canonicalUnit: "kg",
+    },
+  ],
+};
+const packagedExpansion = expandRecipeLeaves(
+  [packagedParent, packagedPrepared],
+  packagedParent.id,
+  2,
+);
+check(
+  "persisted child conversion validates against the child output unit",
+  packagedExpansion.ok,
+  packagedExpansion.ok ? "" : packagedExpansion.error.code,
+);
+check(
+  "nested expansion scales by the canonical child quantity",
+  packagedExpansion.ok &&
+    packagedExpansion.requirements[0]?.quantity === 500,
+  packagedExpansion.ok
+    ? `${packagedExpansion.requirements[0]?.quantity}`
+    : packagedExpansion.error.code,
+);
+const missingChildConversionQuantity = validateRecipeGraph(
+  [
+    {
+      ...packagedParent,
+      lines: packagedParent.lines.map(({ canonicalQuantity, ...line }) => line),
+    },
+    packagedPrepared,
+  ],
+  packagedParent.id,
+);
+check(
+  "child unit change without a conversion quantity is rejected",
+  !missingChildConversionQuantity.ok &&
+    missingChildConversionQuantity.error.code ===
+      "missing_conversion_snapshot",
+);
+
 const sharedPrepared = {
   ...cookedRice,
   id: "shared-v1",

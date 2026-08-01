@@ -86,6 +86,21 @@ check(
   knownZeroCost.valid && knownZeroCost.costComplete,
 );
 
+const optionalUnknownCost = validateRecipeVersionDraft({
+  ...draft,
+  id: "draft-optional-unknown",
+  inputs: [
+    {
+      ...draft.inputs[0],
+      optional: true,
+    },
+  ],
+});
+check(
+  "optional unknown input cost does not make the recipe cost partial",
+  optionalUnknownCost.valid && optionalUnknownCost.costComplete,
+);
+
 const fabricatedKnownCost = validateRecipeVersionDraft({
   ...draft,
   id: "draft-fabricated-known",

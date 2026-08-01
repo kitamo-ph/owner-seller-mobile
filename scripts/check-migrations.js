@@ -19,6 +19,7 @@ const migrationModules = [
   ["012_recipe_versions_and_drafts.js", "recipeVersionsAndDraftsMigration"],
   ["013_inventory_planning_and_adjustments.js", "inventoryPlanningAndAdjustmentsMigration"],
   ["014_supply_order_costs.js", "supplyOrderCostsMigration"],
+  ["015_recipe_first_costs.js", "recipeFirstCostsMigration"],
 ];
 const migrations = migrationModules.map(([file, exportName]) => require(path.join(compiledDir, file))[exportName]);
 const dbPath = path.join(os.tmpdir(), `kitamo-migrations-${process.pid}-${Date.now()}.sqlite`);

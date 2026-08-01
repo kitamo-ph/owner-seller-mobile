@@ -25,6 +25,7 @@ const migrationSources = [
   ["012_recipe_versions_and_drafts.ts", "recipeVersionsAndDraftsMigration"],
   ["013_inventory_planning_and_adjustments.ts", "inventoryPlanningAndAdjustmentsMigration"],
   ["014_supply_order_costs.ts", "supplyOrderCostsMigration"],
+  ["015_recipe_first_costs.ts", "recipeFirstCostsMigration"],
 ];
 const expectedNewTableColumns = {
   catalog_items: [
@@ -63,7 +64,7 @@ const expectedNewTableColumns = {
     "cost_per_unit_snapshot", "line_cost_snapshot", "cost_state", "allocation_mode",
     "legacy_ingredient_id_snapshot", "legacy_ingredient_lot_id",
     "source_label_snapshot", "original_legacy_line_id", "notes_snapshot", "created_at",
-    "updated_at", "sync_status", "deleted_at",
+    "updated_at", "sync_status", "deleted_at", "cost_source", "cost_profile_id",
   ],
   catalog_item_recipe_roles: [
     "id", "business_id", "output_catalog_item_id", "recipe_id", "role", "status",
@@ -78,7 +79,7 @@ const expectedNewTableColumns = {
     "editor_step", "lifecycle_status", "autosave_revision", "last_saved_at",
     "unresolved_requirement_count", "parent_draft_id", "parent_line_id",
     "return_route", "published_version_id", "created_at", "updated_at", "sync_status",
-    "deleted_at",
+    "deleted_at", "notes",
   ],
   recipe_draft_lines: [
     "id", "business_id", "recipe_draft_id", "sort_order", "source_kind",
@@ -86,7 +87,19 @@ const expectedNewTableColumns = {
     "quantity", "unit", "normalized_quantity", "normalized_unit", "conversion_id",
     "conversion_factor_snapshot", "role", "is_optional", "cost_override",
     "cost_state", "allocation_mode", "legacy_ingredient_lot_id", "notes",
+    "created_at", "updated_at", "sync_status", "deleted_at", "cost_source",
+    "cost_profile_id",
+  ],
+  catalog_cost_profiles: [
+    "id", "business_id", "catalog_item_id", "source_kind", "total_cost",
+    "reference_quantity", "reference_unit", "request_token", "source_recipe_version_id",
+    "supersedes_profile_id", "status", "effective_at", "superseded_at", "notes",
     "created_at", "updated_at", "sync_status", "deleted_at",
+  ],
+  recipe_version_cost_summaries: [
+    "id", "business_id", "recipe_version_id", "status", "total_cost",
+    "cost_per_output_unit", "known_cost_subtotal", "missing_required_count",
+    "estimated_input_count", "created_at", "sync_status", "deleted_at",
   ],
   suppliers: [
     "id", "business_id", "name", "contact_number", "notes", "status", "created_at",
@@ -270,6 +283,14 @@ const expectedNewIndexes = [
   "idx_sale_supply_usages_supply",
   "idx_sale_supply_lot_usages_usage",
   "idx_sale_supply_lot_usages_lot",
+  "idx_catalog_cost_profiles_item_history",
+  "idx_catalog_cost_profiles_recipe_version",
+  "uq_catalog_cost_profiles_owner_request",
+  "uq_catalog_cost_profiles_recipe_version",
+  "uq_catalog_cost_profiles_active",
+  "idx_recipe_draft_lines_cost_profile",
+  "idx_recipe_version_lines_cost_profile",
+  "idx_recipe_version_cost_summaries_business_status",
 ];
 
 function compileMigrations() {
@@ -416,6 +437,8 @@ function assertNoFabricatedRows(dbPath) {
     "supply_usage_rules",
     "sale_supply_usages",
     "sale_supply_lot_usages",
+    "catalog_cost_profiles",
+    "recipe_version_cost_summaries",
   ];
   for (const tableName of emptyTables) {
     assert.equal(
@@ -459,8 +482,8 @@ function assertRunnerRegistration(migrations) {
   }
 
   const schemaSource = fs.readFileSync(path.join(workspace, "src/db/schema.ts"), "utf8");
-  assert.match(schemaSource, /export const schemaVersion = 14;/);
-  assert.equal(migrations.length, 14);
+  assert.match(schemaSource, /export const schemaVersion = 15;/);
+  assert.equal(migrations.length, 15);
 }
 
 function seedPopulatedV10(dbPath) {
@@ -631,6 +654,28 @@ function seedResetCoverage(dbPath) {
        'draft-line-reset', 'business-1', 'draft-parent', 0, 'unresolved',
        'Pending child', 'unset', 0, 'unknown', 'none',
        datetime('now'), datetime('now'), 'local'
+     );
+     INSERT INTO catalog_cost_profiles (
+       id, business_id, catalog_item_id, source_kind, total_cost,
+       reference_quantity, reference_unit, request_token, status, effective_at,
+       created_at, updated_at, sync_status
+     ) VALUES (
+       'cost-profile-reset', 'business-1', 'legacy:product:shared-id',
+       'owner_estimate', 35, 5, 'pcs', 'reset-estimate', 'active', datetime('now'),
+       datetime('now'), datetime('now'), 'local'
+     );
+     UPDATE recipe_draft_lines
+     SET cost_source = 'owner_estimate',
+         cost_profile_id = 'cost-profile-reset'
+     WHERE id = 'draft-line-reset';
+     INSERT INTO recipe_version_cost_summaries (
+       id, business_id, recipe_version_id, status, total_cost,
+       cost_per_output_unit, known_cost_subtotal, missing_required_count,
+       estimated_input_count, created_at, sync_status
+     ) VALUES (
+       'cost-summary-reset', 'business-1',
+       'legacy:recipe-version:recipe-1:1', 'actual', 35, 7, 35, 0, 0,
+       datetime('now'), 'local'
      );
      INSERT INTO production_plans (
        id, business_id, branch_id, root_recipe_id, root_recipe_version_id,
@@ -829,7 +874,7 @@ function assertResetCoverage(dbPath) {
   for (const tableName of tableOrder) {
     assert.equal(Number(sql(dbPath, `SELECT COUNT(*) FROM ${tableName};`)), 0);
   }
-  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 14);
+  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 15);
   assertHealthy(dbPath);
 }
 
@@ -854,13 +899,14 @@ try {
       "012_recipe_versions_and_drafts",
       "013_inventory_planning_and_adjustments",
       "014_supply_order_costs",
+      "015_recipe_first_costs",
     ],
   );
 
   const freshDb = path.join(temporaryRoot, "fresh.sqlite");
-  assert.equal(applyMigrations(freshDb, migrations), 14, "fresh database must apply 14 migrations");
+  assert.equal(applyMigrations(freshDb, migrations), 15, "fresh database must apply 15 migrations");
   assert.equal(applyMigrations(freshDb, migrations), 0, "fresh replay must apply zero migrations");
-  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 14);
+  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 15);
   assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM catalog_items;")), 0);
   assertSchemaInventory(freshDb);
   assertHealthy(freshDb);
@@ -869,7 +915,7 @@ try {
   assert.equal(applyMigrations(populatedDb, migrations, 10), 10);
   seedPopulatedV10(populatedDb);
   const beforeFingerprint = legacyFingerprint(populatedDb);
-  assert.equal(applyMigrations(populatedDb, migrations), 4);
+  assert.equal(applyMigrations(populatedDb, migrations), 5);
   assert.equal(applyMigrations(populatedDb, migrations), 0);
   assert.deepEqual(legacyFingerprint(populatedDb), beforeFingerprint, "legacy facts must remain unchanged");
 
@@ -1012,6 +1058,8 @@ try {
            cost_per_unit_snapshot,
            line_cost_snapshot,
            cost_state,
+           cost_source,
+           cost_profile_id,
            allocation_mode,
            legacy_ingredient_id_snapshot,
            legacy_ingredient_lot_id,
@@ -1035,6 +1083,8 @@ try {
         cost_per_unit_snapshot: 0.12,
         line_cost_snapshot: 30.0,
         cost_state: "known",
+        cost_source: "purchase_lot",
+        cost_profile_id: null,
         allocation_mode: "legacy_selected",
         legacy_ingredient_id_snapshot: "shared-id",
         legacy_ingredient_lot_id: "lot-positive",
@@ -1053,6 +1103,8 @@ try {
         cost_per_unit_snapshot: null,
         line_cost_snapshot: 5.0,
         cost_state: "known",
+        cost_source: "custom",
+        cost_profile_id: null,
         allocation_mode: "none",
         legacy_ingredient_id_snapshot: null,
         legacy_ingredient_lot_id: null,
@@ -1219,6 +1271,7 @@ try {
     ["recipe_versions", ["recipes", "active_version_id"]],
     ["product_stock_lots", ["ingredient_lots", "cost_state"]],
     ["supply_usage_rules", null],
+    ["catalog_cost_profiles", ["recipe_draft_lines", "cost_source"]],
   ];
   for (let index = 10; index < migrations.length; index += 1) {
     const migration = migrations[index];
@@ -1265,13 +1318,13 @@ try {
   }
   assert.equal(applyMigrations(retryDb, migrations), 0);
 
-  console.log("fresh 001-014 migration and replay: passed");
+  console.log("fresh 001-015 migration and replay: passed");
   console.log("populated v10 preservation and deterministic import: passed");
   console.log("legacy zero, selected-lot, and historical-version handling: passed");
   console.log("binding and one-primary-recipe constraints: passed");
   console.log("native unknown/known-zero persistence constraints: passed");
   console.log("representative child-first pilot reset with migration ledger retained: passed");
-  console.log("forced rollback and restart for 011-014: passed");
+  console.log("forced rollback and restart for 011-015: passed");
   console.log("integrity_check and foreign_key_check: passed");
   console.log("ALL INVENTORY REDESIGN MIGRATION CHECKS PASSED");
 } finally {

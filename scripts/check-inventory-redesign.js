@@ -18,6 +18,9 @@ const checks = [
   "check:recipe-graph",
   "check:recipe-versioning",
   "check:recipe-drafts",
+  "check:recipe-first",
+  "check:recipe-first-transactions",
+  "check:recipe-first-orchestration",
   "check:production-planner",
   "check:production-plan-lot-guards",
   "check:inventory-redesign-migrations",
@@ -33,4 +36,4 @@ for (const check of checks) {
   });
 }
 
-console.log("\nALL INVENTORY REDESIGN PHASE B CHECKS PASSED");
+console.log("\nALL INVENTORY REDESIGN PHASE B AND PHASE C1 CHECKS PASSED");
