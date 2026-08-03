@@ -60,6 +60,14 @@ export const RECIPE_FIRST_UNITS = [
   "pcs",
   "pack",
   "portion",
+  "serving",
+  "metric_cup",
+  "us_cup",
+  "custom_cup",
+  "tbsp",
+  "tsp",
+  "us_gallon",
+  "imperial_gallon",
 ] as const;
 
 export type RecipeFirstUnit = (typeof RECIPE_FIRST_UNITS)[number];
@@ -89,13 +97,29 @@ const UNIT_ALIASES: Readonly<Record<string, RecipeFirstUnit>> = {
   packs: "pack",
   portion: "portion",
   portions: "portion",
-  serving: "portion",
-  servings: "portion",
+  serving: "serving",
+  servings: "serving",
+  metric_cup: "metric_cup",
+  metriccup: "metric_cup",
+  us_cup: "us_cup",
+  uscup: "us_cup",
+  custom_cup: "custom_cup",
+  business_cup: "custom_cup",
+  tbsp: "tbsp",
+  tablespoon: "tbsp",
+  tablespoons: "tbsp",
+  tsp: "tsp",
+  teaspoon: "tsp",
+  teaspoons: "tsp",
+  us_gallon: "us_gallon",
+  usgallon: "us_gallon",
+  imperial_gallon: "imperial_gallon",
+  imperialgallon: "imperial_gallon",
 };
 
 type UnitDefinition = {
   dimension: "mass" | "volume" | "count" | "package" | "portion";
-  factor: number;
+  factor: number | null;
 };
 
 const UNIT_DEFINITIONS: Readonly<Record<RecipeFirstUnit, UnitDefinition>> = {
@@ -106,10 +130,18 @@ const UNIT_DEFINITIONS: Readonly<Record<RecipeFirstUnit, UnitDefinition>> = {
   pcs: { dimension: "count", factor: 1 },
   pack: { dimension: "package", factor: 1 },
   portion: { dimension: "portion", factor: 1 },
+  serving: { dimension: "portion", factor: 1 },
+  metric_cup: { dimension: "volume", factor: 250 },
+  us_cup: { dimension: "volume", factor: 236.5882365 },
+  custom_cup: { dimension: "volume", factor: null },
+  tbsp: { dimension: "volume", factor: 15 },
+  tsp: { dimension: "volume", factor: 5 },
+  us_gallon: { dimension: "volume", factor: 3_785.411784 },
+  imperial_gallon: { dimension: "volume", factor: 4_546.09 },
 };
 
 export function normalizeRecipeUnit(unit: string): RecipeFirstUnit | null {
-  return UNIT_ALIASES[unit.trim().toLowerCase()] ?? null;
+  return UNIT_ALIASES[unit.trim().toLowerCase().replace(/[ -]+/g, "_")] ?? null;
 }
 
 export type RecipeQuantityConversion =
@@ -138,7 +170,7 @@ export function convertRecipeQuantity(
 
   const from = UNIT_DEFINITIONS[fromUnit];
   const to = UNIT_DEFINITIONS[toUnit];
-  if (from.dimension !== to.dimension) {
+  if (from.dimension !== to.dimension || from.factor === null || to.factor === null) {
     return { ok: false, reason: "incompatible_units" };
   }
   return {

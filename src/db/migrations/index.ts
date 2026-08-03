@@ -17,6 +17,7 @@ import { recipeVersionsAndDraftsMigration } from "./012_recipe_versions_and_draf
 import { inventoryPlanningAndAdjustmentsMigration } from "./013_inventory_planning_and_adjustments";
 import { supplyOrderCostsMigration } from "./014_supply_order_costs";
 import { recipeFirstCostsMigration } from "./015_recipe_first_costs";
+import { recipeUsabilityMigration } from "./016_recipe_usability";
 
 export type Migration = {
   id: string;
@@ -39,6 +40,7 @@ const migrations: Migration[] = [
   inventoryPlanningAndAdjustmentsMigration,
   supplyOrderCostsMigration,
   recipeFirstCostsMigration,
+  recipeUsabilityMigration,
 ];
 
 type MigrationRow = {

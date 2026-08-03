@@ -238,6 +238,11 @@ export type ValidatedRecipeDraftPublicationInput = {
       {
         costSource: RecipeLineCostSource;
         costProfileId: string | null;
+        allocationMode: PublishRecipeVersionInput["lines"][number]["allocationMode"];
+        legacyIngredientLotId: string | null;
+        customName: string | null;
+        conversionChainJson: string | null;
+        unitStandardSnapshot: string | null;
       }
     >
   >;
@@ -264,6 +269,7 @@ async function prepareValidatedRecipePublication(
       throw new Error("Validated recipe unexpectedly contains an unresolved line.");
     }
     const costState = line.costState as RecipeVersionCostState;
+    const evidence = input.lineCostEvidence?.[line.id];
     return {
       sourceKind: line.sourceKind,
       catalogItemId:
@@ -279,6 +285,8 @@ async function prepareValidatedRecipePublication(
       normalizedUnit: line.normalizedUnit ?? null,
       conversionId: line.conversionId ?? null,
       conversionFactorSnapshot: line.conversionFactorSnapshot ?? null,
+      conversionChainJson: evidence?.conversionChainJson ?? null,
+      unitStandardSnapshot: evidence?.unitStandardSnapshot ?? null,
       role: line.role,
       isOptional: line.optional,
       costOverride:
@@ -297,10 +305,10 @@ async function prepareValidatedRecipePublication(
             : line.authoritativeUnitCost * line.quantity
           : null,
       costState,
-      costSource: input.lineCostEvidence?.[line.id]?.costSource,
-      costProfileId:
-        input.lineCostEvidence?.[line.id]?.costProfileId ?? null,
-      allocationMode: "none" as const,
+      costSource: evidence?.costSource,
+      costProfileId: evidence?.costProfileId ?? null,
+      allocationMode: evidence?.allocationMode ?? "none",
+      legacyIngredientLotId: evidence?.legacyIngredientLotId ?? null,
       sourceLabelSnapshot: line.label,
     };
   });

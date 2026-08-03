@@ -2,6 +2,7 @@ import { openKitamoDatabase } from "@/db/client";
 import { runMigrations } from "@/db/migrations";
 import {
   activateCatalogCostProfileInTransaction,
+  archiveCatalogItem,
   createItemUnitConversion,
   createItemUnitConversionInTransaction,
   createRecipeVersionCostSummary,
@@ -42,6 +43,10 @@ import type {
   RecipeVersionDraftInput,
   VersionCostState,
 } from "@/domain/recipeVersioning";
+import {
+  standardRecipeUnitFactor,
+  validateRecipeConversionSnapshotEvidence,
+} from "@/domain/recipeConversionChains";
 
 import { publishValidatedRecipeDraftInTransaction } from "./recipeVersioning";
 
@@ -70,6 +75,7 @@ export type StartRecipeFirstDraftInput = {
 export type RecipeFirstDraftSnapshot = {
   draft: RecipeDraftRecord;
   lines: RecipeDraftLineRecord[];
+  resolvedLines: RecipeFirstResolvedLine[];
   output: {
     catalogItemId: string;
     productId: string | null;
@@ -82,6 +88,26 @@ export type RecipeFirstDraftSnapshot = {
     productActive: boolean | null;
   };
   costProfiles: CatalogCostProfileRecord[];
+};
+
+export type RecipeFirstResolvedLine = {
+  lineId: string;
+  displayName: string;
+  classification: string | null;
+  category: string | null;
+  sourceLabel: string;
+  sourceDetail: string | null;
+  costLabel: "Actual cost" | "Estimated cost" | "No price yet" | "Cost incomplete";
+  conversionSummary: string | null;
+  childLifecycle: string | null;
+  missingReason: string | null;
+  profileTotalCost: number | null;
+  profileReferenceQuantity: number | null;
+  profileReferenceUnit: string | null;
+  sourceCatalogItemId?: string | null;
+  pinnedRecipeVersionId?: string | null;
+  pinnedOutputQuantity?: number | null;
+  pinnedOutputUnit?: string | null;
 };
 
 export type RecipeFirstLibraryEntry = {
@@ -108,6 +134,8 @@ export type RecipeFirstLibraryEntry = {
   draftLifecycle: string | null;
   activeRecipeId: string | null;
   activeVersionId: string | null;
+  activeVersionOutputQuantity: number | null;
+  activeVersionOutputUnit: string | null;
   activeVersionCostStatus: RecipeVersionCostSummaryStatus | null;
   activeVersionTotalCost: number | null;
   activeVersionCostPerOutputUnit: number | null;
@@ -116,6 +144,20 @@ export type RecipeFirstLibraryEntry = {
   activeCostTotal: number | null;
   activeCostReferenceQuantity: number | null;
   activeCostReferenceUnit: string | null;
+};
+
+export type RecipeIngredientPickerGroup =
+  | "purchased"
+  | "prepared"
+  | "estimated"
+  | "drafts"
+  | "legacy";
+
+export type RecipeIngredientPickerEntry = RecipeFirstLibraryEntry & {
+  pickerGroup: RecipeIngredientPickerGroup;
+  action: "select_version" | "select_estimate" | "continue_draft" | "unavailable";
+  selectable: boolean;
+  disabledReason: string | null;
 };
 
 type OutputRow = {
@@ -369,6 +411,247 @@ async function loadOutputRow(
   );
 }
 
+async function resolveRecipeFirstLines(
+  lines: RecipeDraftLineRecord[],
+  db: RepositoryDatabase,
+): Promise<RecipeFirstResolvedLine[]> {
+  const resolved: RecipeFirstResolvedLine[] = [];
+  for (const line of lines) {
+    const costLabel: RecipeFirstResolvedLine["costLabel"] =
+      line.costState !== "known"
+        ? line.costState === "unknown"
+          ? "No price yet"
+          : "Cost incomplete"
+        : line.costSource === "purchase_lot" || line.costSource === "recipe_version"
+          ? "Actual cost"
+          : "Estimated cost";
+    const conversionSummary = line.conversionChainJson
+      ? (() => {
+          try {
+            const parsed = JSON.parse(line.conversionChainJson) as {
+              steps?: { fromQuantity: number; fromUnit: string; toQuantity: number; toUnit: string }[];
+            };
+            return (parsed.steps ?? [])
+              .map(
+                (step) =>
+                  `${step.fromQuantity} ${step.fromUnit} = ${step.toQuantity} ${step.toUnit}`,
+              )
+              .join(" · ") || null;
+          } catch {
+            return "Saved conversion unavailable";
+          }
+        })()
+      : line.normalizedUnit && line.conversionFactorSnapshot
+        ? `1 ${line.unit ?? "unit"} = ${line.conversionFactorSnapshot} ${line.normalizedUnit}`
+        : null;
+
+    if (line.sourceKind === "catalog_item" && line.catalogItemId) {
+      const item = await db.getFirstAsync<{
+        name: string;
+        classification: string;
+        ingredient_name: string | null;
+        ingredient_category: string | null;
+        lot_brand: string | null;
+        lot_source: string | null;
+        lot_status: string | null;
+        profile_total_cost: number | null;
+        profile_reference_quantity: number | null;
+        profile_reference_unit: string | null;
+      }>(
+        `
+          SELECT item.name, item.classification,
+            ingredient.name AS ingredient_name,
+            ingredient.category AS ingredient_category,
+            lot.brand_name AS lot_brand, lot.source_name AS lot_source,
+            lot.status AS lot_status, profile.total_cost AS profile_total_cost,
+            profile.reference_quantity AS profile_reference_quantity,
+            profile.reference_unit AS profile_reference_unit
+          FROM catalog_items item
+          LEFT JOIN legacy_item_bindings binding
+            ON binding.catalog_item_id = item.id
+            AND binding.entity_kind = 'ingredient'
+            AND binding.deleted_at IS NULL
+          LEFT JOIN ingredients ingredient
+            ON ingredient.id = binding.legacy_entity_id
+            AND ingredient.deleted_at IS NULL
+          LEFT JOIN ingredient_lots lot
+            ON lot.id = ? AND lot.ingredient_id = ingredient.id
+            AND lot.deleted_at IS NULL
+          LEFT JOIN catalog_cost_profiles profile
+            ON profile.id = ? AND profile.catalog_item_id = item.id
+            AND profile.deleted_at IS NULL
+          WHERE item.id = ? AND item.deleted_at IS NULL
+        `,
+        [line.legacyIngredientLotId, line.costProfileId, line.catalogItemId],
+      );
+      const name = item?.ingredient_name ?? item?.name;
+      if (!name?.trim() && line.customName?.trim()) {
+        console.warn(
+          "[recipeFirst] catalog ingredient identity missing; customName used only as last-resort diagnostic fallback",
+        );
+      }
+      resolved.push({
+        lineId: line.id,
+        displayName:
+          name?.trim() ||
+          line.customName?.trim() ||
+          "Ingredient information unavailable",
+        classification: item?.classification ?? null,
+        category: item?.ingredient_category ?? null,
+        sourceLabel:
+          line.costSource === "owner_estimate"
+            ? "Estimated prepared item"
+            : line.legacyIngredientLotId
+              ? "Exact Grocery lot"
+              : "Catalog ingredient",
+        sourceDetail: [item?.lot_brand, item?.lot_source, item?.lot_status]
+          .filter(Boolean)
+          .join(" · ") || null,
+        costLabel,
+        conversionSummary,
+        childLifecycle: null,
+        missingReason: item ? null : "The linked catalog item is unavailable.",
+        profileTotalCost: item?.profile_total_cost ?? null,
+        profileReferenceQuantity: item?.profile_reference_quantity ?? null,
+        profileReferenceUnit: item?.profile_reference_unit ?? null,
+      });
+      continue;
+    }
+    if (line.sourceKind === "child_recipe_version" && line.childRecipeVersionId) {
+      const child = await db.getFirstAsync<{
+        name_snapshot: string;
+        classification: string;
+        category_snapshot: string | null;
+        status: string;
+        cost_summary_status: RecipeVersionCostSummaryStatus | null;
+        output_catalog_item_id: string;
+        expected_output_quantity: number;
+        expected_output_unit: string;
+        profile_total_cost: number | null;
+        profile_reference_quantity: number | null;
+        profile_reference_unit: string | null;
+      }>(
+        `
+          SELECT version.name_snapshot, item.classification,
+            version.category_snapshot, version.status,
+            version.output_catalog_item_id, version.expected_output_quantity,
+            version.expected_output_unit,
+            summary.status AS cost_summary_status,
+            profile.total_cost AS profile_total_cost,
+            profile.reference_quantity AS profile_reference_quantity,
+            profile.reference_unit AS profile_reference_unit
+          FROM recipe_versions version
+          INNER JOIN catalog_items item
+            ON item.id = version.output_catalog_item_id
+            AND item.deleted_at IS NULL
+          LEFT JOIN recipe_version_cost_summaries summary
+            ON summary.recipe_version_id = version.id
+            AND summary.deleted_at IS NULL
+          LEFT JOIN catalog_cost_profiles profile
+            ON profile.id = ? AND profile.source_recipe_version_id = version.id
+            AND profile.deleted_at IS NULL
+          WHERE version.id = ? AND version.deleted_at IS NULL
+        `,
+        [line.costProfileId, line.childRecipeVersionId],
+      );
+      const pinnedCostLabel: RecipeFirstResolvedLine["costLabel"] =
+        child?.cost_summary_status === "actual"
+          ? "Actual cost"
+          : child?.cost_summary_status === "estimated"
+            ? "Estimated cost"
+            : child?.cost_summary_status === "no_price"
+              ? "No price yet"
+              : child?.cost_summary_status === "incomplete"
+                ? "Cost incomplete"
+                : costLabel;
+      if (!child?.name_snapshot?.trim() && line.customName?.trim()) {
+        console.warn(
+          "[recipeFirst] pinned prepared Recipe identity missing; falling back to saved label",
+        );
+      }
+      resolved.push({
+        lineId: line.id,
+        displayName:
+          child?.name_snapshot?.trim() ||
+          line.customName?.trim() ||
+          "Ingredient information unavailable",
+        classification: child?.classification ?? null,
+        category: child?.category_snapshot ?? null,
+        sourceLabel: "Pinned prepared Recipe version",
+        sourceDetail: child?.status ? `Version status: ${child.status}` : null,
+        costLabel: pinnedCostLabel,
+        conversionSummary,
+        childLifecycle: child?.status ?? null,
+        missingReason: child
+          ? null
+          : "Ingredient information unavailable",
+        profileTotalCost: child?.profile_total_cost ?? null,
+        profileReferenceQuantity: child?.profile_reference_quantity ?? null,
+        profileReferenceUnit: child?.profile_reference_unit ?? null,
+        sourceCatalogItemId: child?.output_catalog_item_id ?? null,
+        pinnedRecipeVersionId: line.childRecipeVersionId,
+        pinnedOutputQuantity: child?.expected_output_quantity ?? null,
+        pinnedOutputUnit: child?.expected_output_unit ?? null,
+      });
+      continue;
+    }
+    if (line.sourceKind === "child_draft" && line.childDraftId) {
+      const child = await db.getFirstAsync<{
+        name: string | null;
+        category: string | null;
+        classification_proposal: string | null;
+        lifecycle_status: string;
+      }>(
+        `
+          SELECT name, category, classification_proposal, lifecycle_status
+          FROM recipe_drafts
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [line.childDraftId],
+      );
+      resolved.push({
+        lineId: line.id,
+        displayName:
+          child?.name?.trim() ||
+          line.customName?.trim() ||
+          "Ingredient information unavailable",
+        classification: child?.classification_proposal ?? null,
+        category: child?.category ?? null,
+        sourceLabel: "Prepared Recipe draft",
+        sourceDetail: child ? `Draft status: ${child.lifecycle_status}` : null,
+        costLabel,
+        conversionSummary,
+        childLifecycle: child?.lifecycle_status ?? null,
+        missingReason: child
+          ? "Complete this prepared Recipe before publishing."
+          : "Ingredient information unavailable",
+        profileTotalCost: null,
+        profileReferenceQuantity: null,
+        profileReferenceUnit: null,
+      });
+      continue;
+    }
+    resolved.push({
+      lineId: line.id,
+      displayName: line.customName?.trim() || "Ingredient information unavailable",
+      classification: null,
+      category: null,
+      sourceLabel:
+        line.sourceKind === "custom_cost" ? "Custom ingredient cost" : "Unresolved ingredient",
+      sourceDetail: null,
+      costLabel,
+      conversionSummary,
+      childLifecycle: null,
+      missingReason:
+        line.sourceKind === "unresolved" ? "Choose or complete an ingredient source." : null,
+      profileTotalCost: null,
+      profileReferenceQuantity: null,
+      profileReferenceUnit: null,
+    });
+  }
+  return resolved;
+}
+
 export async function loadRecipeFirstDraft(
   draftId: string,
   db: RepositoryDatabase = openKitamoDatabase(),
@@ -380,9 +663,11 @@ export async function loadRecipeFirstDraft(
   if (!output || output.business_id !== draft.businessId) {
     throw new Error("Recipe-first draft output identity is unavailable.");
   }
+  const lines = await listRecipeDraftLines(draftId, db);
   return {
     draft,
-    lines: await listRecipeDraftLines(draftId, db),
+    lines,
+    resolvedLines: await resolveRecipeFirstLines(lines, db),
     output: {
       catalogItemId: output.id,
       productId: output.product_id,
@@ -475,6 +760,8 @@ export async function loadRecipeLibrary(
     draft_lifecycle: string | null;
     active_recipe_id: string | null;
     active_version_id: string | null;
+    active_version_output_quantity: number | null;
+    active_version_output_unit: string | null;
     version_cost_status: RecipeVersionCostSummaryStatus | null;
     version_total_cost: number | null;
     version_cost_per_output_unit: number | null;
@@ -574,6 +861,38 @@ export async function loadRecipeLibrary(
           END, role.effective_at DESC, role.id DESC
           LIMIT 1
         ) AS active_version_id,
+        (
+          SELECT active_version.expected_output_quantity
+          FROM catalog_item_recipe_roles role
+          INNER JOIN recipes recipe
+            ON recipe.id = role.recipe_id AND recipe.is_active = 1
+            AND recipe.deleted_at IS NULL
+          INNER JOIN recipe_versions active_version
+            ON active_version.id = recipe.active_version_id
+            AND active_version.status = 'published'
+            AND active_version.deleted_at IS NULL
+          WHERE role.output_catalog_item_id = item.id
+            AND role.status = 'active' AND role.deleted_at IS NULL
+          ORDER BY CASE role.role WHEN 'primary' THEN 0 WHEN 'kiosk_cook_upon_order' THEN 1 ELSE 2 END,
+            role.effective_at DESC, role.id DESC
+          LIMIT 1
+        ) AS active_version_output_quantity,
+        (
+          SELECT active_version.expected_output_unit
+          FROM catalog_item_recipe_roles role
+          INNER JOIN recipes recipe
+            ON recipe.id = role.recipe_id AND recipe.is_active = 1
+            AND recipe.deleted_at IS NULL
+          INNER JOIN recipe_versions active_version
+            ON active_version.id = recipe.active_version_id
+            AND active_version.status = 'published'
+            AND active_version.deleted_at IS NULL
+          WHERE role.output_catalog_item_id = item.id
+            AND role.status = 'active' AND role.deleted_at IS NULL
+          ORDER BY CASE role.role WHEN 'primary' THEN 0 WHEN 'kiosk_cook_upon_order' THEN 1 ELSE 2 END,
+            role.effective_at DESC, role.id DESC
+          LIMIT 1
+        ) AS active_version_output_unit,
         summary.status AS version_cost_status,
         summary.total_cost AS version_total_cost,
         summary.cost_per_output_unit AS version_cost_per_output_unit,
@@ -664,6 +983,8 @@ export async function loadRecipeLibrary(
     draftLifecycle: row.draft_lifecycle,
     activeRecipeId: row.active_recipe_id,
     activeVersionId: row.active_version_id,
+    activeVersionOutputQuantity: row.active_version_output_quantity,
+    activeVersionOutputUnit: row.active_version_output_unit,
     activeVersionCostStatus: row.version_cost_status,
     activeVersionTotalCost: row.version_total_cost,
     activeVersionCostPerOutputUnit: row.version_cost_per_output_unit,
@@ -673,6 +994,236 @@ export async function loadRecipeLibrary(
     activeCostReferenceQuantity: row.active_cost_reference_quantity,
     activeCostReferenceUnit: row.active_cost_reference_unit,
   }));
+}
+
+export async function loadRecipeIngredientPicker(
+  businessId: string,
+  currentOutputCatalogItemId?: string | null,
+  db: RepositoryDatabase = openKitamoDatabase(),
+): Promise<RecipeIngredientPickerEntry[]> {
+  const library = await loadRecipeLibrary(businessId, db);
+  return library
+    .filter((entry) => entry.lifecycle !== "archived")
+    .map((entry): RecipeIngredientPickerEntry => {
+      const selfReference = entry.catalogItemId === currentOutputCatalogItemId;
+      if (entry.activeVersionId) {
+        const canMeasure = Boolean(entry.activeVersionOutputUnit);
+        return {
+          ...entry,
+          pickerGroup:
+            entry.sourceType === "native" ? "prepared" : "legacy",
+          action: "select_version",
+          selectable: !selfReference && canMeasure,
+          disabledReason: selfReference
+            ? "A Recipe cannot directly use its own published version."
+            : canMeasure
+              ? null
+              : "This Recipe version has no usable output measurement.",
+        };
+      }
+      if (
+        entry.activeCostSource === "owner_estimate" &&
+        entry.activeCostProfileId &&
+        entry.activeCostReferenceQuantity &&
+        entry.activeCostReferenceUnit
+      ) {
+        return {
+          ...entry,
+          pickerGroup: "estimated",
+          action: "select_estimate",
+          selectable: !selfReference,
+          disabledReason: selfReference
+            ? "A Recipe cannot use its own estimate as an ingredient."
+            : null,
+        };
+      }
+      if (entry.draftId && !entry.activeVersionId) {
+        return {
+          ...entry,
+          pickerGroup: "drafts",
+          action: "continue_draft",
+          selectable: false,
+          disabledReason: selfReference
+            ? "A Recipe cannot use its own draft as an ingredient."
+            : "Continue this draft and publish a version before selecting it.",
+        };
+      }
+      if (
+        entry.ingredientId ||
+        entry.classification === "purchased_ingredient" ||
+        entry.classification === "supply_packaging"
+      ) {
+        return {
+          ...entry,
+          pickerGroup: "purchased",
+          action: "unavailable",
+          selectable: false,
+          disabledReason: "Choose an exact purchase lot from Grocery.",
+        };
+      }
+      return {
+        ...entry,
+        pickerGroup: "legacy",
+        action: "unavailable",
+        selectable: false,
+        disabledReason: "This legacy item has no selectable Recipe version.",
+      };
+    });
+}
+
+/**
+ * Reconciles mutable identities after a parent line was removed or replaced.
+ * Estimate-only identities are deleted only through the existing strict
+ * reference audit. Nested drafts are detached into ordinary resumable drafts
+ * so a failed cleanup can never hide or strand owner work.
+ */
+export async function reconcileRemovedRecipeLineSource(
+  input: {
+    businessId: string;
+    parentDraftId: string;
+    line: Pick<
+      RecipeDraftLineRecord,
+      "id" | "sourceKind" | "catalogItemId" | "childDraftId" | "costSource"
+    >;
+  },
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  const parent = await db.getFirstAsync<{ business_id: string }>(
+    `
+      SELECT business_id
+      FROM recipe_drafts
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [input.parentDraftId],
+  );
+  if (parent?.business_id !== input.businessId) {
+    throw new Error("Recipe line cleanup parent is unavailable.");
+  }
+  const current = await db.getFirstAsync<{
+    source_kind: RecipeDraftLineRecord["sourceKind"];
+    catalog_item_id: string | null;
+    child_draft_id: string | null;
+    cost_source: RecipeDraftLineRecord["costSource"];
+  }>(
+    `
+      SELECT source_kind, catalog_item_id, child_draft_id, cost_source
+      FROM recipe_draft_lines
+      WHERE recipe_draft_id = ? AND id = ? AND deleted_at IS NULL
+    `,
+    [input.parentDraftId, input.line.id],
+  );
+  if (
+    current &&
+    current.source_kind === input.line.sourceKind &&
+    current.catalog_item_id === input.line.catalogItemId &&
+    current.child_draft_id === input.line.childDraftId &&
+    current.cost_source === input.line.costSource
+  ) {
+    throw new Error("Recipe line cleanup requires the saved replacement first.");
+  }
+  if (
+    input.line.costSource === "owner_estimate" &&
+    input.line.catalogItemId
+  ) {
+    const item = await db.getFirstAsync<{ business_id: string }>(
+      `
+        SELECT business_id
+        FROM catalog_items
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [input.line.catalogItemId],
+    );
+    if (!item) {
+      return {
+        reconciled: "already_reconciled" as const,
+        catalogItemId: input.line.catalogItemId,
+      };
+    }
+    if (item.business_id !== input.businessId) {
+      throw new Error("Estimate cleanup identity belongs to another business.");
+    }
+    const resultHolder: {
+      current:
+        | { deleted: true; catalogItemId: string }
+        | { deleted: false; catalogItemId: string }
+        | null;
+    } = { current: null };
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      resultHolder.current = await deleteRecipeFirstItemInTransaction(
+        {
+          businessId: input.businessId,
+          catalogItemId: input.line.catalogItemId as string,
+          ownerAuthorized: true,
+        },
+        txn,
+        { retainWhenProtected: true },
+      );
+    });
+    const result = resultHolder.current;
+    if (!result) throw new Error("Estimate source cleanup did not complete.");
+    return {
+      reconciled: result.deleted ? ("deleted" as const) : ("retained" as const),
+      catalogItemId: input.line.catalogItemId,
+    };
+  }
+  if (input.line.sourceKind === "child_draft" && input.line.childDraftId) {
+    let alreadyDetached = false;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      const detachedAt = timestamp();
+      const detached = await txn.runAsync(
+        `
+          UPDATE recipe_drafts
+          SET parent_draft_id = NULL, parent_line_id = NULL,
+            return_route = NULL, autosave_revision = autosave_revision + 1,
+            last_saved_at = ?, updated_at = ?, sync_status = 'local'
+          WHERE id = ? AND business_id = ? AND parent_draft_id = ?
+            AND parent_line_id = ? AND lifecycle_status IN ('editing', 'ready')
+            AND deleted_at IS NULL
+        `,
+        [
+          detachedAt,
+          detachedAt,
+          input.line.childDraftId,
+          input.businessId,
+          input.parentDraftId,
+          input.line.id,
+        ],
+      );
+      if (detached.changes !== 1) {
+        const child = await txn.getFirstAsync<{
+          business_id: string;
+          parent_draft_id: string | null;
+          parent_line_id: string | null;
+          return_route: string | null;
+        }>(
+          `
+            SELECT business_id, parent_draft_id, parent_line_id, return_route
+            FROM recipe_drafts
+            WHERE id = ? AND deleted_at IS NULL
+          `,
+          [input.line.childDraftId],
+        );
+        if (
+          child?.business_id === input.businessId &&
+          child.parent_draft_id === null &&
+          child.parent_line_id === null &&
+          child.return_route === null
+        ) {
+          alreadyDetached = true;
+          return;
+        }
+        throw new Error("Nested Recipe draft changed before source cleanup.");
+      }
+    });
+    return {
+      reconciled: alreadyDetached
+        ? ("already_reconciled" as const)
+        : ("detached" as const),
+      detachedDraftId: input.line.childDraftId,
+    };
+  }
+  return { reconciled: "retained" as const };
 }
 
 export type AddQuickEstimatedPreparedInputInput = {
@@ -692,7 +1243,11 @@ export type AddQuickEstimatedPreparedInputInput = {
   usageQuantity: number;
   usageUnit: string;
   role?: RecipeDraftLineRecord["role"];
+  isOptional?: boolean;
   notes?: string | null;
+  conversionChainJson?: string | null;
+  unitStandardSnapshot?: string | null;
+  usageUnitFactorToReference?: number | null;
 };
 
 export type QuickEstimatedPreparedInputResult = {
@@ -705,6 +1260,8 @@ export type QuickEstimatedPreparedInputResult = {
 };
 
 function unitFactor(fromUnit: string, toUnit: string) {
+  const practical = standardRecipeUnitFactor(fromUnit, toUnit);
+  if (practical !== null) return practical;
   const from = fromUnit.trim().toLocaleLowerCase();
   const to = toUnit.trim().toLocaleLowerCase();
   if (from === to) return 1;
@@ -841,12 +1398,50 @@ function validateQuickEstimateInput(input: AddQuickEstimatedPreparedInputInput) 
   ) {
     throw new Error("Estimated prepared-item quantities must be positive.");
   }
+  const usageFactor =
+    input.usageUnitFactorToReference ?? unitFactor(usageUnit, referenceUnit);
+  if (!Number.isFinite(usageFactor) || usageFactor <= 0) {
+    throw new Error("Estimated prepared-item conversion must be positive.");
+  }
+  const conversionChainJson = input.conversionChainJson?.trim() || null;
+  if (conversionChainJson) {
+    const validation = validateRecipeConversionSnapshotEvidence({
+      conversionChainJson,
+      unitStandardSnapshot: input.unitStandardSnapshot,
+      expectedInputUnit: usageUnit,
+      expectedOutputUnit: referenceUnit,
+      expectedOutputQuantityPerInputUnit: usageFactor,
+    });
+    if (!validation.ok) {
+      throw new Error(
+        `Estimated prepared-item conversion evidence is inconsistent (${validation.reason}).`,
+      );
+    }
+  } else {
+    if (input.unitStandardSnapshot?.trim()) {
+      throw new Error(
+        "Estimated prepared-item unit standard requires a conversion chain.",
+      );
+    }
+    const standardFactor = standardRecipeUnitFactor(usageUnit, referenceUnit);
+    if (
+      input.usageUnitFactorToReference !== null &&
+      input.usageUnitFactorToReference !== undefined &&
+      (standardFactor === null ||
+        Math.abs(standardFactor - usageFactor) >
+          1e-9 * Math.max(1, Math.abs(standardFactor), Math.abs(usageFactor)))
+    ) {
+      throw new Error(
+        "An item-specific estimate conversion requires its exact conversion chain.",
+      );
+    }
+  }
   return {
     referenceUnit,
     usageUnit,
+    usageFactor,
     authoritativeUsageUnitCost:
-      (input.totalCost / input.referenceQuantity) *
-      unitFactor(usageUnit, referenceUnit),
+      (input.totalCost / input.referenceQuantity) * usageFactor,
   };
 }
 
@@ -882,6 +1477,7 @@ async function loadRepeatedEstimate(
     usage_quantity: number | null;
     usage_unit: string | null;
     usage_role: RecipeDraftLineRecord["role"];
+    usage_optional: number;
     usage_cost_override: number | null;
     usage_notes: string | null;
   }>(
@@ -892,6 +1488,7 @@ async function loadRepeatedEstimate(
         child.branch_id AS prepared_branch_id, child.notes AS prepared_notes,
         item.name AS catalog_name, line.quantity AS usage_quantity,
         line.unit AS usage_unit, line.role AS usage_role,
+        line.is_optional AS usage_optional,
         line.cost_override AS usage_cost_override,
         line.notes AS usage_notes
       FROM recipe_drafts child
@@ -933,6 +1530,7 @@ async function loadRepeatedEstimate(
     Math.abs(row.usage_quantity - input.usageQuantity) > 1e-9 ||
     row.usage_unit?.trim() !== validated.usageUnit ||
     row.usage_role !== (input.role ?? "supporting") ||
+    row.usage_optional !== (input.isOptional ? 1 : 0) ||
     row.usage_cost_override === null ||
     Math.abs(
       row.usage_cost_override - validated.authoritativeUsageUnitCost,
@@ -1001,6 +1599,36 @@ export async function addQuickEstimatedPreparedInput(
     const catalogItemId = input.catalogItemId ?? makeCatalogItemId();
     const preparedDraftId = input.preparedDraftId ?? makeRecipeDraftId();
     const parentLineId = input.parentLineId ?? makeRecipeDraftLineId();
+    const replacedLine = input.parentLineId
+      ? await txn.getFirstAsync<{
+          id: string;
+          recipe_draft_id: string;
+          source_kind: RecipeDraftLineRecord["sourceKind"];
+          catalog_item_id: string | null;
+          child_draft_id: string | null;
+          cost_source: RecipeDraftLineRecord["costSource"];
+        }>(
+          `
+            SELECT id, recipe_draft_id, source_kind, catalog_item_id,
+              child_draft_id, cost_source
+            FROM recipe_draft_lines
+            WHERE id = ? AND deleted_at IS NULL
+          `,
+          [input.parentLineId],
+        )
+      : null;
+    if (
+      replacedLine &&
+      replacedLine.recipe_draft_id !== input.parentDraftId
+    ) {
+      throw new Error("Only this draft's ingredient can be replaced in place.");
+    }
+    if (
+      replacedLine?.cost_source === "owner_estimate" &&
+      replacedLine.catalog_item_id === catalogItemId
+    ) {
+      throw new Error("Estimate replacement requires a new catalog identity.");
+    }
     await txn.runAsync(
       `
         INSERT INTO catalog_items (
@@ -1067,6 +1695,17 @@ export async function addQuickEstimatedPreparedInput(
       },
       txn,
     );
+    const conversion = await createConversionSnapshotInTransaction(
+      {
+        businessId: input.businessId,
+        catalogItemId,
+        quantity: input.usageQuantity,
+        fromUnit: validated.usageUnit,
+        toUnit: validated.referenceUnit,
+        factor: validated.usageFactor,
+      },
+      txn,
+    );
     const nextSort = await txn.getFirstAsync<{ value: number }>(
       `
         SELECT COALESCE(MAX(sort_order), -1) + 1 AS value
@@ -1075,36 +1714,90 @@ export async function addQuickEstimatedPreparedInput(
       `,
       [input.parentDraftId],
     );
-    await txn.runAsync(
-      `
-        INSERT INTO recipe_draft_lines (
-          id, business_id, recipe_draft_id, sort_order, source_kind,
-          catalog_item_id, child_recipe_version_id, child_draft_id,
-          custom_name, quantity, unit, normalized_quantity, normalized_unit,
-          conversion_id, conversion_factor_snapshot, role, is_optional,
-          cost_override, cost_state, allocation_mode,
-          legacy_ingredient_lot_id, notes, created_at, updated_at, sync_status,
-          deleted_at, cost_source, cost_profile_id
-        ) VALUES (?, ?, ?, ?, 'catalog_item', ?, NULL, NULL, NULL, ?, ?, NULL,
-          NULL, NULL, NULL, ?, 0, ?, 'known', 'none', NULL, ?, ?, ?, 'local',
-          NULL, 'owner_estimate', ?)
-      `,
-      [
-        parentLineId,
-        input.businessId,
-        input.parentDraftId,
-        nextSort?.value ?? 0,
-        catalogItemId,
-        input.usageQuantity,
-        validated.usageUnit,
-        input.role ?? "supporting",
-        validated.authoritativeUsageUnitCost,
-        input.notes?.trim() || null,
-        createdAt,
-        createdAt,
-        profile.id,
-      ],
-    );
+    if (replacedLine) {
+      const lineUpdate = await txn.runAsync(
+        `
+          UPDATE recipe_draft_lines
+          SET source_kind = 'catalog_item', catalog_item_id = ?,
+            child_recipe_version_id = NULL, child_draft_id = NULL,
+            custom_name = ?, quantity = ?, unit = ?, normalized_quantity = ?,
+            normalized_unit = ?, conversion_id = ?,
+            conversion_factor_snapshot = ?, conversion_chain_json = ?,
+            unit_standard_snapshot = ?, role = ?, is_optional = ?,
+            cost_override = ?,
+            cost_state = 'known', allocation_mode = 'none',
+            legacy_ingredient_lot_id = NULL, notes = ?, updated_at = ?,
+            sync_status = 'local', cost_source = 'owner_estimate',
+            cost_profile_id = ?
+          WHERE id = ? AND recipe_draft_id = ? AND business_id = ?
+            AND deleted_at IS NULL
+        `,
+        [
+          catalogItemId,
+          input.name.trim(),
+          input.usageQuantity,
+          validated.usageUnit,
+          conversion.normalizedQuantity,
+          conversion.normalizedUnit,
+          conversion.conversionId,
+          conversion.conversionFactorSnapshot,
+          input.conversionChainJson?.trim() || null,
+          input.unitStandardSnapshot?.trim() || null,
+          input.role ?? "supporting",
+          input.isOptional ? 1 : 0,
+          validated.authoritativeUsageUnitCost,
+          input.notes?.trim() || null,
+          createdAt,
+          profile.id,
+          parentLineId,
+          input.parentDraftId,
+          input.businessId,
+        ],
+      );
+      if (lineUpdate.changes !== 1) {
+        throw new Error("Owner-estimate line changed before replacement.");
+      }
+    } else {
+      await txn.runAsync(
+        `
+          INSERT INTO recipe_draft_lines (
+            id, business_id, recipe_draft_id, sort_order, source_kind,
+            catalog_item_id, child_recipe_version_id, child_draft_id,
+            custom_name, quantity, unit, normalized_quantity, normalized_unit,
+            conversion_id, conversion_factor_snapshot, conversion_chain_json,
+            unit_standard_snapshot, role, is_optional,
+            cost_override, cost_state, allocation_mode,
+            legacy_ingredient_lot_id, notes, created_at, updated_at, sync_status,
+            deleted_at, cost_source, cost_profile_id
+          ) VALUES (?, ?, ?, ?, 'catalog_item', ?, NULL, NULL, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, 'known', 'none', NULL, ?, ?, ?,
+            'local', NULL, 'owner_estimate', ?)
+        `,
+        [
+          parentLineId,
+          input.businessId,
+          input.parentDraftId,
+          nextSort?.value ?? 0,
+          catalogItemId,
+          input.name.trim(),
+          input.usageQuantity,
+          validated.usageUnit,
+          conversion.normalizedQuantity,
+          conversion.normalizedUnit,
+          conversion.conversionId,
+          conversion.conversionFactorSnapshot,
+          input.conversionChainJson?.trim() || null,
+          input.unitStandardSnapshot?.trim() || null,
+          input.role ?? "supporting",
+          input.isOptional ? 1 : 0,
+          validated.authoritativeUsageUnitCost,
+          input.notes?.trim() || null,
+          createdAt,
+          createdAt,
+          profile.id,
+        ],
+      );
+    }
     const parentUpdate = await txn.runAsync(
       `
         UPDATE recipe_drafts
@@ -1124,6 +1817,48 @@ export async function addQuickEstimatedPreparedInput(
     );
     if (parentUpdate.changes !== 1) {
       throw new Error("Parent Recipe draft changed before estimate save.");
+    }
+    if (
+      replacedLine?.cost_source === "owner_estimate" &&
+      replacedLine.catalog_item_id
+    ) {
+      await deleteRecipeFirstItemInTransaction(
+        {
+          businessId: input.businessId,
+          catalogItemId: replacedLine.catalog_item_id,
+          ownerAuthorized: true,
+        },
+        txn,
+        { retainWhenProtected: true },
+      );
+    }
+    if (
+      replacedLine?.source_kind === "child_draft" &&
+      replacedLine.child_draft_id
+    ) {
+      const detachedAt = timestamp();
+      const detached = await txn.runAsync(
+        `
+          UPDATE recipe_drafts
+          SET parent_draft_id = NULL, parent_line_id = NULL,
+            return_route = NULL, autosave_revision = autosave_revision + 1,
+            last_saved_at = ?, updated_at = ?, sync_status = 'local'
+          WHERE id = ? AND business_id = ? AND parent_draft_id = ?
+            AND parent_line_id = ? AND lifecycle_status IN ('editing', 'ready')
+            AND deleted_at IS NULL
+        `,
+        [
+          detachedAt,
+          detachedAt,
+          replacedLine.child_draft_id,
+          input.businessId,
+          input.parentDraftId,
+          parentLineId,
+        ],
+      );
+      if (detached.changes !== 1) {
+        throw new Error("Nested Recipe draft changed before replacement.");
+      }
     }
     result = {
       repeated: false,
@@ -1327,7 +2062,15 @@ async function buildDomainDraft(
   draft: RecipeVersionDraft;
   evidence: Record<
     string,
-    { costSource: RecipeLineCostSource; costProfileId: string | null }
+    {
+      costSource: RecipeLineCostSource;
+      costProfileId: string | null;
+      allocationMode: RecipeDraftLineRecord["allocationMode"];
+      legacyIngredientLotId: string | null;
+      customName: string | null;
+      conversionChainJson: string | null;
+      unitStandardSnapshot: string | null;
+    }
   >;
 }> {
   if (!draft.outputCatalogItemId) {
@@ -1336,12 +2079,25 @@ async function buildDomainDraft(
   const inputs: RecipeVersionDraftInput[] = [];
   const evidence: Record<
     string,
-    { costSource: RecipeLineCostSource; costProfileId: string | null }
+    {
+      costSource: RecipeLineCostSource;
+      costProfileId: string | null;
+      allocationMode: RecipeDraftLineRecord["allocationMode"];
+      legacyIngredientLotId: string | null;
+      customName: string | null;
+      conversionChainJson: string | null;
+      unitStandardSnapshot: string | null;
+    }
   > = {};
   for (const line of lines) {
     evidence[line.id] = {
       costSource: line.costSource,
       costProfileId: line.costProfileId,
+      allocationMode: line.allocationMode,
+      legacyIngredientLotId: line.legacyIngredientLotId,
+      customName: line.customName,
+      conversionChainJson: line.conversionChainJson,
+      unitStandardSnapshot: line.unitStandardSnapshot,
     };
     const base = {
       id: line.id,
@@ -1615,7 +2371,7 @@ function calculateCostSummary(
 async function resolveNestedParentInTransaction(
   child: RecipeDraftRecord,
   version: RecipeVersionRecord,
-  profile: CatalogCostProfileRecord,
+  profile: CatalogCostProfileRecord | null,
   db: RepositoryDatabase,
 ) {
   if (!child.parentDraftId || !child.parentLineId) return;
@@ -1654,17 +2410,19 @@ async function resolveNestedParentInTransaction(
   ) {
     throw new Error("Nested Recipe return context changed before publication.");
   }
-  const costPerParentUnit =
-    (profile.totalCost / profile.referenceQuantity) *
-    unitFactor(parentLine.unit, profile.referenceUnit);
+  const referenceUnit = profile?.referenceUnit ?? version.expectedOutputUnit;
+  const usageFactor = unitFactor(parentLine.unit, referenceUnit);
+  const costPerParentUnit = profile
+    ? (profile.totalCost / profile.referenceQuantity) * usageFactor
+    : null;
   const conversion = await createConversionSnapshotInTransaction(
     {
       businessId: child.businessId,
-      catalogItemId: profile.catalogItemId,
+      catalogItemId: version.outputCatalogItemId,
       quantity: parentLine.quantity,
       fromUnit: parentLine.unit,
-      toUnit: profile.referenceUnit,
-      factor: unitFactor(parentLine.unit, profile.referenceUnit),
+      toUnit: referenceUnit,
+      factor: usageFactor,
     },
     db,
   );
@@ -1675,8 +2433,8 @@ async function resolveNestedParentInTransaction(
         child_recipe_version_id = ?, child_draft_id = NULL,
         normalized_quantity = ?, normalized_unit = ?, conversion_id = ?,
         conversion_factor_snapshot = ?,
-        cost_override = ?, cost_state = 'known',
-        cost_source = 'recipe_version', cost_profile_id = ?,
+        cost_override = ?, cost_state = ?,
+        cost_source = ?, cost_profile_id = ?,
         updated_at = ?, sync_status = 'local'
       WHERE id = ? AND recipe_draft_id = ?
         AND source_kind = 'child_draft' AND child_draft_id = ?
@@ -1689,7 +2447,9 @@ async function resolveNestedParentInTransaction(
       conversion.conversionId,
       conversion.conversionFactorSnapshot,
       costPerParentUnit,
-      profile.id,
+      profile ? "known" : "unknown",
+      profile ? "recipe_version" : "unknown",
+      profile?.id ?? null,
       timestamp(),
       child.parentLineId,
       child.parentDraftId,
@@ -2244,11 +3004,6 @@ export async function publishRecipeFirstDraft(
       ],
     );
     if (draft.parentDraftId) {
-      if (!profile) {
-        throw new Error(
-          "Nested prepared Recipe requires a recipe-derived cost profile.",
-        );
-      }
       await resolveNestedParentInTransaction(
         draft,
         publication.version,
@@ -2279,7 +3034,7 @@ export async function completePreparedItemRecipe(
   const result = await publishRecipeFirstDraft(
     {
       ...input,
-      requireCompleteCost: true,
+      requireCompleteCost: false,
       requirePreparedProduction: true,
       requirePreparedClassification: true,
     },
@@ -2377,28 +3132,31 @@ async function insertVersionLinesIntoDraft(
           id, business_id, recipe_draft_id, sort_order, source_kind,
           catalog_item_id, child_recipe_version_id, child_draft_id,
           custom_name, quantity, unit, normalized_quantity, normalized_unit,
-          conversion_id, conversion_factor_snapshot, role, is_optional,
-          cost_override, cost_state, allocation_mode,
+          conversion_id, conversion_factor_snapshot, conversion_chain_json,
+          unit_standard_snapshot, role, is_optional, cost_override,
+          cost_state, allocation_mode,
           legacy_ingredient_lot_id, notes, created_at, updated_at, sync_status,
           deleted_at, cost_source, cost_profile_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, 'local', NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, 'local', NULL, ?, ?)
       `,
       [
-        makeRecipeDraftLineId(),
+        line.id,
         businessId,
         draftId,
         sortOrder,
         sourceKind,
         catalogItemId,
         childRecipeVersionId,
-        line.customName,
+        line.customName ?? line.sourceLabelSnapshot,
         line.quantity,
         line.unit,
         normalizedQuantity,
         normalizedUnit,
         conversionId,
         conversionFactorSnapshot,
+        line.conversionChainJson,
+        line.unitStandardSnapshot,
         line.role,
         line.isOptional ? 1 : 0,
         costOverride,
@@ -2599,108 +3357,18 @@ export async function archiveRecipeFirstItem(
   if (!input.ownerAuthorized) {
     throw new Error("Owner authorization is required to archive an item.");
   }
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    const item = await txn.getFirstAsync<{
-      business_id: string;
-      lifecycle_status: string;
-    }>(
-      `
-        SELECT business_id, lifecycle_status
-        FROM catalog_items
-        WHERE id = ? AND deleted_at IS NULL
-      `,
-      [input.catalogItemId],
-    );
-    if (item?.business_id !== input.businessId) {
-      throw new Error("Recipe-first item is unavailable.");
-    }
-    if (item.lifecycle_status === "archived") return;
-    const archivedAt = timestamp();
-    const archived = await txn.runAsync(
-      `
-        UPDATE catalog_items
-        SET lifecycle_status = 'archived', readiness_state = 'blocked',
-          sellable = 0, kiosk_enabled = 0, archived_at = ?,
-          updated_at = ?, sync_status = 'local'
-        WHERE id = ? AND business_id = ? AND deleted_at IS NULL
-      `,
-      [
-        archivedAt,
-        archivedAt,
-        input.catalogItemId,
-        input.businessId,
-      ],
-    );
-    if (archived.changes !== 1) {
-      throw new Error("Recipe-first item changed before archive.");
-    }
-    await txn.runAsync(
-      `
-        UPDATE products
-        SET active = 0, updated_at = ?, sync_status = 'local'
-        WHERE id IN (
-          SELECT legacy_entity_id
-          FROM legacy_item_bindings
-          WHERE catalog_item_id = ? AND entity_kind = 'product'
-            AND deleted_at IS NULL
-        ) AND deleted_at IS NULL
-      `,
-      [archivedAt, input.catalogItemId],
-    );
-    await txn.runAsync(
-      `
-        UPDATE legacy_item_bindings
-        SET binding_status = 'archived', legacy_active_snapshot = 0,
-          updated_at = ?, sync_status = 'local'
-        WHERE catalog_item_id = ? AND deleted_at IS NULL
-      `,
-      [archivedAt, input.catalogItemId],
-    );
-    await txn.runAsync(
-      `
-        UPDATE recipes
-        SET is_active = 0, updated_at = ?, sync_status = 'local'
-        WHERE output_product_id IN (
-          SELECT legacy_entity_id
-          FROM legacy_item_bindings
-          WHERE catalog_item_id = ? AND entity_kind = 'product'
-            AND deleted_at IS NULL
-        ) AND deleted_at IS NULL
-      `,
-      [archivedAt, input.catalogItemId],
-    );
-    await txn.runAsync(
-      `
-        UPDATE catalog_item_recipe_roles
-        SET status = 'archived', archived_at = ?, updated_at = ?,
-          sync_status = 'local'
-        WHERE output_catalog_item_id = ? AND status = 'active'
-          AND deleted_at IS NULL
-      `,
-      [archivedAt, archivedAt, input.catalogItemId],
-    );
-    await txn.runAsync(
-      `
-        UPDATE recipe_drafts
-        SET lifecycle_status = 'abandoned',
-          autosave_revision = autosave_revision + 1,
-          last_saved_at = ?, updated_at = ?, sync_status = 'local'
-        WHERE output_catalog_item_id = ?
-          AND lifecycle_status IN ('editing', 'ready')
-          AND deleted_at IS NULL
-      `,
-      [archivedAt, archivedAt, input.catalogItemId],
-    );
-    await txn.runAsync(
-      `
-        UPDATE catalog_cost_profiles
-        SET status = 'archived', updated_at = ?, sync_status = 'local'
-        WHERE catalog_item_id = ? AND status = 'active'
-          AND deleted_at IS NULL
-      `,
-      [archivedAt, input.catalogItemId],
-    );
-  });
+  const item = await db.getFirstAsync<{ business_id: string }>(
+    `
+      SELECT business_id
+      FROM catalog_items
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [input.catalogItemId],
+  );
+  if (item?.business_id !== input.businessId) {
+    throw new Error("Recipe-first item is unavailable.");
+  }
+  await archiveCatalogItem(input.catalogItemId, input.ownerAuthorized, db);
   const output = await loadOutputRow(input.catalogItemId, db);
   if (!output || output.lifecycle_status !== "archived") {
     throw new Error("Archived Recipe-first item is unavailable.");
@@ -2714,15 +3382,14 @@ export type DeleteRecipeFirstItemInput = {
   ownerAuthorized: boolean;
 };
 
-export async function deleteRecipeFirstItem(
+async function deleteRecipeFirstItemInTransaction(
   input: DeleteRecipeFirstItemInput,
-  db: RepositoryDatabase = openKitamoDatabase(),
+  txn: RepositoryDatabase,
+  options: { retainWhenProtected?: boolean } = {},
 ) {
-  await runMigrations(db);
   if (!input.ownerAuthorized) {
     throw new Error("Owner authorization is required to delete an item.");
   }
-  await db.withExclusiveTransactionAsync(async (txn) => {
     const item = await txn.getFirstAsync<{
       business_id: string;
       source_type: string;
@@ -2772,6 +3439,34 @@ export async function deleteRecipeFirstItem(
         WHERE catalog_item_id = ?
       `,
       [input.catalogItemId],
+    );
+    const ownedConversions = await txn.getAllAsync<{ id: string }>(
+      `
+        SELECT id
+        FROM item_unit_conversions
+        WHERE catalog_item_id = ? AND deleted_at IS NULL
+      `,
+      [input.catalogItemId],
+    );
+    const conversionReferences = await txn.getFirstAsync<{ count: number }>(
+      `
+        SELECT (
+          SELECT COUNT(*)
+          FROM recipe_draft_lines
+          WHERE conversion_id IN (
+            SELECT id FROM item_unit_conversions
+            WHERE catalog_item_id = ? AND deleted_at IS NULL
+          ) AND deleted_at IS NULL
+        ) + (
+          SELECT COUNT(*)
+          FROM recipe_version_lines
+          WHERE conversion_id IN (
+            SELECT id FROM item_unit_conversions
+            WHERE catalog_item_id = ? AND deleted_at IS NULL
+          ) AND deleted_at IS NULL
+        ) AS count
+      `,
+      [input.catalogItemId, input.catalogItemId],
     );
     const profileReferences = await txn.getFirstAsync<{ count: number }>(
       `
@@ -2859,8 +3554,10 @@ export async function deleteRecipeFirstItem(
       ownDrafts.count < 1 ||
       recipeVersionReferences !== ownDrafts.count ||
       protectedCount !== 0 ||
-      historicalDependencies !== ownDrafts.count ||
+      historicalDependencies !==
+        ownDrafts.count + ownedProfiles.length + ownedConversions.length ||
       profileReferences?.count !== 0 ||
+      conversionReferences?.count !== 0 ||
       ownedProfiles.some(
         (profile) =>
           profile.source_kind !== "owner_estimate" ||
@@ -2868,6 +3565,9 @@ export async function deleteRecipeFirstItem(
       ) ||
       nestedReferences?.count !== 0
     ) {
+      if (options.retainWhenProtected) {
+        return { deleted: false as const, catalogItemId: input.catalogItemId };
+      }
       throw new Error(
         "Recipe-first item has protected evidence and must be archived.",
       );
@@ -2891,6 +3591,9 @@ export async function deleteRecipeFirstItem(
       [input.catalogItemId],
     );
     if (projection?.active === 1) {
+      if (options.retainWhenProtected) {
+        return { deleted: false as const, catalogItemId: input.catalogItemId };
+      }
       throw new Error("Active Product projections must be archived.");
     }
     await txn.runAsync(
@@ -2941,6 +3644,20 @@ export async function deleteRecipeFirstItem(
         remainingProfiles.delete(profile.id);
       }
     }
+    for (const conversion of ownedConversions) {
+      const removedConversion = await txn.runAsync(
+        `
+          DELETE FROM item_unit_conversions
+          WHERE id = ? AND catalog_item_id = ? AND deleted_at IS NULL
+        `,
+        [conversion.id, input.catalogItemId],
+      );
+      if (removedConversion.changes !== 1) {
+        throw new Error(
+          "Owner-estimate conversion changed before draft deletion.",
+        );
+      }
+    }
     await txn.runAsync(
       "DELETE FROM legacy_item_bindings WHERE catalog_item_id = ?",
       [input.catalogItemId],
@@ -2962,6 +3679,21 @@ export async function deleteRecipeFirstItem(
     if (removed.changes !== 1) {
       throw new Error("Recipe-first item changed before permanent deletion.");
     }
-  });
   return { deleted: true as const, catalogItemId: input.catalogItemId };
+}
+
+export async function deleteRecipeFirstItem(
+  input: DeleteRecipeFirstItemInput,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  let result:
+    | { deleted: true; catalogItemId: string }
+    | { deleted: false; catalogItemId: string }
+    | null = null;
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    result = await deleteRecipeFirstItemInTransaction(input, txn);
+  });
+  if (!result) throw new Error("Recipe-first item deletion did not complete.");
+  return result;
 }

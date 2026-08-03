@@ -13,7 +13,9 @@ import {
 import {
   Alert,
   BackHandler,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -52,6 +54,12 @@ import {
   makeUnitConversionId,
 } from "@/domain/ids";
 import {
+  buildRecipeConversionChain,
+  normalizePracticalRecipeUnit,
+  recipeUnitStandard,
+  type RecipeConversionStep,
+} from "@/domain/recipeConversionChains";
+import {
   calculatePreparedBatchCost,
   calculateSimpleIngredientCost,
   convertRecipeQuantity,
@@ -71,12 +79,16 @@ import {
   completePreparedItemRecipe,
   createRecipeFirstUnitConversion,
   loadRecipeFirstDraft,
+  loadRecipeIngredientPicker,
   loadRecipeLibrary,
   publishRecipeFirstDraft,
+  reconcileRemovedRecipeLineSource,
   saveRecipeFirstDraftSnapshot,
   startRecipeFirstDraft,
   type RecipeFirstDraftSnapshot,
   type RecipeFirstLibraryEntry,
+  type RecipeFirstResolvedLine,
+  type RecipeIngredientPickerEntry,
   type RecipeFirstMode,
 } from "@/services/recipeFirst";
 import { spacing } from "@/theme/spacing";
@@ -102,6 +114,37 @@ type GroceryLot = GrocerySnapshot["lots"][number];
 
 const editorStepNames = ["definition", "inputs", "review"] as const;
 const PURCHASE_UNITS = ["g", "kg", "ml", "l", "pcs", "pack"] as const;
+const RECIPE_LINE_ROLES: readonly DraftLine["role"][] = [
+  "main",
+  "supporting",
+  "seasoning",
+  "garnish",
+  "packaging",
+  "optional",
+];
+const LINE_REQUIREMENTS = ["Required", "Optional"] as const;
+type LineRequirement = (typeof LINE_REQUIREMENTS)[number];
+const COST_MEASUREMENTS = [
+  "Price per amount",
+  "Package breakdown",
+  "Prepared batch recipe",
+  "Custom conversion",
+] as const;
+type CostMeasurement = (typeof COST_MEASUREMENTS)[number];
+type OriginalConversionEvidence = {
+  lineId: string;
+  inputSignature: string;
+  factor: number | null;
+  conversionChainJson: string | null;
+  unitStandardSnapshot: string | null;
+};
+const PICKER_GROUPS = [
+  ["purchased", "Purchased Ingredients"],
+  ["prepared", "Prepared Recipes"],
+  ["estimated", "Estimated Prepared Items"],
+  ["drafts", "Prepared Drafts"],
+  ["legacy", "Legacy Recipe Inputs"],
+] as const;
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -124,8 +167,17 @@ function packageConversionFactor(
   usageUnit: string,
   piecesPerPack: number | null,
   portionsPerPiece: number | null,
+  customCupMilliliters: number | null = null,
 ) {
   if (purchaseUnit === usageUnit) return null;
+  if (usageUnit === "custom_cup" && customCupMilliliters) {
+    const converted = convertRecipeQuantity(
+      customCupMilliliters,
+      "ml",
+      purchaseUnit,
+    );
+    return converted.ok ? converted.quantity : null;
+  }
   if (purchaseUnit === "pack" && usageUnit === "pcs" && piecesPerPack) {
     return 1 / piecesPerPack;
   }
@@ -145,6 +197,445 @@ function packageConversionFactor(
     return 1 / portionsPerPiece;
   }
   return null;
+}
+
+function calculateIngredientCostWithExplicitConversion(
+  input: Parameters<typeof calculateSimpleIngredientCost>[0],
+  usageToPurchaseFactor: number | null,
+): ReturnType<typeof calculateSimpleIngredientCost> {
+  const standard = calculateSimpleIngredientCost(input);
+  if (!usageToPurchaseFactor) return standard;
+  if (
+    !Number.isFinite(input.purchasedQuantity) ||
+    input.purchasedQuantity <= 0 ||
+    !Number.isFinite(input.usageQuantity) ||
+    input.usageQuantity < 0
+  ) {
+    return standard;
+  }
+  const availableUsageQuantity =
+    input.purchasedQuantity / usageToPurchaseFactor;
+  if (input.costSource === "unknown") {
+    return {
+      source: input.costSource,
+      state: "no_price",
+      amount: null,
+      costPerUsageUnit: null,
+      availableUsageQuantity,
+      usageQuantity: input.usageQuantity,
+      usageUnit: normalizePracticalRecipeUnit(input.usageUnit),
+      issue: null,
+    };
+  }
+  if (input.purchaseCost === null || input.purchaseCost < 0) return standard;
+  const costPerUsageUnit =
+    (input.purchaseCost / input.purchasedQuantity) * usageToPurchaseFactor;
+  return {
+    source: input.costSource,
+    state: costStateForSource(input.costSource),
+    amount: costPerUsageUnit * input.usageQuantity,
+    costPerUsageUnit,
+    availableUsageQuantity,
+    usageQuantity: input.usageQuantity,
+    usageUnit: normalizePracticalRecipeUnit(input.usageUnit),
+    issue: null,
+  };
+}
+
+function immutableConversionSnapshot(
+  fromUnit: string,
+  toUnit: string,
+  factor: number | null,
+  meaning: string,
+  standard?: "metric" | "us_customary" | "imperial" | "business_custom" | "item_specific" | "package_breakdown",
+) {
+  if (!factor || fromUnit.trim() === toUnit.trim()) {
+    return { conversionChainJson: null, unitStandardSnapshot: null };
+  }
+  const normalized = normalizePracticalRecipeUnit(fromUnit);
+  const chain = buildRecipeConversionChain([
+    {
+      fromQuantity: 1,
+      fromUnit,
+      toQuantity: factor,
+      toUnit,
+      standard:
+        standard ??
+        (normalized ? recipeUnitStandard(normalized) : "item_specific"),
+      meaning,
+    },
+  ]);
+  if (!chain.ok) {
+    throw new Error("The conversion details are inconsistent.");
+  }
+  return {
+    conversionChainJson: JSON.stringify(chain.snapshot),
+    unitStandardSnapshot: chain.snapshot.unitStandardSummary,
+  };
+}
+
+function packageChainSnapshot(
+  purchaseUnit: string,
+  usageUnit: string,
+  piecesPerPack: number | null,
+  portionsPerPiece: number | null,
+) {
+  if (purchaseUnit === usageUnit) {
+    return { conversionChainJson: null, unitStandardSnapshot: null };
+  }
+  const steps = [];
+  if (usageUnit === "portion" && portionsPerPiece) {
+    steps.push({
+      fromQuantity: portionsPerPiece,
+      fromUnit: "portion",
+      toQuantity: 1,
+      toUnit: "pcs",
+      standard: "package_breakdown" as const,
+      meaning: "Portions produced by each piece",
+    });
+  }
+  if (
+    purchaseUnit === "pack" &&
+    piecesPerPack &&
+    (usageUnit === "pcs" || usageUnit === "portion")
+  ) {
+    steps.push({
+      fromQuantity: piecesPerPack,
+      fromUnit: "pcs",
+      toQuantity: 1,
+      toUnit: "pack",
+      standard: "package_breakdown" as const,
+      meaning: "Pieces contained in each pack",
+    });
+  }
+  if (steps.length === 0) {
+    return { conversionChainJson: null, unitStandardSnapshot: null };
+  }
+  const chain = buildRecipeConversionChain(steps);
+  if (!chain.ok) throw new Error("Package conversion steps are inconsistent.");
+  return {
+    conversionChainJson: JSON.stringify(chain.snapshot),
+    unitStandardSnapshot: chain.snapshot.unitStandardSummary,
+  };
+}
+
+function customCupChainSnapshot(
+  outputUnit: string,
+  customCupMilliliters: number,
+) {
+  const steps: RecipeConversionStep[] = [
+    {
+      fromQuantity: 1,
+      fromUnit: "custom_cup",
+      toQuantity: customCupMilliliters,
+      toUnit: "ml",
+      standard: "business_custom" as const,
+      meaning: "Owner-defined cup volume",
+    },
+  ];
+  if (outputUnit.toLocaleLowerCase() === "l") {
+    steps.push({
+      fromQuantity: 1_000,
+      fromUnit: "ml",
+      toQuantity: 1,
+      toUnit: "l",
+      standard: "metric" as const,
+      meaning: "Milliliters per liter",
+    });
+  }
+  const chain = buildRecipeConversionChain(steps);
+  if (!chain.ok) throw new Error("Custom cup conversion is inconsistent.");
+  return {
+    conversionChainJson: JSON.stringify(chain.snapshot),
+    unitStandardSnapshot: chain.snapshot.unitStandardSummary,
+  };
+}
+
+function customConversionSnapshot(input: {
+  fromQuantity: number | null;
+  fromUnit: RecipeFirstUnit;
+  toQuantity: number | null;
+  toUnit: RecipeFirstUnit;
+  meaning: string;
+  expectedUsageUnit: string;
+  expectedEvidenceUnit: string;
+}) {
+  if (
+    input.fromQuantity === null ||
+    input.toQuantity === null ||
+    !input.meaning.trim()
+  ) {
+    return {
+      ok: false as const,
+      message: "Enter both conversion amounts and explain what the conversion means.",
+    };
+  }
+  if (
+    input.fromUnit.toLocaleLowerCase() !==
+      input.expectedUsageUnit.trim().toLocaleLowerCase() ||
+    input.toUnit.toLocaleLowerCase() !==
+      input.expectedEvidenceUnit.trim().toLocaleLowerCase()
+  ) {
+    return {
+      ok: false as const,
+      message:
+        "The custom conversion must start with the Recipe usage unit and end with the recorded cost unit.",
+    };
+  }
+  if (input.fromUnit === input.toUnit) {
+    return {
+      ok: false as const,
+      message: "A custom conversion must use two different units.",
+    };
+  }
+  const chain = buildRecipeConversionChain([
+    {
+      fromQuantity: input.fromQuantity,
+      fromUnit: input.expectedUsageUnit,
+      toQuantity: input.toQuantity,
+      toUnit: input.expectedEvidenceUnit,
+      standard: "item_specific",
+      meaning: input.meaning,
+    },
+  ]);
+  if (!chain.ok) {
+    return {
+      ok: false as const,
+      message: `The custom conversion is invalid (${chain.reason.replaceAll("_", " ")}).`,
+    };
+  }
+  return {
+    ok: true as const,
+    factor: chain.snapshot.outputQuantityPerInputUnit,
+    conversionChainJson: JSON.stringify(chain.snapshot),
+    unitStandardSnapshot: chain.snapshot.unitStandardSummary,
+  };
+}
+
+function parseSavedConversionEvidence(line: DraftLine) {
+  if (!line.conversionChainJson) return null;
+  try {
+    const parsed = JSON.parse(line.conversionChainJson) as {
+      steps?: RecipeConversionStep[];
+    };
+    if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return null;
+    const validated = buildRecipeConversionChain(parsed.steps);
+    if (!validated.ok) return null;
+    return validated.snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function resolveMeasuredConversion(input: {
+  measurement: CostMeasurement;
+  usageUnit: RecipeFirstUnit;
+  evidenceUnit: string;
+  piecesPerPack: number | null;
+  portionsPerPiece: number | null;
+  customFromQuantity: number | null;
+  customFromUnit: RecipeFirstUnit;
+  customToQuantity: number | null;
+  customToUnit: RecipeFirstUnit;
+  customMeaning: string;
+}) {
+  if (input.measurement === "Prepared batch recipe") {
+    return {
+      ok: false as const,
+      message:
+        "Create or choose a prepared Recipe instead of flattening this transformation into a cost conversion.",
+    };
+  }
+  if (input.measurement === "Custom conversion") {
+    const custom = customConversionSnapshot({
+      fromQuantity: input.customFromQuantity,
+      fromUnit: input.customFromUnit,
+      toQuantity: input.customToQuantity,
+      toUnit: input.customToUnit,
+      meaning: input.customMeaning,
+      expectedUsageUnit: input.usageUnit,
+      expectedEvidenceUnit: input.evidenceUnit,
+    });
+    return custom.ok
+      ? {
+          ok: true as const,
+          factor: custom.factor,
+          conversionChainJson: custom.conversionChainJson,
+          unitStandardSnapshot: custom.unitStandardSnapshot,
+        }
+      : custom;
+  }
+  if (input.measurement === "Package breakdown") {
+    const factor = packageConversionFactor(
+      input.evidenceUnit,
+      input.usageUnit,
+      input.piecesPerPack,
+      input.portionsPerPiece,
+    );
+    if (factor === null) {
+      return {
+        ok: false as const,
+        message:
+          "Enter a complete package breakdown that connects the usage unit to the recorded package unit.",
+      };
+    }
+    return {
+      ok: true as const,
+      factor,
+      ...packageChainSnapshot(
+        input.evidenceUnit,
+        input.usageUnit,
+        input.piecesPerPack,
+        input.portionsPerPiece,
+      ),
+    };
+  }
+  const standard = convertRecipeQuantity(
+    1,
+    input.usageUnit,
+    input.evidenceUnit,
+  );
+  if (!standard.ok) {
+    return {
+      ok: false as const,
+      message:
+        "These units do not have a standard conversion. Choose Package breakdown, Prepared batch recipe, or Custom conversion.",
+    };
+  }
+  return {
+    ok: true as const,
+    factor:
+      input.usageUnit.toLocaleLowerCase() ===
+      input.evidenceUnit.trim().toLocaleLowerCase()
+        ? null
+        : standard.quantity,
+    ...immutableConversionSnapshot(
+      input.usageUnit,
+      input.evidenceUnit,
+      standard.quantity,
+      "Standard unit conversion used by this Recipe",
+    ),
+  };
+}
+
+function measuredConversionInputSignature(input: {
+  measurement: CostMeasurement;
+  usageUnit: string;
+  evidenceUnit: string;
+  piecesPerPack: string;
+  portionsPerPiece: string;
+  customFromQuantity: string;
+  customFromUnit: RecipeFirstUnit;
+  customToQuantity: string;
+  customToUnit: RecipeFirstUnit;
+  customMeaning: string;
+}) {
+  return JSON.stringify({
+    measurement: input.measurement,
+    usageUnit: input.usageUnit.trim().toLocaleLowerCase(),
+    evidenceUnit: input.evidenceUnit.trim().toLocaleLowerCase(),
+    piecesPerPack: input.piecesPerPack.trim(),
+    portionsPerPiece: input.portionsPerPiece.trim(),
+    customFromQuantity: input.customFromQuantity.trim(),
+    customFromUnit: input.customFromUnit,
+    customToQuantity: input.customToQuantity.trim(),
+    customToUnit: input.customToUnit,
+    customMeaning: input.customMeaning.trim(),
+  });
+}
+
+function editableMeasuredConversion(
+  line: DraftLine,
+  usageUnit: RecipeFirstUnit,
+  evidenceUnit: string,
+) {
+  const saved = parseSavedConversionEvidence(line);
+  let measurement: CostMeasurement = "Price per amount";
+  let piecesPerPack = "";
+  let portionsPerPiece = "";
+  let customFromQuantity = "";
+  let customFromUnit: RecipeFirstUnit = usageUnit;
+  let customToQuantity = "";
+  let customToUnit =
+    (normalizePracticalRecipeUnit(evidenceUnit) as RecipeFirstUnit | null) ??
+    usageUnit;
+  let customMeaning = "";
+  let customCupMilliliters = "";
+
+  if (saved?.steps.some((step) => step.standard === "package_breakdown")) {
+    measurement = "Package breakdown";
+    const pieces = saved.steps.find(
+      (step) =>
+        normalizePracticalRecipeUnit(step.fromUnit) === "pcs" &&
+        normalizePracticalRecipeUnit(step.toUnit) === "pack",
+    );
+    const portions = saved.steps.find(
+      (step) =>
+        normalizePracticalRecipeUnit(step.fromUnit) === "portion" &&
+        normalizePracticalRecipeUnit(step.toUnit) === "pcs",
+    );
+    piecesPerPack = pieces
+      ? String(pieces.fromQuantity / pieces.toQuantity)
+      : "";
+    portionsPerPiece = portions
+      ? String(portions.fromQuantity / portions.toQuantity)
+      : "";
+  } else if (
+    saved &&
+    saved.steps.some((step) =>
+      ["item_specific", "business_custom"].includes(step.standard),
+    )
+  ) {
+    measurement = "Custom conversion";
+    customFromQuantity = "1";
+    customFromUnit =
+      (normalizePracticalRecipeUnit(saved.inputUnit) as RecipeFirstUnit | null) ??
+      usageUnit;
+    customToQuantity = String(saved.outputQuantityPerInputUnit);
+    customToUnit =
+      (normalizePracticalRecipeUnit(saved.outputUnit) as RecipeFirstUnit | null) ??
+      customToUnit;
+    customMeaning = saved.steps.map((step) => step.meaning).join(" → ");
+    const cup = saved.steps.find(
+      (step) =>
+        normalizePracticalRecipeUnit(step.fromUnit) === "custom_cup" &&
+        normalizePracticalRecipeUnit(step.toUnit) === "ml",
+    );
+    customCupMilliliters = cup
+      ? String(cup.toQuantity / cup.fromQuantity)
+      : "";
+  }
+
+  const inputSignature = measuredConversionInputSignature({
+    measurement,
+    usageUnit,
+    evidenceUnit,
+    piecesPerPack,
+    portionsPerPiece,
+    customFromQuantity,
+    customFromUnit,
+    customToQuantity,
+    customToUnit,
+    customMeaning,
+  });
+  return {
+    measurement,
+    piecesPerPack,
+    portionsPerPiece,
+    customFromQuantity,
+    customFromUnit,
+    customToQuantity,
+    customToUnit,
+    customMeaning,
+    customCupMilliliters,
+    original: {
+      lineId: line.id,
+      inputSignature,
+      factor: saved?.outputQuantityPerInputUnit ?? line.conversionFactorSnapshot,
+      conversionChainJson: line.conversionChainJson,
+      unitStandardSnapshot: line.unitStandardSnapshot,
+    } satisfies OriginalConversionEvidence,
+  };
 }
 
 function modeFromSnapshot(
@@ -173,6 +664,8 @@ function saveableLine(line: DraftLine) {
     normalizedUnit: line.normalizedUnit,
     conversionId: line.conversionId,
     conversionFactorSnapshot: line.conversionFactorSnapshot,
+    conversionChainJson: line.conversionChainJson,
+    unitStandardSnapshot: line.unitStandardSnapshot,
     role: line.role,
     isOptional: line.isOptional,
     costOverride: line.costOverride,
@@ -183,17 +676,6 @@ function saveableLine(line: DraftLine) {
     legacyIngredientLotId: line.legacyIngredientLotId,
     notes: line.notes,
   };
-}
-
-function draftLineLabel(line: DraftLine) {
-  return (
-    line.customName ??
-    (line.sourceKind === "child_draft"
-      ? "Prepared recipe draft"
-      : line.sourceKind === "unresolved"
-        ? "Prepared ingredient to complete"
-        : "Recorded ingredient")
-  );
 }
 
 function lineAmount(line: DraftLine) {
@@ -218,6 +700,32 @@ function activeCostProfile(snapshot: RecipeFirstDraftSnapshot | null) {
   );
 }
 
+function resolvedLineFor(
+  snapshot: RecipeFirstDraftSnapshot | null,
+  lineId: string,
+) {
+  return snapshot?.resolvedLines.find((line) => line.lineId === lineId) ?? null;
+}
+
+function replaceOrAppendLine(
+  lines: DraftLine[],
+  nextLine: DraftLine,
+  editingLineId: string | null,
+) {
+  if (!editingLineId) return [...lines, nextLine];
+  const existing = lines.find((line) => line.id === editingLineId);
+  if (!existing) throw new Error("The ingredient being edited has changed.");
+  return lines.map((line) =>
+    line.id === editingLineId
+      ? {
+          ...nextLine,
+          id: existing.id,
+          sortOrder: existing.sortOrder,
+        }
+      : line,
+  );
+}
+
 export default function OwnerRecipeEditorScreen() {
   const params = useLocalSearchParams<{
     draftId?: string | string[];
@@ -235,6 +743,8 @@ export default function OwnerRecipeEditorScreen() {
     useState<RecipeFirstDraftSnapshot | null>(null);
   const snapshotRef = useRef<RecipeFirstDraftSnapshot | null>(null);
   const [library, setLibrary] = useState<RecipeFirstLibraryEntry[]>([]);
+  const [ingredientPicker, setIngredientPicker] =
+    useState<RecipeIngredientPickerEntry[]>([]);
   const [grocery, setGrocery] = useState<GrocerySnapshot | null>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | null>(null);
@@ -263,13 +773,29 @@ export default function OwnerRecipeEditorScreen() {
 
   const [ingredientSheet, setIngredientSheet] =
     useState<IngredientSheet>(null);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [replacingLineSource, setReplacingLineSource] = useState(false);
   const [ingredientSearch, setIngredientSearch] = useState("");
   const [selectedLotId, setSelectedLotId] = useState<string | null>(null);
   const [usageQuantity, setUsageQuantity] = useState("");
   const [usageUnit, setUsageUnit] = useState<RecipeFirstUnit>("g");
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [lineRole, setLineRole] = useState<DraftLine["role"]>("main");
+  const [lineRequirement, setLineRequirement] =
+    useState<LineRequirement>("Required");
+  const [costMeasurement, setCostMeasurement] =
+    useState<CostMeasurement>("Price per amount");
   const [piecesPerPack, setPiecesPerPack] = useState("");
   const [portionsPerPiece, setPortionsPerPiece] = useState("");
+  const [customCupMilliliters, setCustomCupMilliliters] = useState("");
+  const [customFromQuantity, setCustomFromQuantity] = useState("");
+  const [customFromUnit, setCustomFromUnit] =
+    useState<RecipeFirstUnit>("portion");
+  const [customToQuantity, setCustomToQuantity] = useState("");
+  const [customToUnit, setCustomToUnit] =
+    useState<RecipeFirstUnit>("pack");
+  const [customMeaning, setCustomMeaning] = useState("");
+  const [originalConversionEvidence, setOriginalConversionEvidence] =
+    useState<OriginalConversionEvidence | null>(null);
 
   const [estimateName, setEstimateName] = useState("");
   const [estimateCost, setEstimateCost] = useState("");
@@ -280,6 +806,7 @@ export default function OwnerRecipeEditorScreen() {
   const [estimateUsageQuantity, setEstimateUsageQuantity] = useState("");
   const [estimateUsageUnit, setEstimateUsageUnit] =
     useState<RecipeFirstUnit>("g");
+  const [estimateNotes, setEstimateNotes] = useState("");
 
   const [nestedName, setNestedName] = useState("");
   const [nestedUsageQuantity, setNestedUsageQuantity] = useState("");
@@ -338,6 +865,14 @@ export default function OwnerRecipeEditorScreen() {
     ]);
     setGrocery(nextGrocery);
     setLibrary(nextLibrary);
+    setIngredientPicker(
+      activeBusiness
+        ? await loadRecipeIngredientPicker(
+            activeBusiness.id,
+            nextDraft?.output.catalogItemId,
+          )
+        : [],
+    );
     if (requestedDraftId && !nextDraft) {
       throw new Error("This Recipe draft is no longer available.");
     }
@@ -517,6 +1052,35 @@ export default function OwnerRecipeEditorScreen() {
     [],
   );
 
+  const reconcileReplacement = useCallback(
+    async (
+      before: RecipeFirstDraftSnapshot,
+      after: RecipeFirstDraftSnapshot,
+      lineId: string | null,
+    ) => {
+      if (!lineId) return true;
+      const prior = before.lines.find((line) => line.id === lineId);
+      const current = after.lines.find((line) => line.id === lineId);
+      if (!prior) return true;
+      const sourceChanged =
+        !current ||
+        current.sourceKind !== prior.sourceKind ||
+        current.catalogItemId !== prior.catalogItemId ||
+        current.childDraftId !== prior.childDraftId ||
+        current.costSource !== prior.costSource;
+      if (!sourceChanged) return true;
+      const reconciled = await runSave(() =>
+        reconcileRemovedRecipeLineSource({
+          businessId: before.draft.businessId,
+          parentDraftId: before.draft.id,
+          line: prior,
+        }),
+      );
+      return Boolean(reconciled);
+    },
+    [runSave],
+  );
+
   const saveAndMove = useCallback(
     async (targetStep: EditorStep) => {
       const saved = await runSave(() => ensureDraft(targetStep));
@@ -585,7 +1149,7 @@ export default function OwnerRecipeEditorScreen() {
 
   const visibleLots = useMemo(() => {
     const query = ingredientSearch.trim().toLocaleLowerCase();
-    return (grocery?.lots ?? [])
+    const matches = (grocery?.lots ?? [])
       .filter((lot) => lot.status !== "archived")
       .filter((lot) =>
         query
@@ -594,53 +1158,102 @@ export default function OwnerRecipeEditorScreen() {
               .toLocaleLowerCase()
               .includes(query)
           : true,
-      )
-      .slice(0, 12);
-  }, [grocery?.lots, ingredientSearch]);
+      );
+    const visible = matches.slice(0, 12);
+    const selected = selectedLotId
+      ? matches.find((lot) => lot.id === selectedLotId)
+      : null;
+    return selected && !visible.some((lot) => lot.id === selected.id)
+      ? [selected, ...visible.slice(0, 11)]
+      : visible;
+  }, [grocery?.lots, ingredientSearch, selectedLotId]);
 
   const selectedLot =
     grocery?.lots.find((lot) => lot.id === selectedLotId) ?? null;
 
-  const preparedEntries = useMemo(
-    () =>
-      library.filter(
-        (entry) =>
-          entry.classification === "prepared_base" &&
-          entry.lifecycle !== "archived" &&
-          Boolean(entry.activeVersionId) &&
-          entry.activeCostSource === "recipe_version" &&
-          Boolean(entry.activeCostProfileId) &&
-          entry.activeCostTotal !== null &&
-          entry.activeCostReferenceQuantity !== null &&
-          entry.activeCostReferenceQuantity > 0 &&
-          Boolean(entry.activeCostReferenceUnit),
-      ),
-    [library],
-  );
+  const preparedEntries = useMemo(() => {
+    const query = ingredientSearch.trim().toLocaleLowerCase();
+    return ingredientPicker.filter((entry) =>
+      query
+        ? [entry.name, entry.classification, entry.pickerGroup]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(query)
+        : true,
+    );
+  }, [ingredientPicker, ingredientSearch]);
   const selectedPrepared =
-    preparedEntries.find(
+    ingredientPicker.find(
       (entry) => entry.catalogItemId === selectedPreparedId,
     ) ?? null;
+  const pinnedPrepared = useMemo(() => {
+    if (!editingLineId || selectedPreparedId || replacingLineSource) return null;
+    const line = snapshot?.lines.find(
+      (candidate) => candidate.id === editingLineId,
+    );
+    const resolved = resolvedLineFor(snapshot, editingLineId);
+    return line?.sourceKind === "child_recipe_version" &&
+      line.childRecipeVersionId &&
+      resolved
+      ? { line, resolved }
+      : null;
+  }, [editingLineId, replacingLineSource, selectedPreparedId, snapshot]);
+  const editingNestedDraftId = useMemo(() => {
+    if (!editingLineId || replacingLineSource) return null;
+    const line = snapshot?.lines.find(
+      (candidate) => candidate.id === editingLineId,
+    );
+    return line?.sourceKind === "child_draft" ? line.childDraftId : null;
+  }, [editingLineId, replacingLineSource, snapshot?.lines]);
   const preparedPreview = useMemo(() => {
     const quantity = parsePositive(preparedUsageQuantity);
     if (
-      !selectedPrepared ||
+      (!selectedPrepared && !pinnedPrepared) ||
       quantity === null ||
-      selectedPrepared.activeCostTotal === null ||
-      selectedPrepared.activeCostReferenceQuantity === null ||
-      !selectedPrepared.activeCostReferenceUnit
+      (selectedPrepared
+        ? selectedPrepared.activeCostTotal === null ||
+          selectedPrepared.activeCostReferenceQuantity === null ||
+          !selectedPrepared.activeCostReferenceUnit
+        : pinnedPrepared?.resolved.profileTotalCost === null ||
+          pinnedPrepared?.resolved.profileReferenceQuantity === null ||
+          !pinnedPrepared?.resolved.profileReferenceUnit)
     ) {
       return null;
     }
-    return calculateSimpleIngredientCost({
+    const customCupVolume = parsePositive(customCupMilliliters);
+    const customConversion =
+      preparedUsageUnit === "custom_cup" && customCupVolume
+        ? convertRecipeQuantity(
+            customCupVolume,
+            "ml",
+            selectedPrepared?.activeCostReferenceUnit ??
+              (pinnedPrepared?.resolved.profileReferenceUnit as string),
+          )
+        : null;
+    const explicitFactor = customConversion?.ok
+      ? customConversion.quantity
+      : null;
+    return calculateIngredientCostWithExplicitConversion({
       costSource: "prepared_recipe",
-      purchaseCost: selectedPrepared.activeCostTotal,
-      purchasedQuantity: selectedPrepared.activeCostReferenceQuantity,
-      purchaseUnit: selectedPrepared.activeCostReferenceUnit,
+      purchaseCost:
+        selectedPrepared?.activeCostTotal ??
+        (pinnedPrepared?.resolved.profileTotalCost as number),
+      purchasedQuantity:
+        selectedPrepared?.activeCostReferenceQuantity ??
+        (pinnedPrepared?.resolved.profileReferenceQuantity as number),
+      purchaseUnit:
+        selectedPrepared?.activeCostReferenceUnit ??
+        (pinnedPrepared?.resolved.profileReferenceUnit as string),
       usageQuantity: quantity,
       usageUnit: preparedUsageUnit,
-    });
-  }, [preparedUsageQuantity, preparedUsageUnit, selectedPrepared]);
+    }, explicitFactor);
+  }, [
+    customCupMilliliters,
+    preparedUsageQuantity,
+    preparedUsageUnit,
+    pinnedPrepared,
+    selectedPrepared,
+  ]);
 
   const libraryCatalogIdForLot = useCallback(
     (lot: GroceryLot) =>
@@ -651,6 +1264,63 @@ export default function OwnerRecipeEditorScreen() {
             .ingredientId === lot.ingredientId,
       )?.catalogItemId ?? null,
     [library],
+  );
+
+  const resolveCurrentMeasuredConversion = useCallback(
+    (usage: RecipeFirstUnit, evidence: string) => {
+      const resolved = resolveMeasuredConversion({
+        measurement: costMeasurement,
+        usageUnit: usage,
+        evidenceUnit: evidence,
+        piecesPerPack: parsePositive(piecesPerPack),
+        portionsPerPiece: parsePositive(portionsPerPiece),
+        customFromQuantity: parsePositive(customFromQuantity),
+        customFromUnit,
+        customToQuantity: parsePositive(customToQuantity),
+        customToUnit,
+        customMeaning,
+      });
+      if (!resolved.ok) return resolved;
+      const signature = measuredConversionInputSignature({
+        measurement: costMeasurement,
+        usageUnit: usage,
+        evidenceUnit: evidence,
+        piecesPerPack,
+        portionsPerPiece,
+        customFromQuantity,
+        customFromUnit,
+        customToQuantity,
+        customToUnit,
+        customMeaning,
+      });
+      if (
+        editingLineId &&
+        originalConversionEvidence?.lineId === editingLineId &&
+        originalConversionEvidence.inputSignature === signature
+      ) {
+        return {
+          ...resolved,
+          factor: originalConversionEvidence.factor,
+          conversionChainJson:
+            originalConversionEvidence.conversionChainJson,
+          unitStandardSnapshot:
+            originalConversionEvidence.unitStandardSnapshot,
+        };
+      }
+      return resolved;
+    },
+    [
+      costMeasurement,
+      customFromQuantity,
+      customFromUnit,
+      customMeaning,
+      customToQuantity,
+      customToUnit,
+      editingLineId,
+      originalConversionEvidence,
+      piecesPerPack,
+      portionsPerPiece,
+    ],
   );
 
   const addGroceryIngredient = useCallback(async () => {
@@ -667,7 +1337,15 @@ export default function OwnerRecipeEditorScreen() {
       );
       return;
     }
-    const calculation = calculateSimpleIngredientCost({
+    const conversionEvidence = resolveCurrentMeasuredConversion(
+      usageUnit,
+      lot.unit,
+    );
+    if (!conversionEvidence.ok) {
+      setMessage(conversionEvidence.message);
+      return;
+    }
+    const calculation = calculateIngredientCostWithExplicitConversion({
       costSource:
         lot.costState === "known" ? "purchase_lot" : "unknown",
       purchaseCost:
@@ -680,21 +1358,16 @@ export default function OwnerRecipeEditorScreen() {
       portionsPerPiece: parsePositive(portionsPerPiece),
       usageQuantity: quantity,
       usageUnit,
-    });
+    }, conversionEvidence.factor);
     if (calculation.issue) {
       setMessage(
-        "These purchase and usage units cannot be safely converted. Check Advanced details or use the lot unit.",
+        "These purchase and usage units cannot be safely converted with the selected measurement.",
       );
       return;
     }
     const base = await runSave(() => ensureDraft(2));
     if (!base) return;
-    const conversionFactor = packageConversionFactor(
-      lot.unit,
-      usageUnit,
-      parsePositive(piecesPerPack),
-      parsePositive(portionsPerPiece),
-    );
+    const conversionFactor = conversionEvidence.factor;
     const conversionId = conversionFactor ? makeUnitConversionId() : null;
     const conversionSaved = conversionFactor
       ? await runSave(() =>
@@ -710,7 +1383,7 @@ export default function OwnerRecipeEditorScreen() {
       : null;
     if (conversionFactor && !conversionSaved) return;
     const line: DraftLine = {
-      id: makeRecipeDraftLineId(),
+      id: editingLineId ?? makeRecipeDraftLineId(),
       businessId: base.draft.businessId,
       recipeDraftId: base.draft.id,
       sortOrder: base.lines.length,
@@ -726,8 +1399,10 @@ export default function OwnerRecipeEditorScreen() {
       normalizedUnit: conversionFactor === null ? null : lot.unit,
       conversionId,
       conversionFactorSnapshot: conversionFactor,
-      role: "main",
-      isOptional: false,
+      conversionChainJson: conversionEvidence.conversionChainJson,
+      unitStandardSnapshot: conversionEvidence.unitStandardSnapshot,
+      role: lineRole,
+      isOptional: lineRequirement === "Optional",
       costOverride: calculation.costPerUsageUnit,
       costState: calculation.state === "no_price" ? "unknown" : "known",
       costSource: "purchase_lot",
@@ -735,25 +1410,34 @@ export default function OwnerRecipeEditorScreen() {
       allocationMode: "legacy_selected",
       legacyIngredientLotId: lot.id,
       notes:
-        showAdvanced && (piecesPerPack || portionsPerPiece)
+        costMeasurement === "Package breakdown"
           ? `Package details: ${piecesPerPack || "—"} pieces per pack; ${portionsPerPiece || "—"} portions per piece.`
-          : null,
+          : costMeasurement === "Custom conversion"
+            ? `Item-specific conversion: ${customMeaning.trim()}`
+            : null,
     };
     const saved = await runSave(() =>
-      persistExisting(base, [...base.lines, line], 2),
+      persistExisting(base, replaceOrAppendLine(base.lines, line, editingLineId), 2),
     );
     if (!saved) return;
+    if (!(await reconcileReplacement(base, saved, editingLineId))) return;
     closeIngredientSheet();
     setSnackbar(`${lot.ingredientName} added`);
   }, [
     ensureDraft,
+    costMeasurement,
+    customMeaning,
+    editingLineId,
     libraryCatalogIdForLot,
+    lineRole,
+    lineRequirement,
     persistExisting,
     piecesPerPack,
     portionsPerPiece,
+    reconcileReplacement,
+    resolveCurrentMeasuredConversion,
     runSave,
     selectedLot,
-    showAdvanced,
     usageQuantity,
     usageUnit,
   ]);
@@ -776,23 +1460,15 @@ export default function OwnerRecipeEditorScreen() {
     const base = await runSave(() => ensureDraft(2));
     if (!base) return;
 
-    let serviceReferenceQuantity = referenceQuantity;
-    let serviceReferenceUnit: string =
-      estimateReferenceUnit === "l" ? "L" : estimateReferenceUnit;
-    let serviceUsageUnit: string =
-      estimateUsageUnit === "l" ? "L" : estimateUsageUnit;
     const pieces = parsePositive(piecesPerPack);
     const portions = parsePositive(portionsPerPiece);
-    if (showAdvanced && estimateReferenceUnit === "pack" && pieces) {
-      serviceReferenceQuantity = referenceQuantity * pieces * (portions ?? 1);
-      serviceReferenceUnit = portions ? "portion" : "pcs";
-      serviceUsageUnit = serviceReferenceUnit;
-      if (estimateUsageUnit !== serviceUsageUnit) {
-        setMessage(
-          `For these package details, choose ${serviceUsageUnit} as the usage unit.`,
-        );
-        return;
-      }
+    const estimateConversion = resolveCurrentMeasuredConversion(
+      estimateUsageUnit,
+      estimateReferenceUnit,
+    );
+    if (!estimateConversion.ok) {
+      setMessage(estimateConversion.message);
+      return;
     }
 
     const result = await runSave(() =>
@@ -802,69 +1478,214 @@ export default function OwnerRecipeEditorScreen() {
         branchId: base.draft.branchId,
         parentDraftId: base.draft.id,
         parentExpectedRevision: base.draft.autosaveRevision,
+        parentLineId: editingLineId ?? undefined,
         name: estimateName.trim(),
         totalCost,
-        referenceQuantity: serviceReferenceQuantity,
-        referenceUnit: serviceReferenceUnit,
+        referenceQuantity,
+        referenceUnit: estimateReferenceUnit,
         usageQuantity: quantity,
-        usageUnit: serviceUsageUnit,
-        role: "supporting",
+        usageUnit: estimateUsageUnit,
+        usageUnitFactorToReference: estimateConversion.factor,
+        role: lineRole,
+        isOptional: lineRequirement === "Optional",
+        conversionChainJson: estimateConversion.conversionChainJson,
+        unitStandardSnapshot: estimateConversion.unitStandardSnapshot,
         notes:
-          showAdvanced && pieces
-            ? `Original package: ${referenceQuantity} pack; ${pieces} pieces per pack; ${portions ?? 1} portions per piece.`
-            : "Temporary owner estimate. Complete the prepared batch recipe later.",
+          estimateNotes.trim() ||
+          (costMeasurement === "Package breakdown"
+            ? `Original package: ${referenceQuantity} ${estimateReferenceUnit}; ${pieces ?? "—"} pieces per pack; ${portions ?? "—"} portions per piece.`
+            : "Temporary owner estimate. Complete the prepared batch recipe later."),
       }),
     );
     if (!result) return;
     const refreshed = await loadRecipeFirstDraft(base.draft.id);
-    if (refreshed) applySnapshot(refreshed);
+    if (refreshed) {
+      applySnapshot(refreshed);
+      if (!(await reconcileReplacement(base, refreshed, editingLineId))) return;
+    }
     closeIngredientSheet();
-    setSnackbar(`${estimateName.trim()} estimate added`);
+    setSnackbar(
+      `${estimateName.trim()} estimate ${editingLineId ? "updated" : "added"}`,
+    );
   }, [
     applySnapshot,
+    costMeasurement,
+    editingLineId,
     ensureDraft,
     estimateCost,
     estimateName,
+    estimateNotes,
     estimateReferenceQuantity,
     estimateReferenceUnit,
     estimateUsageQuantity,
     estimateUsageUnit,
+    lineRole,
+    lineRequirement,
     piecesPerPack,
     portionsPerPiece,
+    reconcileReplacement,
+    resolveCurrentMeasuredConversion,
     runSave,
-    showAdvanced,
   ]);
 
   const addExistingPrepared = useCallback(async () => {
     const entry = selectedPrepared;
     const quantity = parsePositive(preparedUsageQuantity);
+    if (pinnedPrepared && quantity !== null) {
+      const base = await runSave(() => ensureDraft(2));
+      if (!base) return;
+      const existing = base.lines.find(
+        (line) => line.id === pinnedPrepared.line.id,
+      );
+      const evidence = resolvedLineFor(base, pinnedPrepared.line.id);
+      const referenceUnit =
+        evidence?.profileReferenceUnit ?? evidence?.pinnedOutputUnit;
+      if (
+        !existing ||
+        existing.sourceKind !== "child_recipe_version" ||
+        !existing.childRecipeVersionId ||
+        !evidence?.sourceCatalogItemId ||
+        !referenceUnit
+      ) {
+        setMessage("The pinned prepared Recipe version is unavailable.");
+        return;
+      }
+      const customCupVolume = parsePositive(customCupMilliliters);
+      const standardConversion = convertRecipeQuantity(
+        1,
+        preparedUsageUnit,
+        referenceUnit,
+      );
+      const customConversion =
+        preparedUsageUnit === "custom_cup" && customCupVolume
+          ? convertRecipeQuantity(customCupVolume, "ml", referenceUnit)
+          : null;
+      const factor = standardConversion.ok
+        ? standardConversion.quantity
+        : customConversion?.ok
+          ? customConversion.quantity
+          : null;
+      if (factor === null) {
+        setMessage(
+          "The edited usage unit cannot be converted to the pinned Recipe output.",
+        );
+        return;
+      }
+      const requiresConversion =
+        preparedUsageUnit.trim().toLocaleLowerCase() !==
+        referenceUnit.trim().toLocaleLowerCase();
+      const conversion = requiresConversion
+        ? await runSave(() =>
+            createRecipeFirstUnitConversion({
+              id: makeUnitConversionId(),
+              businessId: base.draft.businessId,
+              catalogItemId: evidence.sourceCatalogItemId as string,
+              fromUnit: preparedUsageUnit,
+              toUnit: referenceUnit,
+              factor,
+            }),
+          )
+        : null;
+      if (requiresConversion && !conversion) return;
+      const calculation =
+        evidence.profileTotalCost !== null &&
+        evidence.profileReferenceQuantity !== null &&
+        evidence.profileReferenceUnit
+          ? calculateIngredientCostWithExplicitConversion(
+              {
+                costSource: "prepared_recipe",
+                purchaseCost: evidence.profileTotalCost,
+                purchasedQuantity: evidence.profileReferenceQuantity,
+                purchaseUnit: evidence.profileReferenceUnit,
+                usageQuantity: quantity,
+                usageUnit: preparedUsageUnit,
+              },
+              factor,
+            )
+          : null;
+      if (calculation?.issue) {
+        setMessage("The edited usage is incompatible with the pinned Recipe.");
+        return;
+      }
+      const conversionSnapshot =
+        preparedUsageUnit === "custom_cup" && customCupVolume
+          ? customCupChainSnapshot(referenceUnit, customCupVolume)
+          : immutableConversionSnapshot(
+              preparedUsageUnit,
+              referenceUnit,
+              factor,
+              "Pinned prepared output used by this Recipe",
+            );
+      const knownCost = calculation?.costPerUsageUnit ?? null;
+      const updated: DraftLine = {
+        ...existing,
+        quantity,
+        unit: preparedUsageUnit,
+        normalizedQuantity: conversion ? quantity * conversion.factor : null,
+        normalizedUnit: conversion?.toUnit ?? null,
+        conversionId: conversion?.id ?? null,
+        conversionFactorSnapshot: conversion?.factor ?? null,
+        ...conversionSnapshot,
+        role: lineRole,
+        isOptional: lineRequirement === "Optional",
+        costOverride: knownCost,
+        costState: knownCost === null ? "unknown" : "known",
+        costSource: knownCost === null ? "unknown" : "recipe_version",
+        costProfileId: knownCost === null ? null : existing.costProfileId,
+      };
+      const saved = await runSave(() =>
+        persistExisting(
+          base,
+          replaceOrAppendLine(base.lines, updated, existing.id),
+          2,
+        ),
+      );
+      if (!saved) return;
+      closeIngredientSheet();
+      setSnackbar(
+        `${evidence.displayName} usage updated; pinned version preserved`,
+      );
+      return;
+    }
     if (
       !entry ||
       quantity === null ||
-      !entry.activeVersionId ||
-      !entry.activeCostProfileId ||
-      !preparedPreview ||
-      preparedPreview.issue ||
-      preparedPreview.costPerUsageUnit === null
+      !entry.selectable ||
+      (entry.action !== "select_version" && entry.action !== "select_estimate")
     ) {
       setMessage(
-        "Choose a completed prepared Recipe and enter a compatible positive usage amount.",
+        "Choose an available prepared Recipe or estimate and enter a positive usage amount.",
       );
       return;
     }
     const base = await runSave(() => ensureDraft(2));
     if (!base) return;
-    const referenceUnit = entry.activeCostReferenceUnit;
+    const referenceUnit =
+      entry.activeCostReferenceUnit ?? entry.activeVersionOutputUnit;
     if (!referenceUnit) {
       setMessage("The prepared Recipe is missing its output unit.");
       return;
     }
-    const convertedUnit = convertRecipeQuantity(
+    const standardConvertedUnit = convertRecipeQuantity(
       1,
       preparedUsageUnit,
       referenceUnit,
     );
-    if (!convertedUnit.ok) {
+    const customConvertedUnit =
+      preparedUsageUnit === "custom_cup" &&
+      parsePositive(customCupMilliliters)
+        ? convertRecipeQuantity(
+            parsePositive(customCupMilliliters) as number,
+            "ml",
+            referenceUnit,
+          )
+        : null;
+    const convertedQuantity = standardConvertedUnit.ok
+      ? standardConvertedUnit.quantity
+      : customConvertedUnit?.ok
+        ? customConvertedUnit.quantity
+        : null;
+    if (convertedQuantity === null) {
       setMessage(
         "The selected usage unit cannot be converted to this prepared Recipe output.",
       );
@@ -881,19 +1702,47 @@ export default function OwnerRecipeEditorScreen() {
             catalogItemId: entry.catalogItemId,
             fromUnit: preparedUsageUnit,
             toUnit: referenceUnit,
-            factor: convertedUnit.quantity,
+            factor: convertedQuantity,
           }),
         )
       : null;
     if (requiresConversion && !conversion) return;
+    const knownCost =
+      preparedPreview &&
+      !preparedPreview.issue &&
+      preparedPreview.costPerUsageUnit !== null
+        ? preparedPreview.costPerUsageUnit
+        : null;
+    if (entry.action === "select_estimate" && knownCost === null) {
+      setMessage("This estimate no longer has usable cost evidence.");
+      return;
+    }
+    const conversionSnapshot =
+      preparedUsageUnit === "custom_cup" &&
+      parsePositive(customCupMilliliters)
+        ? customCupChainSnapshot(
+            referenceUnit,
+            parsePositive(customCupMilliliters) as number,
+          )
+        : immutableConversionSnapshot(
+            preparedUsageUnit,
+            referenceUnit,
+            convertedQuantity,
+            "Prepared output used by this Recipe",
+          );
     const line: DraftLine = {
-      id: makeRecipeDraftLineId(),
+      id: editingLineId ?? makeRecipeDraftLineId(),
       businessId: base.draft.businessId,
       recipeDraftId: base.draft.id,
       sortOrder: base.lines.length,
-      sourceKind: "child_recipe_version",
-      catalogItemId: null,
-      childRecipeVersionId: entry.activeVersionId,
+      sourceKind:
+        entry.action === "select_estimate"
+          ? "catalog_item"
+          : "child_recipe_version",
+      catalogItemId:
+        entry.action === "select_estimate" ? entry.catalogItemId : null,
+      childRecipeVersionId:
+        entry.action === "select_version" ? entry.activeVersionId : null,
       childDraftId: null,
       customName: entry.name,
       quantity,
@@ -903,28 +1752,44 @@ export default function OwnerRecipeEditorScreen() {
       normalizedUnit: conversion?.toUnit ?? null,
       conversionId: conversion?.id ?? null,
       conversionFactorSnapshot: conversion?.factor ?? null,
-      role: "supporting",
-      isOptional: false,
-      costOverride: preparedPreview.costPerUsageUnit,
-      costState: "known",
-      costSource: "recipe_version",
-      costProfileId: entry.activeCostProfileId,
+      ...conversionSnapshot,
+      role: lineRole,
+      isOptional: lineRequirement === "Optional",
+      costOverride: knownCost,
+      costState: knownCost === null ? "unknown" : "known",
+      costSource:
+        knownCost === null
+          ? "unknown"
+          : entry.action === "select_estimate"
+            ? "owner_estimate"
+            : "recipe_version",
+      costProfileId: knownCost === null ? null : entry.activeCostProfileId,
       allocationMode: "none",
       legacyIngredientLotId: null,
-      notes: `Pinned prepared Recipe version ${entry.activeVersionId}.`,
+      notes:
+        entry.action === "select_version"
+          ? `Pinned prepared Recipe version ${entry.activeVersionId}; ${knownCost === null ? "cost incomplete" : "cost profile pinned"}.`
+          : "Pinned owner estimate; complete the prepared batch Recipe later.",
     };
     const saved = await runSave(() =>
-      persistExisting(base, [...base.lines, line], 2),
+      persistExisting(base, replaceOrAppendLine(base.lines, line, editingLineId), 2),
     );
     if (!saved) return;
+    if (!(await reconcileReplacement(base, saved, editingLineId))) return;
     closeIngredientSheet();
     setSnackbar(`${entry.name} added`);
   }, [
     ensureDraft,
+    customCupMilliliters,
+    editingLineId,
+    lineRole,
+    lineRequirement,
     persistExisting,
+    pinnedPrepared,
     preparedPreview,
     preparedUsageQuantity,
     preparedUsageUnit,
+    reconcileReplacement,
     runSave,
     selectedPrepared,
   ]);
@@ -944,13 +1809,22 @@ export default function OwnerRecipeEditorScreen() {
       );
       return;
     }
+    const intendedPurchaseUnit = newPurchaseUnit === "l" ? "L" : newPurchaseUnit;
+    const conversionEvidence = resolveCurrentMeasuredConversion(
+      newUsageUnit,
+      intendedPurchaseUnit,
+    );
+    if (!conversionEvidence.ok) {
+      setMessage(conversionEvidence.message);
+      return;
+    }
     const base = await runSave(() => ensureDraft(2));
     if (!base) return;
     const purchase = await runSave(() =>
       addGroceryPurchase({
         ingredientName: newIngredientName.trim(),
         quantity: purchasedQuantity,
-        unit: (newPurchaseUnit === "l" ? "L" : newPurchaseUnit) as
+        unit: intendedPurchaseUnit as
           | "g"
           | "kg"
           | "ml"
@@ -979,7 +1853,7 @@ export default function OwnerRecipeEditorScreen() {
       );
       return;
     }
-    const calculation = calculateSimpleIngredientCost({
+    const calculation = calculateIngredientCostWithExplicitConversion({
       costSource: "purchase_lot",
       purchaseCost: totalCost,
       purchasedQuantity,
@@ -988,19 +1862,14 @@ export default function OwnerRecipeEditorScreen() {
       portionsPerPiece: parsePositive(portionsPerPiece),
       usageQuantity: quantity,
       usageUnit: newUsageUnit,
-    });
+    }, conversionEvidence.factor);
     if (calculation.issue || calculation.costPerUsageUnit === null) {
       setMessage(
         "The purchase was saved, but the Recipe usage units need compatible package details.",
       );
       return;
     }
-    const conversionFactor = packageConversionFactor(
-      lot.unit,
-      newUsageUnit,
-      parsePositive(piecesPerPack),
-      parsePositive(portionsPerPiece),
-    );
+    const conversionFactor = conversionEvidence.factor;
     const conversionId = conversionFactor ? makeUnitConversionId() : null;
     const conversionSaved = conversionFactor
       ? await runSave(() =>
@@ -1016,7 +1885,7 @@ export default function OwnerRecipeEditorScreen() {
       : null;
     if (conversionFactor && !conversionSaved) return;
     const line: DraftLine = {
-      id: makeRecipeDraftLineId(),
+      id: editingLineId ?? makeRecipeDraftLineId(),
       businessId: base.draft.businessId,
       recipeDraftId: base.draft.id,
       sortOrder: base.lines.length,
@@ -1032,8 +1901,10 @@ export default function OwnerRecipeEditorScreen() {
       normalizedUnit: conversionFactor === null ? null : lot.unit,
       conversionId,
       conversionFactorSnapshot: conversionFactor,
-      role: "main",
-      isOptional: false,
+      conversionChainJson: conversionEvidence.conversionChainJson,
+      unitStandardSnapshot: conversionEvidence.unitStandardSnapshot,
+      role: lineRole,
+      isOptional: lineRequirement === "Optional",
       costOverride: calculation.costPerUsageUnit,
       costState: "known",
       costSource: "purchase_lot",
@@ -1041,32 +1912,41 @@ export default function OwnerRecipeEditorScreen() {
       allocationMode: "legacy_selected",
       legacyIngredientLotId: lot.id,
       notes:
-        showAdvanced && (piecesPerPack || portionsPerPiece)
+        costMeasurement === "Package breakdown"
           ? `Package details: ${piecesPerPack || "—"} pieces per pack; ${portionsPerPiece || "—"} portions per piece.`
-          : "Purchase recorded inside Recipe creation.",
+          : costMeasurement === "Custom conversion"
+            ? `Purchase recorded inside Recipe creation. Item-specific conversion: ${customMeaning.trim()}`
+            : "Purchase recorded inside Recipe creation.",
     };
     const saved = await runSave(() =>
-      persistExisting(base, [...base.lines, line], 2),
+      persistExisting(base, replaceOrAppendLine(base.lines, line, editingLineId), 2),
     );
     if (!saved) return;
+    if (!(await reconcileReplacement(base, saved, editingLineId))) return;
     closeIngredientSheet();
     setSnackbar(`${purchase.ingredient.name} purchase and usage added`);
   }, [
     ensureDraft,
+    costMeasurement,
+    customMeaning,
+    editingLineId,
     newIngredientName,
     newPurchaseCost,
     newPurchaseQuantity,
     newPurchaseUnit,
     newUsageQuantity,
     newUsageUnit,
+    lineRole,
+    lineRequirement,
     persistExisting,
     piecesPerPack,
     portionsPerPiece,
+    reconcileReplacement,
+    resolveCurrentMeasuredConversion,
     runSave,
-    showAdvanced,
   ]);
 
-  const startNestedDraft = useCallback(async () => {
+  const startNestedDraft = useCallback(async (continueAfterSave = false) => {
     const quantity = parsePositive(nestedUsageQuantity);
     if (!nestedName.trim() || quantity === null) {
       setMessage("Enter the prepared ingredient name and usage.");
@@ -1074,7 +1954,51 @@ export default function OwnerRecipeEditorScreen() {
     }
     const base = await runSave(() => ensureDraft(2));
     if (!base) return;
-    const parentLineId = makeRecipeDraftLineId();
+    if (editingLineId && !replacingLineSource) {
+      const existing = base.lines.find((line) => line.id === editingLineId);
+      if (
+        !existing ||
+        existing.sourceKind !== "child_draft" ||
+        !existing.childDraftId
+      ) {
+        setMessage("The linked prepared Recipe draft is no longer available.");
+        return;
+      }
+      const updated: DraftLine = {
+        ...existing,
+        quantity,
+        unit: nestedUsageUnit,
+        role: lineRole,
+        isOptional: lineRequirement === "Optional",
+      };
+      const saved = await runSave(() =>
+        persistExisting(
+          base,
+          replaceOrAppendLine(base.lines, updated, existing.id),
+          2,
+        ),
+      );
+      if (!saved) return;
+      const childDraftId = existing.childDraftId;
+      closeIngredientSheet();
+      if (continueAfterSave) {
+        router.push({
+          pathname: "/owner/recipe-editor" as never,
+          params: { draftId: childDraftId },
+        });
+      } else {
+        setSnackbar("Prepared draft usage updated");
+      }
+      return;
+    }
+    const replacedLine = editingLineId
+      ? base.lines.find((line) => line.id === editingLineId)
+      : null;
+    if (editingLineId && !replacedLine) {
+      setMessage("The ingredient changed before its source was replaced.");
+      return;
+    }
+    const parentLineId = editingLineId ?? makeRecipeDraftLineId();
     const placeholder: DraftLine = {
       id: parentLineId,
       businessId: base.draft.businessId,
@@ -1091,8 +2015,10 @@ export default function OwnerRecipeEditorScreen() {
       normalizedUnit: null,
       conversionId: null,
       conversionFactorSnapshot: null,
-      role: "supporting",
-      isOptional: false,
+      conversionChainJson: null,
+      unitStandardSnapshot: null,
+      role: lineRole,
+      isOptional: lineRequirement === "Optional",
       costOverride: null,
       costState: "unknown",
       costSource: "unknown",
@@ -1102,7 +2028,11 @@ export default function OwnerRecipeEditorScreen() {
       notes: "Nested prepared recipe in progress.",
     };
     const parent = await runSave(() =>
-      persistExisting(base, [...base.lines, placeholder], 2),
+      persistExisting(
+        base,
+        replaceOrAppendLine(base.lines, placeholder, editingLineId),
+        2,
+      ),
     );
     if (!parent) return;
     const child = await runSave(() =>
@@ -1118,6 +2048,18 @@ export default function OwnerRecipeEditorScreen() {
       }),
     );
     if (!child) return;
+    if (
+      editingLineId &&
+      !(await runSave(() =>
+        reconcileRemovedRecipeLineSource({
+          businessId: base.draft.businessId,
+          parentDraftId: base.draft.id,
+          line: replacedLine as DraftLine,
+        }),
+      ))
+    ) {
+      return;
+    }
     closeIngredientSheet();
     router.replace({
       pathname: "/owner/recipe-editor" as never,
@@ -1125,16 +2067,22 @@ export default function OwnerRecipeEditorScreen() {
     });
   }, [
     ensureDraft,
+    editingLineId,
     nestedName,
     nestedUsageQuantity,
     nestedUsageUnit,
+    lineRole,
+    lineRequirement,
     persistExisting,
+    replacingLineSource,
     router,
     runSave,
   ]);
 
   function closeIngredientSheet() {
     setIngredientSheet(null);
+    setEditingLineId(null);
+    setReplacingLineSource(false);
     setIngredientSearch("");
     setSelectedLotId(null);
     setUsageQuantity("");
@@ -1142,6 +2090,7 @@ export default function OwnerRecipeEditorScreen() {
     setEstimateCost("");
     setEstimateReferenceQuantity("");
     setEstimateUsageQuantity("");
+    setEstimateNotes("");
     setNestedName("");
     setNestedUsageQuantity("");
     setSelectedPreparedId(null);
@@ -1150,10 +2099,122 @@ export default function OwnerRecipeEditorScreen() {
     setNewPurchaseQuantity("");
     setNewPurchaseCost("");
     setNewUsageQuantity("");
-    setShowAdvanced(false);
+    setCostMeasurement("Price per amount");
     setPiecesPerPack("");
     setPortionsPerPiece("");
+    setCustomCupMilliliters("");
+    setCustomFromQuantity("");
+    setCustomFromUnit("portion");
+    setCustomToQuantity("");
+    setCustomToUnit("pack");
+    setCustomMeaning("");
+    setOriginalConversionEvidence(null);
+    setLineRole("main");
+    setLineRequirement("Required");
   }
+
+  const editLine = useCallback(
+    (line: DraftLine) => {
+      const resolved = resolvedLineFor(snapshotRef.current, line.id);
+      const prepopulateConversion = (
+        usage: RecipeFirstUnit,
+        evidenceUnit: string,
+      ) => {
+        const evidence = editableMeasuredConversion(line, usage, evidenceUnit);
+        setCostMeasurement(evidence.measurement);
+        setPiecesPerPack(evidence.piecesPerPack);
+        setPortionsPerPiece(evidence.portionsPerPiece);
+        setCustomFromQuantity(evidence.customFromQuantity);
+        setCustomFromUnit(evidence.customFromUnit);
+        setCustomToQuantity(evidence.customToQuantity);
+        setCustomToUnit(evidence.customToUnit);
+        setCustomMeaning(evidence.customMeaning);
+        setCustomCupMilliliters(evidence.customCupMilliliters);
+        setOriginalConversionEvidence(evidence.original);
+      };
+      setEditingLineId(line.id);
+      setReplacingLineSource(false);
+      setLineRole(line.role);
+      setLineRequirement(line.isOptional ? "Optional" : "Required");
+      if (line.costSource === "purchase_lot" && line.legacyIngredientLotId) {
+        setSelectedLotId(line.legacyIngredientLotId);
+        setUsageQuantity(String(line.quantity ?? ""));
+        const normalized = line.unit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (normalized && RECIPE_FIRST_UNITS.includes(normalized)) {
+          setUsageUnit(normalized);
+          const lot = grocery?.lots.find(
+            (candidate) => candidate.id === line.legacyIngredientLotId,
+          );
+          prepopulateConversion(
+            normalized,
+            lot?.unit ?? line.normalizedUnit ?? normalized,
+          );
+        }
+        setIngredientSheet("grocery");
+        return;
+      }
+      if (line.costSource === "owner_estimate" && line.catalogItemId) {
+        setEstimateName(resolved?.displayName ?? line.customName ?? "");
+        setEstimateCost(
+          resolved?.profileTotalCost === null ||
+            resolved?.profileTotalCost === undefined
+            ? ""
+            : String(resolved.profileTotalCost),
+        );
+        setEstimateReferenceQuantity(
+          resolved?.profileReferenceQuantity === null ||
+            resolved?.profileReferenceQuantity === undefined
+            ? ""
+            : String(resolved.profileReferenceQuantity),
+        );
+        const reference = resolved?.profileReferenceUnit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (reference && RECIPE_FIRST_UNITS.includes(reference)) {
+          setEstimateReferenceUnit(reference);
+        }
+        setEstimateUsageQuantity(String(line.quantity ?? ""));
+        setEstimateNotes(line.notes ?? "");
+        const usage = line.unit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (usage && RECIPE_FIRST_UNITS.includes(usage)) {
+          setEstimateUsageUnit(usage);
+          prepopulateConversion(
+            usage,
+            resolved?.profileReferenceUnit ?? line.normalizedUnit ?? usage,
+          );
+        }
+        setIngredientSheet("estimate");
+        return;
+      }
+      if (line.sourceKind === "child_recipe_version" && line.childRecipeVersionId) {
+        setSelectedPreparedId(null);
+        setPreparedUsageQuantity(String(line.quantity ?? ""));
+        const usage = line.unit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (usage && RECIPE_FIRST_UNITS.includes(usage)) {
+          setPreparedUsageUnit(usage);
+          prepopulateConversion(
+            usage,
+            resolved?.profileReferenceUnit ??
+              resolved?.pinnedOutputUnit ??
+              line.normalizedUnit ??
+              usage,
+          );
+        }
+        setIngredientSheet("prepared");
+        return;
+      }
+      if (line.sourceKind === "child_draft" && line.childDraftId) {
+        setNestedName(resolved?.displayName ?? line.customName ?? "");
+        setNestedUsageQuantity(String(line.quantity ?? ""));
+        const usage = line.unit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (usage && RECIPE_FIRST_UNITS.includes(usage)) {
+          setNestedUsageUnit(usage);
+        }
+        setIngredientSheet("nested");
+        return;
+      }
+      setIngredientSheet("sources");
+    },
+    [grocery?.lots],
+  );
 
   const removeLine = useCallback(
     async (lineId: string) => {
@@ -1166,9 +2227,11 @@ export default function OwnerRecipeEditorScreen() {
           2,
         ),
       );
-      if (saved) setSnackbar("Ingredient removed");
+      if (!saved) return;
+      if (!(await reconcileReplacement(current, saved, lineId))) return;
+      setSnackbar("Ingredient removed; unused source reconciled");
     },
-    [persistExisting, runSave],
+    [persistExisting, reconcileReplacement, runSave],
   );
 
   const costSummary = useMemo<RecipeFirstCostSummaryValue>(() => {
@@ -1195,7 +2258,11 @@ export default function OwnerRecipeEditorScreen() {
     const price = parseOptionalNonNegative(sellingPrice);
     const definitionReady =
       lines.length > 0 &&
-      missingCostCount === 0 &&
+      lines.every(
+        (line) =>
+          line.isOptional ||
+          (line.sourceKind !== "unresolved" && line.sourceKind !== "child_draft"),
+      ) &&
       (mode === "finished_per_unit" ||
         (mode === "prepared_batch" && outputQuantity !== null));
     const productionReady =
@@ -1280,7 +2347,20 @@ export default function OwnerRecipeEditorScreen() {
     if (!selectedLot) return null;
     const quantity = parsePositive(usageQuantity);
     if (quantity === null) return null;
-    return calculateSimpleIngredientCost({
+    const conversion = resolveMeasuredConversion({
+      measurement: costMeasurement,
+      usageUnit,
+      evidenceUnit: selectedLot.unit,
+      piecesPerPack: parsePositive(piecesPerPack),
+      portionsPerPiece: parsePositive(portionsPerPiece),
+      customFromQuantity: parsePositive(customFromQuantity),
+      customFromUnit,
+      customToQuantity: parsePositive(customToQuantity),
+      customToUnit,
+      customMeaning,
+    });
+    if (!conversion.ok) return null;
+    return calculateIngredientCostWithExplicitConversion({
       costSource:
         selectedLot.costState === "known" ? "purchase_lot" : "unknown",
       purchaseCost:
@@ -1293,8 +2373,14 @@ export default function OwnerRecipeEditorScreen() {
       portionsPerPiece: parsePositive(portionsPerPiece),
       usageQuantity: quantity,
       usageUnit,
-    });
+    }, conversion.factor);
   }, [
+    costMeasurement,
+    customFromQuantity,
+    customFromUnit,
+    customMeaning,
+    customToQuantity,
+    customToUnit,
     piecesPerPack,
     portionsPerPiece,
     selectedLot,
@@ -1305,7 +2391,7 @@ export default function OwnerRecipeEditorScreen() {
   const markReady = useCallback(async () => {
     if (!costSummary.definitionReady) {
       setMessage(
-        "Complete the required ingredients, costs, and yield before marking this Recipe ready.",
+        "Complete the required ingredient identities and yield before marking this Recipe ready.",
       );
       return;
     }
@@ -1332,12 +2418,24 @@ export default function OwnerRecipeEditorScreen() {
             expectedRevision: saved.draft.autosaveRevision,
             expectedActiveCostProfileId:
               activeCostProfile(saved)?.id ?? null,
-            requireCompleteCost: true,
+            requireCompleteCost: false,
           }),
     );
     if (!published) return;
     if (returnRoute) router.replace(returnRoute as never);
-    else router.replace("/owner/recipes");
+    else {
+      const group =
+        saved.draft.classificationProposal === "prepared_base"
+          ? "prepared"
+          : "selling";
+      router.replace({
+        pathname: "/owner/recipes" as never,
+        params: {
+          publishedItemId: published.version.outputCatalogItemId,
+          group,
+        },
+      });
+    }
   }, [
     costSummary.definitionReady,
     ensureDraft,
@@ -1522,6 +2620,17 @@ export default function OwnerRecipeEditorScreen() {
               step={2}
               title="Ingredients"
             />
+            {snapshot ? (
+              <RecipeContextCard
+                classification={
+                  snapshot.draft.classificationProposal ??
+                  snapshot.output.classification
+                }
+                costStatus={costSummary.status}
+                lifecycle={snapshot.draft.lifecycle}
+                name={snapshot.draft.name ?? snapshot.output.name}
+              />
+            ) : null}
             <GabiNotice
               message="Utensils, bags, and optional condiments can be added during order review."
               tone="owner"
@@ -1543,7 +2652,18 @@ export default function OwnerRecipeEditorScreen() {
                     disabled={busy}
                     key={line.id}
                     line={line}
+                    onEdit={() => editLine(line)}
                     onRemove={() => void removeLine(line.id)}
+                    onReplace={() => {
+                      setEditingLineId(line.id);
+                      setReplacingLineSource(true);
+                      setLineRole(line.role);
+                      setLineRequirement(
+                        line.isOptional ? "Optional" : "Required",
+                      );
+                      setIngredientSheet("sources");
+                    }}
+                    resolved={resolvedLineFor(snapshot, line.id)}
                   />
                 ))}
               </GabiCard>
@@ -1553,7 +2673,11 @@ export default function OwnerRecipeEditorScreen() {
                   actionLabel="Add Ingredient"
                   icon="leaf-outline"
                   message="Use Grocery stock, a temporary estimate, or create a prepared recipe without leaving this flow."
-                  onAction={() => setIngredientSheet("sources")}
+                  onAction={() => {
+                    setEditingLineId(null);
+                    setReplacingLineSource(false);
+                    setIngredientSheet("sources");
+                  }}
                   title="No ingredients yet"
                 />
               </GabiCard>
@@ -1562,7 +2686,11 @@ export default function OwnerRecipeEditorScreen() {
             <GabiPrimaryButton
               icon="add"
               label="Add Ingredient"
-              onPress={() => setIngredientSheet("sources")}
+              onPress={() => {
+                setEditingLineId(null);
+                setReplacingLineSource(false);
+                setIngredientSheet("sources");
+              }}
             />
             <GabiSoftButton
               disabled={!snapshot || snapshot.lines.length === 0}
@@ -1592,6 +2720,17 @@ export default function OwnerRecipeEditorScreen() {
               step={3}
               title="Review cost"
             />
+            {snapshot ? (
+              <RecipeContextCard
+                classification={
+                  snapshot.draft.classificationProposal ??
+                  snapshot.output.classification
+                }
+                costStatus={costSummary.status}
+                lifecycle={snapshot.draft.lifecycle}
+                name={snapshot.draft.name ?? snapshot.output.name}
+              />
+            ) : null}
 
             {mode === "prepared_batch" ? (
               <GabiCard>
@@ -1698,10 +2837,17 @@ export default function OwnerRecipeEditorScreen() {
 
             {snapshot?.lines.map((line) => (
               <IngredientLine
-                disabled
+                disabled={busy}
                 key={line.id}
                 line={line}
+                onEdit={() => {
+                  setStep(2);
+                  editLine(line);
+                }}
                 onRemove={() => undefined}
+                onReplace={() => undefined}
+                resolved={resolvedLineFor(snapshot, line.id)}
+                review
               />
             ))}
 
@@ -1733,29 +2879,52 @@ export default function OwnerRecipeEditorScreen() {
       </ScrollView>
 
       <IngredientModal
-        advanced={showAdvanced}
+        costMeasurement={costMeasurement}
+        customFromQuantity={customFromQuantity}
+        customFromUnit={customFromUnit}
+        customMeaning={customMeaning}
+        customToQuantity={customToQuantity}
+        customToUnit={customToUnit}
         estimateCost={estimateCost}
         estimateName={estimateName}
+        estimateNotes={estimateNotes}
         estimateReferenceQuantity={estimateReferenceQuantity}
         estimateReferenceUnit={estimateReferenceUnit}
         estimateUsageQuantity={estimateUsageQuantity}
         estimateUsageUnit={estimateUsageUnit}
+        customCupMilliliters={customCupMilliliters}
         ingredientSearch={ingredientSearch}
+        lineRole={lineRole}
+        lineRequirement={lineRequirement}
+        editingNestedDraftId={editingNestedDraftId}
         onAddEstimate={() => void addEstimate()}
         onAddGrocery={() => void addGroceryIngredient()}
         onAddNewRaw={() => void addNewRawIngredient()}
         onAddPrepared={() => void addExistingPrepared()}
-        onBack={() => setIngredientSheet("sources")}
+        onBack={() => {
+          if (editingLineId) setReplacingLineSource(true);
+          setIngredientSheet("sources");
+        }}
         onChangeEstimateCost={setEstimateCost}
         onChangeEstimateName={setEstimateName}
+        onChangeEstimateNotes={setEstimateNotes}
         onChangeEstimateReferenceQuantity={setEstimateReferenceQuantity}
         onChangeEstimateReferenceUnit={setEstimateReferenceUnit}
         onChangeEstimateUsageQuantity={setEstimateUsageQuantity}
         onChangeEstimateUsageUnit={setEstimateUsageUnit}
+        onChangeCustomCupMilliliters={setCustomCupMilliliters}
+        onChangeCustomFromQuantity={setCustomFromQuantity}
+        onChangeCustomFromUnit={setCustomFromUnit}
+        onChangeCustomMeaning={setCustomMeaning}
+        onChangeCustomToQuantity={setCustomToQuantity}
+        onChangeCustomToUnit={setCustomToUnit}
         onChangeIngredientSearch={(value) => {
           setIngredientSearch(value);
           setSelectedLotId(null);
         }}
+        onChangeLineRole={setLineRole}
+        onChangeLineRequirement={setLineRequirement}
+        onChangeCostMeasurement={setCostMeasurement}
         onChangeNewIngredientName={setNewIngredientName}
         onChangeNewPurchaseCost={setNewPurchaseCost}
         onChangeNewPurchaseQuantity={setNewPurchaseQuantity}
@@ -1773,20 +2942,49 @@ export default function OwnerRecipeEditorScreen() {
         onChangeUsageUnit={setUsageUnit}
         onClose={closeIngredientSheet}
         onOpenSource={setIngredientSheet}
+        onOpenIngredient={() => {
+          if (!selectedLot) return;
+          closeIngredientSheet();
+          router.push({
+            pathname: "/owner/grocery" as never,
+            params: {
+              lotId: selectedLot.id,
+              ingredientId: selectedLot.ingredientId,
+            },
+          });
+        }}
         onSelectLot={(lot) => {
+          if (selectedLotId && selectedLotId !== lot.id) {
+            setOriginalConversionEvidence(null);
+            setCostMeasurement("Price per amount");
+          }
           setSelectedLotId(lot.id);
           const normalized = lot.unit.toLowerCase() as RecipeFirstUnit;
           if (RECIPE_FIRST_UNITS.includes(normalized)) {
             setUsageUnit(normalized);
           }
         }}
-        onSelectPrepared={setSelectedPreparedId}
+        onSelectPrepared={(catalogItemId) => {
+          setOriginalConversionEvidence(null);
+          setSelectedPreparedId(catalogItemId);
+        }}
+        onContinuePrepared={(draftId) => {
+          closeIngredientSheet();
+          router.push({
+            pathname: "/owner/recipe-editor" as never,
+            params: { draftId },
+          });
+        }}
         onStartNested={() => void startNestedDraft()}
-        onToggleAdvanced={() => setShowAdvanced((current) => !current)}
+        onContinueNested={() => void startNestedDraft(true)}
         piecesPerPack={piecesPerPack}
         portionsPerPiece={portionsPerPiece}
         preparedEntries={preparedEntries}
         preparedPreview={preparedPreview}
+        pinnedPreparedLabel={pinnedPrepared?.resolved.displayName ?? null}
+        pinnedPreparedVersionId={
+          pinnedPrepared?.line.childRecipeVersionId ?? null
+        }
         preparedUsageQuantity={preparedUsageQuantity}
         preparedUsageUnit={preparedUsageUnit}
         nestedName={nestedName}
@@ -1839,13 +3037,61 @@ function BatchMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function RecipeContextCard({
+  name,
+  classification,
+  lifecycle,
+  costStatus,
+}: {
+  name: string;
+  classification: string;
+  lifecycle: string;
+  costStatus: RecipeFirstCostSummaryValue["status"];
+}) {
+  return (
+    <GabiCard>
+      <GabiText variant="cardTitle">{name}</GabiText>
+      <View style={styles.contextChips}>
+        <GabiChip label={classification.replaceAll("_", " ")} tone="primary" />
+        <GabiChip label={lifecycle} tone="neutral" />
+        <GabiChip
+          label={
+            costStatus === "actual"
+              ? "Actual cost"
+              : costStatus === "estimated"
+                ? "Estimated cost"
+                : costStatus === "no_price"
+                  ? "No price yet"
+                  : "Cost incomplete"
+          }
+          tone={
+            costStatus === "actual"
+              ? "success"
+              : costStatus === "estimated"
+                ? "warning"
+                : "danger"
+          }
+        />
+      </View>
+    </GabiCard>
+  );
+}
+
 function IngredientLine({
   line,
+  resolved,
   disabled,
+  review = false,
+  onEdit,
+  onReplace,
   onRemove,
 }: {
   line: DraftLine;
+  resolved: RecipeFirstResolvedLine | null;
   disabled: boolean;
+  review?: boolean;
+  onEdit: () => void;
+  onReplace: () => void;
   onRemove: () => void;
 }) {
   const { palette, extended } = useGabiTheme();
@@ -1854,40 +3100,93 @@ function IngredientLine({
   return (
     <View style={[styles.line, { borderColor: palette.border }]}>
       <View style={styles.lineCopy}>
-        <GabiText variant="buttonSm">{draftLineLabel(line)}</GabiText>
+        <GabiText variant="buttonSm">
+          {resolved?.displayName?.trim() ||
+            "Ingredient information unavailable"}
+        </GabiText>
+        <GabiText tone="muted" variant="caption">
+          {[
+            resolved?.classification
+              ? resolved.classification.replaceAll("_", " ")
+              : null,
+            resolved?.sourceLabel,
+            resolved?.costLabel,
+          ]
+            .filter(Boolean)
+            .join(" · ") || "Unresolved ingredient"}
+        </GabiText>
         <GabiText tone="muted" variant="caption">
           {formatQuantity(line.quantity ?? 0)} {line.unit ?? "unit"}
-          {line.costSource === "owner_estimate"
-            ? " · Estimated prepared ingredient"
-            : line.costSource === "purchase_lot"
-              ? " · Exact Grocery lot"
-              : line.sourceKind === "child_draft"
-                ? " · Nested Recipe draft"
-                : ""}
+          {" per recipe"}
         </GabiText>
+        {resolved?.category ? (
+          <GabiText tone="faint" variant="caption">
+            {resolved.category}
+          </GabiText>
+        ) : null}
+        {resolved?.sourceDetail ? (
+          <GabiText tone="faint" variant="caption">
+            {resolved.sourceDetail}
+          </GabiText>
+        ) : null}
+        {resolved?.conversionSummary ? (
+          <GabiText tone="muted" variant="caption">
+            {resolved.conversionSummary}
+          </GabiText>
+        ) : null}
         <GabiText
           money
           tone={amount === null ? "danger" : "primary"}
           variant="caption"
         >
-          {amount === null ? "Cost missing" : formatPeso(amount)}
+          {amount === null
+            ? resolved?.costLabel ?? "Cost missing"
+            : `${formatPeso(amount)} ${
+                resolved?.costLabel?.toLocaleLowerCase() ?? "cost"
+              }`}
         </GabiText>
+        {resolved?.missingReason ? (
+          <GabiText tone="warning" variant="caption">
+            {resolved.missingReason}
+          </GabiText>
+        ) : null}
       </View>
       {!disabled ? (
-        <Pressable
-          accessibilityLabel={`Remove ${draftLineLabel(line)}`}
-          accessibilityRole="button"
-          onPress={onRemove}
-          style={[
-            styles.removeButton,
-            {
-              backgroundColor: extended.neutralChipBg,
-              borderColor: palette.border,
-            },
-          ]}
-        >
-          <Ionicons color={palette.danger} name="trash-outline" size={19} />
-        </Pressable>
+        <View style={styles.lineActions}>
+          <GabiSoftButton
+            compact
+            icon="create-outline"
+            label="Edit"
+            onPress={onEdit}
+          />
+          {!review ? (
+            <>
+              <GabiSoftButton
+                compact
+                icon="swap-horizontal-outline"
+                label="Replace source"
+                onPress={onReplace}
+              />
+              <Pressable
+                accessibilityLabel={`Remove ${
+                  resolved?.displayName?.trim() ||
+                  "Ingredient information unavailable"
+                }`}
+                accessibilityRole="button"
+                onPress={onRemove}
+                style={[
+                  styles.removeButton,
+                  {
+                    backgroundColor: extended.neutralChipBg,
+                    borderColor: palette.border,
+                  },
+                ]}
+              >
+                <Ionicons color={palette.danger} name="trash-outline" size={19} />
+              </Pressable>
+            </>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -1899,25 +3198,37 @@ type IngredientModalProps = {
   selectedLotId: string | null;
   selectedLotPreview: ReturnType<typeof calculateSimpleIngredientCost> | null;
   ingredientSearch: string;
+  lineRole: DraftLine["role"];
+  lineRequirement: LineRequirement;
   usageQuantity: string;
   usageUnit: RecipeFirstUnit;
-  advanced: boolean;
+  costMeasurement: CostMeasurement;
   piecesPerPack: string;
   portionsPerPiece: string;
+  customCupMilliliters: string;
+  customFromQuantity: string;
+  customFromUnit: RecipeFirstUnit;
+  customToQuantity: string;
+  customToUnit: RecipeFirstUnit;
+  customMeaning: string;
   estimateName: string;
   estimateCost: string;
   estimateReferenceQuantity: string;
   estimateReferenceUnit: RecipeFirstUnit;
   estimateUsageQuantity: string;
   estimateUsageUnit: RecipeFirstUnit;
-  preparedEntries: RecipeFirstLibraryEntry[];
+  estimateNotes: string;
+  preparedEntries: RecipeIngredientPickerEntry[];
   selectedPreparedId: string | null;
+  pinnedPreparedLabel: string | null;
+  pinnedPreparedVersionId: string | null;
   preparedPreview: ReturnType<typeof calculateSimpleIngredientCost> | null;
   preparedUsageQuantity: string;
   preparedUsageUnit: RecipeFirstUnit;
   nestedName: string;
   nestedUsageQuantity: string;
   nestedUsageUnit: RecipeFirstUnit;
+  editingNestedDraftId: string | null;
   newIngredientName: string;
   newPurchaseQuantity: string;
   newPurchaseUnit: (typeof PURCHASE_UNITS)[number];
@@ -1927,15 +3238,25 @@ type IngredientModalProps = {
   onClose: () => void;
   onBack: () => void;
   onOpenSource: (sheet: Exclude<IngredientSheet, null>) => void;
+  onOpenIngredient: () => void;
   onChangeIngredientSearch: (value: string) => void;
+  onChangeLineRole: (value: DraftLine["role"]) => void;
+  onChangeLineRequirement: (value: LineRequirement) => void;
   onSelectLot: (lot: GroceryLot) => void;
   onChangeUsageQuantity: (value: string) => void;
   onChangeUsageUnit: (value: RecipeFirstUnit) => void;
-  onToggleAdvanced: () => void;
+  onChangeCostMeasurement: (value: CostMeasurement) => void;
   onChangePiecesPerPack: (value: string) => void;
   onChangePortionsPerPiece: (value: string) => void;
+  onChangeCustomCupMilliliters: (value: string) => void;
+  onChangeCustomFromQuantity: (value: string) => void;
+  onChangeCustomFromUnit: (value: RecipeFirstUnit) => void;
+  onChangeCustomToQuantity: (value: string) => void;
+  onChangeCustomToUnit: (value: RecipeFirstUnit) => void;
+  onChangeCustomMeaning: (value: string) => void;
   onAddGrocery: () => void;
   onSelectPrepared: (catalogItemId: string) => void;
+  onContinuePrepared: (draftId: string) => void;
   onChangePreparedUsageQuantity: (value: string) => void;
   onChangePreparedUsageUnit: (value: RecipeFirstUnit) => void;
   onAddPrepared: () => void;
@@ -1945,6 +3266,7 @@ type IngredientModalProps = {
   onChangeEstimateReferenceUnit: (value: RecipeFirstUnit) => void;
   onChangeEstimateUsageQuantity: (value: string) => void;
   onChangeEstimateUsageUnit: (value: RecipeFirstUnit) => void;
+  onChangeEstimateNotes: (value: string) => void;
   onAddEstimate: () => void;
   onChangeNewIngredientName: (value: string) => void;
   onChangeNewPurchaseQuantity: (value: string) => void;
@@ -1959,6 +3281,7 @@ type IngredientModalProps = {
   onChangeNestedUsageQuantity: (value: string) => void;
   onChangeNestedUsageUnit: (value: RecipeFirstUnit) => void;
   onStartNested: () => void;
+  onContinueNested: () => void;
 };
 
 function IngredientModal(props: IngredientModalProps) {
@@ -1974,7 +3297,17 @@ function IngredientModal(props: IngredientModalProps) {
       transparent
       visible={props.sheet !== null}
     >
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={insets.top}
+        style={styles.modalBackdrop}
+      >
+        <Pressable
+          accessibilityLabel="Close ingredient form"
+          accessibilityRole="button"
+          onPress={props.onClose}
+          style={styles.modalScrim}
+        />
         <View
           style={[
             styles.modalSheet,
@@ -2022,6 +3355,22 @@ function IngredientModal(props: IngredientModalProps) {
             contentContainerStyle={styles.modalContent}
             keyboardShouldPersistTaps="handled"
           >
+            {props.sheet && props.sheet !== "sources" ? (
+              <>
+                <RecipeFirstChoiceRow
+                  label="Ingredient role"
+                  onChange={props.onChangeLineRole}
+                  options={RECIPE_LINE_ROLES}
+                  selected={props.lineRole}
+                />
+                <RecipeFirstChoiceRow
+                  label="Ingredient status"
+                  onChange={props.onChangeLineRequirement}
+                  options={LINE_REQUIREMENTS}
+                  selected={props.lineRequirement}
+                />
+              </>
+            ) : null}
             {props.sheet === "sources" ? (
               <View style={styles.sourceList}>
                 <SourceChoice
@@ -2143,6 +3492,11 @@ function IngredientModal(props: IngredientModalProps) {
                 ) : null}
                 {selectedLot ? (
                   <>
+                    <GabiSoftButton
+                      icon="open-outline"
+                      label="Open Ingredient in Grocery"
+                      onPress={props.onOpenIngredient}
+                    />
                     <RecipeFirstField
                       help="How much is used for one piece, serving, or batch?"
                       keyboardType="decimal-pad"
@@ -2157,7 +3511,10 @@ function IngredientModal(props: IngredientModalProps) {
                       options={RECIPE_FIRST_UNITS}
                       selected={props.usageUnit}
                     />
-                    <AdvancedPackageFields {...props} />
+                    <CostMeasurementFields
+                      {...props}
+                      selectedLot={selectedLot}
+                    />
                     {props.selectedLotPreview ? (
                       <GabiNotice
                         message={
@@ -2170,11 +3527,13 @@ function IngredientModal(props: IngredientModalProps) {
                         }
                       />
                     ) : null}
-                    <GabiPrimaryButton
-                      icon="add"
-                      label="Add Grocery Ingredient"
-                      onPress={props.onAddGrocery}
-                    />
+                    {props.costMeasurement !== "Prepared batch recipe" ? (
+                      <GabiPrimaryButton
+                        icon="add"
+                        label="Add Grocery Ingredient"
+                        onPress={props.onAddGrocery}
+                      />
+                    ) : null}
                   </>
                 ) : null}
               </>
@@ -2183,72 +3542,137 @@ function IngredientModal(props: IngredientModalProps) {
             {props.sheet === "prepared" ? (
               <>
                 <GabiNotice
-                  message="Only completed prepared Recipes with exact version and recipe-derived cost evidence are available here."
+                  message="Every Recipe ingredient source is shown. Unavailable choices remain visible with the reason; cost-incomplete published Recipes can be selected but stay blocked from production."
                   tone="owner"
                 />
-                {props.preparedEntries.map((entry) => {
-                  const selected =
-                    entry.catalogItemId === props.selectedPreparedId;
-                  const referenceCost =
-                    entry.activeCostTotal !== null &&
-                    entry.activeCostReferenceQuantity !== null &&
-                    entry.activeCostReferenceQuantity > 0
-                      ? entry.activeCostTotal /
-                        entry.activeCostReferenceQuantity
-                      : null;
+                {props.pinnedPreparedVersionId ? (
+                  <GabiNotice
+                    message={`Editing ${props.pinnedPreparedLabel ?? "prepared Recipe"} at pinned version ${props.pinnedPreparedVersionId}. Saving usage keeps this exact historical version. Selecting another entry below explicitly replaces it.`}
+                    tone="warning"
+                  />
+                ) : null}
+                <View
+                  style={[
+                    styles.search,
+                    {
+                      backgroundColor: extended.field,
+                      borderColor: palette.border,
+                    },
+                  ]}
+                >
+                  <Ionicons color={palette.mutedText} name="search" size={19} />
+                  <TextInput
+                    onChangeText={props.onChangeIngredientSearch}
+                    placeholder="Search every ingredient source"
+                    placeholderTextColor={extended.textFaint}
+                    style={[styles.searchInput, { color: palette.text }]}
+                    value={props.ingredientSearch}
+                  />
+                </View>
+                {PICKER_GROUPS.map(([group, label]) => {
+                  const entries = props.preparedEntries.filter(
+                    (entry) => entry.pickerGroup === group,
+                  );
+                  if (entries.length === 0) return null;
                   return (
-                    <Pressable
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: selected }}
-                      key={entry.catalogItemId}
-                      onPress={() =>
-                        props.onSelectPrepared(entry.catalogItemId)
-                      }
-                      style={[
-                        styles.lot,
-                        {
-                          backgroundColor: selected
-                            ? palette.softPrimary
-                            : palette.surface,
-                          borderColor: selected
-                            ? palette.primary
-                            : palette.border,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        color={
-                          selected ? palette.primary : extended.radioOff
-                        }
-                        name={
-                          selected
-                            ? "radio-button-on"
-                            : "radio-button-off-outline"
-                        }
-                        size={22}
+                    <View key={group} style={styles.sourceList}>
+                      <GabiSectionHeader
+                        action={<GabiChip label={String(entries.length)} tone="neutral" />}
+                        title={label}
                       />
-                      <View style={styles.lineCopy}>
-                        <GabiText variant="buttonSm">{entry.name}</GabiText>
-                        <GabiText tone="muted" variant="caption">
-                          Completed prepared Recipe · pinned version
-                        </GabiText>
-                        <GabiText money tone="primary" variant="caption">
-                          {referenceCost === null
-                            ? "Cost unavailable"
-                            : `${formatPeso(referenceCost)}/${entry.activeCostReferenceUnit ?? "unit"}`}
-                        </GabiText>
-                      </View>
-                    </Pressable>
+                      {entries.map((entry) => {
+                        const selected =
+                          entry.catalogItemId === props.selectedPreparedId;
+                        const referenceCost =
+                          entry.activeCostTotal !== null &&
+                          entry.activeCostReferenceQuantity !== null &&
+                          entry.activeCostReferenceQuantity > 0
+                            ? entry.activeCostTotal /
+                              entry.activeCostReferenceQuantity
+                            : null;
+                        return (
+                          <Pressable
+                            accessibilityRole="radio"
+                            accessibilityState={{
+                              checked: selected,
+                              disabled:
+                                !entry.selectable &&
+                                entry.action !== "continue_draft",
+                            }}
+                            key={`${group}:${entry.catalogItemId}`}
+                            onPress={() => {
+                              if (entry.selectable) {
+                                props.onSelectPrepared(entry.catalogItemId);
+                              } else if (
+                                entry.action === "continue_draft" &&
+                                entry.draftId
+                              ) {
+                                props.onContinuePrepared(entry.draftId);
+                              }
+                            }}
+                            style={[
+                              styles.lot,
+                              {
+                                backgroundColor: selected
+                                  ? palette.softPrimary
+                                  : palette.surface,
+                                borderColor: selected
+                                  ? palette.primary
+                                  : palette.border,
+                                opacity:
+                                  entry.selectable ||
+                                  entry.action === "continue_draft"
+                                    ? 1
+                                    : 0.72,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              color={selected ? palette.primary : extended.radioOff}
+                              name={
+                                entry.action === "continue_draft"
+                                  ? "create-outline"
+                                  : selected
+                                    ? "radio-button-on"
+                                    : entry.selectable
+                                      ? "radio-button-off-outline"
+                                      : "lock-closed-outline"
+                              }
+                              size={22}
+                            />
+                            <View style={styles.lineCopy}>
+                              <GabiText variant="buttonSm">{entry.name}</GabiText>
+                              <GabiText tone="muted" variant="caption">
+                                {entry.activeVersionId
+                                  ? `Pinned version · ${entry.activeVersionOutputQuantity ?? "?"} ${entry.activeVersionOutputUnit ?? "unit"}`
+                                  : entry.action === "continue_draft"
+                                    ? "Continue Recipe draft"
+                                    : entry.classification}
+                              </GabiText>
+                              <GabiText
+                                money
+                                tone={referenceCost === null ? "warning" : "primary"}
+                                variant="caption"
+                              >
+                                {referenceCost === null
+                                  ? entry.disabledReason ?? "Cost incomplete — production remains blocked"
+                                  : `${formatPeso(referenceCost)}/${entry.activeCostReferenceUnit ?? entry.activeVersionOutputUnit ?? "unit"}`}
+                              </GabiText>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
                   );
                 })}
                 {props.preparedEntries.length === 0 ? (
                   <GabiEmptyState
                     icon="layers-outline"
-                    message="Complete a prepared Recipe first, or add a quick temporary estimate."
-                    title="No completed prepared Recipes"
+                    message="Try another search, record a purchase, or create a prepared Recipe."
+                    title="No matching ingredient sources"
                   />
                 ) : null}
-                {props.selectedPreparedId ? (
+                {props.selectedPreparedId || props.pinnedPreparedVersionId ? (
                   <>
                     <RecipeFirstField
                       help="How much is used for one piece, serving, or batch?"
@@ -2264,6 +3688,16 @@ function IngredientModal(props: IngredientModalProps) {
                       options={RECIPE_FIRST_UNITS}
                       selected={props.preparedUsageUnit}
                     />
+                    {props.preparedUsageUnit === "custom_cup" ? (
+                      <RecipeFirstField
+                        help="Define this kitchen cup explicitly. The exact volume is saved with this Recipe line."
+                        keyboardType="decimal-pad"
+                        label="Custom business cup volume (mL)"
+                        onChangeText={props.onChangeCustomCupMilliliters}
+                        placeholder="Example: 240"
+                        value={props.customCupMilliliters}
+                      />
+                    ) : null}
                     {props.preparedPreview ? (
                       <GabiNotice
                         message={
@@ -2278,7 +3712,11 @@ function IngredientModal(props: IngredientModalProps) {
                     ) : null}
                     <GabiPrimaryButton
                       icon="add"
-                      label="Add Prepared Recipe"
+                      label={
+                        props.pinnedPreparedVersionId
+                          ? "Save Pinned Version Usage"
+                          : "Add Prepared Recipe"
+                      }
                       onPress={props.onAddPrepared}
                     />
                   </>
@@ -2333,12 +3771,22 @@ function IngredientModal(props: IngredientModalProps) {
                   options={RECIPE_FIRST_UNITS}
                   selected={props.estimateUsageUnit}
                 />
-                <AdvancedPackageFields {...props} />
-                <GabiPrimaryButton
-                  icon="calculator-outline"
-                  label="Add Estimated Ingredient"
-                  onPress={props.onAddEstimate}
+                <CostMeasurementFields {...props} selectedLot={null} />
+                <RecipeFirstField
+                  help="Optional owner notes and evidence context are preserved when this estimate is edited."
+                  label="Notes"
+                  multiline
+                  onChangeText={props.onChangeEstimateNotes}
+                  placeholder="Why this estimate is reasonable"
+                  value={props.estimateNotes}
                 />
+                {props.costMeasurement !== "Prepared batch recipe" ? (
+                  <GabiPrimaryButton
+                    icon="calculator-outline"
+                    label="Add Estimated Ingredient"
+                    onPress={props.onAddEstimate}
+                  />
+                ) : null}
               </>
             ) : null}
 
@@ -2388,12 +3836,14 @@ function IngredientModal(props: IngredientModalProps) {
                   options={RECIPE_FIRST_UNITS}
                   selected={props.newUsageUnit}
                 />
-                <AdvancedPackageFields {...props} />
-                <GabiPrimaryButton
-                  icon="add"
-                  label="Record Purchase and Add Ingredient"
-                  onPress={props.onAddNewRaw}
-                />
+                <CostMeasurementFields {...props} selectedLot={null} />
+                {props.costMeasurement !== "Prepared batch recipe" ? (
+                  <GabiPrimaryButton
+                    icon="add"
+                    label="Record Purchase and Add Ingredient"
+                    onPress={props.onAddNewRaw}
+                  />
+                ) : null}
               </>
             ) : null}
 
@@ -2404,6 +3854,7 @@ function IngredientModal(props: IngredientModalProps) {
                   tone="owner"
                 />
                 <RecipeFirstField
+                  editable={!props.editingNestedDraftId}
                   label="Prepared ingredient name"
                   onChangeText={props.onChangeNestedName}
                   placeholder="Example: Cooked Rice"
@@ -2424,55 +3875,90 @@ function IngredientModal(props: IngredientModalProps) {
                   selected={props.nestedUsageUnit}
                 />
                 <GabiPrimaryButton
-                  icon="git-branch-outline"
-                  label="Save Parent and Create Prepared Recipe"
+                  icon={
+                    props.editingNestedDraftId
+                      ? "save-outline"
+                      : "git-branch-outline"
+                  }
+                  label={
+                    props.editingNestedDraftId
+                      ? "Save Parent Usage"
+                      : "Save Parent and Create Prepared Recipe"
+                  }
                   onPress={props.onStartNested}
                 />
+                {props.editingNestedDraftId ? (
+                  <GabiSoftButton
+                    icon="create-outline"
+                    label="Continue Prepared Recipe"
+                    onPress={props.onContinueNested}
+                  />
+                ) : null}
               </>
             ) : null}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-function AdvancedPackageFields(
-  props: Pick<
-    IngredientModalProps,
-    | "advanced"
-    | "piecesPerPack"
-    | "portionsPerPiece"
-    | "onToggleAdvanced"
-    | "onChangePiecesPerPack"
-    | "onChangePortionsPerPiece"
-  >,
+function CostMeasurementFields(
+  props: IngredientModalProps & { selectedLot: GroceryLot | null },
 ) {
+  const pieces = parsePositive(props.piecesPerPack);
+  const portions = parsePositive(props.portionsPerPiece);
+  const referenceQuantity =
+    props.sheet === "grocery"
+      ? props.selectedLot?.purchasedQuantity ?? null
+      : props.sheet === "estimate"
+        ? parsePositive(props.estimateReferenceQuantity)
+        : parsePositive(props.newPurchaseQuantity);
+  const referenceCost =
+    props.sheet === "grocery"
+      ? props.selectedLot?.costState === "known"
+        ? (props.selectedLot.recordedTotalCost ?? props.selectedLot.totalCost)
+        : null
+      : props.sheet === "estimate"
+        ? parseOptionalNonNegative(props.estimateCost)
+        : parsePositive(props.newPurchaseCost);
+  const usageQuantity =
+    props.sheet === "grocery"
+      ? parsePositive(props.usageQuantity)
+      : props.sheet === "estimate"
+        ? parsePositive(props.estimateUsageQuantity)
+        : parsePositive(props.newUsageQuantity);
+  const usablePortions =
+    referenceQuantity && pieces
+      ? referenceQuantity * pieces * (portions ?? 1)
+      : null;
+  const costPerPortion =
+    referenceCost !== null && usablePortions
+      ? referenceCost / usablePortions
+      : null;
+  const customFrom = parsePositive(props.customFromQuantity);
+  const customTo = parsePositive(props.customToQuantity);
+
   return (
     <GabiCard>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: props.advanced }}
-        onPress={props.onToggleAdvanced}
-        style={styles.advancedHeader}
-      >
-        <View style={styles.lineCopy}>
-          <GabiText variant="buttonSm">Advanced details</GabiText>
-          <GabiText tone="muted" variant="caption">
-            Optional package calculation
-          </GabiText>
-        </View>
-        <Ionicons
-          name={props.advanced ? "chevron-up" : "chevron-down"}
-          size={20}
+      <RecipeFirstChoiceRow
+        label="How is this cost measured?"
+        onChange={props.onChangeCostMeasurement}
+        options={COST_MEASUREMENTS}
+        selected={props.costMeasurement}
+      />
+      {props.costMeasurement === "Price per amount" ? (
+        <GabiNotice
+          message="Use the recorded price and amount above. Only compatible standard unit conversions are applied automatically."
+          tone="owner"
         />
-      </Pressable>
-      {props.advanced ? (
+      ) : null}
+      {props.costMeasurement === "Package breakdown" ? (
         <>
           <RecipeFirstField
-            help="Example: 18 sausages in one pack"
+            help="Example: 18 sausages in one package"
             keyboardType="decimal-pad"
-            label="Pieces per pack"
+            label="Pieces per package"
             onChangeText={props.onChangePiecesPerPack}
             placeholder="Example: 18"
             value={props.piecesPerPack}
@@ -2485,6 +3971,82 @@ function AdvancedPackageFields(
             placeholder="Example: 4"
             value={props.portionsPerPiece}
           />
+          {usablePortions ? (
+            <GabiNotice
+              message={`${formatQuantity(referenceQuantity ?? 0)} pack × ${formatQuantity(pieces ?? 0)} pieces${portions ? ` × ${formatQuantity(portions)} portions` : ""} = ${formatQuantity(usablePortions)} usable ${portions ? "portions" : "pieces"}.${costPerPortion === null ? " Add a price to calculate cost." : ` ${formatPeso(referenceCost ?? 0)} ÷ ${formatQuantity(usablePortions)} = approximately ${formatPeso(costPerPortion)} each${usageQuantity ? `; ${formatQuantity(usageQuantity)} used costs approximately ${formatPeso(costPerPortion * usageQuantity)}` : ""}.`}`}
+              tone="owner"
+            />
+          ) : (
+            <GabiNotice
+              message="Enter the package quantity and pieces to see the complete live calculation."
+              tone="warning"
+            />
+          )}
+        </>
+      ) : null}
+      {props.costMeasurement === "Prepared batch recipe" ? (
+        <>
+          <GabiNotice
+            message="Use a prepared Recipe for cooking, mixing, seasoning, or another transformation. Its version and batch cost stay explicit instead of being flattened into one conversion."
+            tone="warning"
+          />
+          <GabiSoftButton
+            icon="layers-outline"
+            label="Choose a Prepared Recipe"
+            onPress={() => props.onOpenSource("prepared")}
+          />
+          <GabiSoftButton
+            icon="git-branch-outline"
+            label="Create a Prepared Recipe"
+            onPress={() => props.onOpenSource("nested")}
+          />
+        </>
+      ) : null}
+      {props.costMeasurement === "Custom conversion" ? (
+        <>
+          <GabiNotice
+            message="This owner-entered conversion applies only to the selected ingredient. KitaMo never infers a universal mass-to-volume or package conversion."
+            tone="warning"
+          />
+          <RecipeFirstField
+            keyboardType="decimal-pad"
+            label="From quantity"
+            onChangeText={props.onChangeCustomFromQuantity}
+            placeholder="Example: 1"
+            value={props.customFromQuantity}
+          />
+          <RecipeFirstChoiceRow
+            label="From unit"
+            onChange={props.onChangeCustomFromUnit}
+            options={RECIPE_FIRST_UNITS}
+            selected={props.customFromUnit}
+          />
+          <RecipeFirstField
+            keyboardType="decimal-pad"
+            label="To quantity"
+            onChangeText={props.onChangeCustomToQuantity}
+            placeholder="Example: 240"
+            value={props.customToQuantity}
+          />
+          <RecipeFirstChoiceRow
+            label="To unit"
+            onChange={props.onChangeCustomToUnit}
+            options={RECIPE_FIRST_UNITS}
+            selected={props.customToUnit}
+          />
+          <RecipeFirstField
+            help="Describe the ingredient-specific evidence, such as Our kitchen cup of sushi rice weighs 210 g."
+            label="Conversion meaning"
+            onChangeText={props.onChangeCustomMeaning}
+            placeholder="What this conversion means"
+            value={props.customMeaning}
+          />
+          {customFrom && customTo ? (
+            <GabiNotice
+              message={`${formatQuantity(customFrom)} ${props.customFromUnit} → ${formatQuantity(customTo)} ${props.customToUnit}; 1 ${props.customFromUnit} = ${formatQuantity(customTo / customFrom)} ${props.customToUnit}. This preview is item-specific.`}
+              tone="owner"
+            />
+          ) : null}
         </>
       ) : null}
     </GabiCard>
@@ -2562,6 +4124,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  contextChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
   line: {
     alignItems: "center",
     borderTopWidth: 1,
@@ -2583,6 +4150,10 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  lineActions: {
+    alignItems: "flex-end",
+    gap: spacing.xs,
+  },
   removeButton: {
     alignItems: "center",
     borderRadius: 14,
@@ -2600,6 +4171,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.45)",
     flex: 1,
     justifyContent: "flex-end",
+  },
+  modalScrim: {
+    ...StyleSheet.absoluteFillObject,
   },
   modalSheet: {
     borderTopLeftRadius: 28,

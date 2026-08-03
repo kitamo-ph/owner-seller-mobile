@@ -17,6 +17,24 @@ import { useGabiTheme } from "@/theme/useGabiTheme";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
+const RECIPE_CHOICE_LABELS: Readonly<Record<string, string>> = {
+  g: "Gram (g)",
+  kg: "Kilogram (kg)",
+  ml: "Milliliter (mL)",
+  l: "Liter (L)",
+  pcs: "Piece",
+  pack: "Pack",
+  portion: "Portion",
+  serving: "Serving",
+  metric_cup: "Metric cup — 250 mL",
+  us_cup: "US cup — approximately 236.588 mL",
+  custom_cup: "Custom business cup",
+  tbsp: "Tablespoon — 15 mL",
+  tsp: "Teaspoon — 5 mL",
+  us_gallon: "US gallon — approximately 3,785.412 mL",
+  imperial_gallon: "Imperial gallon — 4,546.09 mL",
+};
+
 export function RecipeFirstStepHeader({
   step,
   title,
@@ -244,7 +262,7 @@ export function RecipeFirstChoiceRow<T extends string>({
                 tone={isSelected ? "primary" : "muted"}
                 variant="buttonSm"
               >
-                {option}
+                {RECIPE_CHOICE_LABELS[option] ?? option.replaceAll("_", " ")}
               </GabiText>
             </Pressable>
           );

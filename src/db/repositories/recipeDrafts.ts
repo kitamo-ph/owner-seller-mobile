@@ -4,6 +4,10 @@ import {
   makeRecipeDraftId,
   makeRecipeDraftLineId,
 } from "@/domain/ids";
+import {
+  standardRecipeUnitFactor,
+  validateRecipeConversionSnapshotEvidence,
+} from "@/domain/recipeConversionChains";
 
 import {
   getRepositoryDatabase,
@@ -82,6 +86,8 @@ export type RecipeDraftLineRecord = {
   normalizedUnit: string | null;
   conversionId: string | null;
   conversionFactorSnapshot: number | null;
+  conversionChainJson: string | null;
+  unitStandardSnapshot: string | null;
   role: RecipeLineRole;
   isOptional: boolean;
   costOverride: number | null;
@@ -141,6 +147,8 @@ type RecipeDraftLineRow = {
   normalized_unit: string | null;
   conversion_id: string | null;
   conversion_factor_snapshot: number | null;
+  conversion_chain_json: string | null;
+  unit_standard_snapshot: string | null;
   role: RecipeLineRole;
   is_optional: number;
   cost_override: number | null;
@@ -262,6 +270,8 @@ function mapLine(row: RecipeDraftLineRow): RecipeDraftLineRecord {
     normalizedUnit: row.normalized_unit,
     conversionId: row.conversion_id,
     conversionFactorSnapshot: row.conversion_factor_snapshot,
+    conversionChainJson: row.conversion_chain_json,
+    unitStandardSnapshot: row.unit_standard_snapshot,
     role: row.role,
     isOptional: toBoolean(row.is_optional),
     costOverride: row.cost_override,
@@ -293,19 +303,8 @@ type RecipeLineConversionEvidence = {
   factor: number;
 };
 
-function normalizedUnit(unit: string) {
-  return unit.trim().toLowerCase();
-}
-
 function standardQuantityFactor(fromUnit: string, toUnit: string) {
-  const from = normalizedUnit(fromUnit);
-  const to = normalizedUnit(toUnit);
-  if (from === to) return 1;
-  if (from === "g" && to === "kg") return 1 / 1_000;
-  if (from === "kg" && to === "g") return 1_000;
-  if (from === "ml" && to === "l") return 1 / 1_000;
-  if (from === "l" && to === "ml") return 1_000;
-  return null;
+  return standardRecipeUnitFactor(fromUnit, toUnit);
 }
 
 function quantityFactorFromUsageUnit(
@@ -330,6 +329,38 @@ function sameCost(left: number, right: number) {
     Math.abs(left - right) <=
     1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
   );
+}
+
+function validateDraftLineConversionSnapshot(
+  line: SaveRecipeDraftLineInput,
+  index: number,
+  expectedOutputUnit?: string | null,
+  expectedFactor?: number | null,
+) {
+  const conversionChainJson = line.conversionChainJson?.trim() || null;
+  if (!conversionChainJson) {
+    if (line.unitStandardSnapshot?.trim()) {
+      throw new Error(
+        `Draft line ${index + 1} unit standard has no conversion chain.`,
+      );
+    }
+    return;
+  }
+  if (!line.unit?.trim()) {
+    throw new Error(`Draft line ${index + 1} conversion input is missing.`);
+  }
+  const validation = validateRecipeConversionSnapshotEvidence({
+    conversionChainJson,
+    unitStandardSnapshot: line.unitStandardSnapshot,
+    expectedInputUnit: line.unit,
+    expectedOutputUnit,
+    expectedOutputQuantityPerInputUnit: expectedFactor,
+  });
+  if (!validation.ok) {
+    throw new Error(
+      `Draft line ${index + 1} conversion snapshot is inconsistent (${validation.reason}).`,
+    );
+  }
 }
 
 function validateDraftLine(line: SaveRecipeDraftLineInput, index: number) {
@@ -397,6 +428,12 @@ function validateDraftLine(line: SaveRecipeDraftLineInput, index: number) {
       `Draft line ${index + 1} cost provenance does not match its source.`,
     );
   }
+  validateDraftLineConversionSnapshot(
+    line,
+    index,
+    line.normalizedUnit,
+    line.conversionFactorSnapshot,
+  );
 }
 
 /**
@@ -513,6 +550,20 @@ export async function validateRecipeDraftLineCostEvidenceInTransaction(
         `Draft line ${index + 1} legacy lot is not an exact item binding.`,
       );
     }
+    const usageUnit = line.unit?.trim();
+    const quantityFactor = usageUnit
+      ? quantityFactorFromUsageUnit(
+          usageUnit,
+          legacyLot.unit,
+          conversion,
+        )
+      : null;
+    validateDraftLineConversionSnapshot(
+      line,
+      index,
+      legacyLot.unit,
+      line.conversionChainJson ? (quantityFactor ?? Number.NaN) : null,
+    );
     if (legacyLot.cost_state !== "known") {
       if (line.costState === "known" || line.costOverride !== null) {
         throw new Error(
@@ -539,14 +590,6 @@ export async function validateRecipeDraftLineCostEvidenceInTransaction(
         `Draft line ${index + 1} lot cost evidence is inconsistent.`,
       );
     }
-    const usageUnit = line.unit?.trim();
-    const quantityFactor = usageUnit
-      ? quantityFactorFromUsageUnit(
-          usageUnit,
-          legacyLot.unit,
-          conversion,
-        )
-      : null;
     const expectedCost =
       quantityFactor === null
         ? null
@@ -565,6 +608,47 @@ export async function validateRecipeDraftLineCostEvidenceInTransaction(
   }
 
   if (costSource !== "owner_estimate" && costSource !== "recipe_version") {
+    if (line.conversionChainJson) {
+      if (
+        line.sourceKind !== "child_recipe_version" ||
+        !line.childRecipeVersionId
+      ) {
+        throw new Error(
+          `Draft line ${index + 1} conversion has no exact source evidence.`,
+        );
+      }
+      const child = await db.getFirstAsync<{
+        business_id: string;
+        expected_output_unit: string;
+      }>(
+        `
+          SELECT business_id, expected_output_unit
+          FROM recipe_versions
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [line.childRecipeVersionId],
+      );
+      const usageUnit = line.unit?.trim();
+      const quantityFactor =
+        child?.business_id === businessId && usageUnit
+          ? quantityFactorFromUsageUnit(
+              usageUnit,
+              child.expected_output_unit,
+              conversion,
+            )
+          : null;
+      if (!child || child.business_id !== businessId) {
+        throw new Error(
+          `Draft line ${index + 1} conversion source is unavailable.`,
+        );
+      }
+      validateDraftLineConversionSnapshot(
+        line,
+        index,
+        child.expected_output_unit,
+        quantityFactor ?? Number.NaN,
+      );
+    }
     return;
   }
   const profile = await db.getFirstAsync<{
@@ -636,6 +720,12 @@ export async function validateRecipeDraftLineCostEvidenceInTransaction(
         conversion,
       )
     : null;
+  validateDraftLineConversionSnapshot(
+    line,
+    index,
+    profile.reference_unit,
+    line.conversionChainJson ? (quantityFactor ?? Number.NaN) : null,
+  );
   const expectedCost =
     quantityFactor === null
       ? null
@@ -671,10 +761,11 @@ async function insertDraftLine(
         catalog_item_id, child_recipe_version_id, child_draft_id, custom_name,
         quantity, unit, normalized_quantity, normalized_unit, conversion_id,
         conversion_factor_snapshot, role, is_optional, cost_override,
+        conversion_chain_json, unit_standard_snapshot,
         cost_state, cost_source, cost_profile_id, allocation_mode,
         legacy_ingredient_lot_id, notes,
         created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', NULL)
     `,
     [
       line.id ?? makeRecipeDraftLineId(),
@@ -695,6 +786,8 @@ async function insertDraftLine(
       line.role,
       toInteger(line.isOptional),
       line.costOverride ?? null,
+      line.conversionChainJson?.trim() || null,
+      line.unitStandardSnapshot?.trim() || null,
       line.costState,
       normalizedDraftLineCostSource(line),
       line.costProfileId ?? null,
