@@ -21,9 +21,64 @@ import {
 } from "@/domain/productionPlanner";
 import type {
   RecipeGraphCostState,
+  RecipeGraphErrorCode,
   RecipeGraphLine,
   RecipeGraphVersion,
 } from "@/domain/recipeGraph";
+import { validateRecipeGraph } from "@/domain/recipeGraph";
+import { loadOwnerSetupStatus } from "./ownerSetup";
+
+export type NativeProductionReadinessEntry = {
+  recipeId: string;
+  versionId: string;
+  catalogItemId: string;
+  productId: string | null;
+  name: string;
+  classification: "finished_product" | "prepared_base";
+  expectedOutputQuantity: number;
+  expectedOutputUnit: string;
+  kind: "finished_per_unit" | "prepared_batch" | "nested" | "blocked";
+  status:
+    | "ready_for_planning"
+    | "staged_execution_deferred"
+    | "blocked";
+  costStatus: "actual" | "estimated" | "incomplete" | "no_price" | null;
+  missingRequirements: string[];
+};
+
+function safeRecipeGraphRequirement(code: RecipeGraphErrorCode): string {
+  if (
+    code === "exact_version_cycle" ||
+    code === "recipe_family_cycle" ||
+    code === "output_item_cycle"
+  ) {
+    return "A Recipe dependency cycle must be resolved.";
+  }
+  if (
+    code === "incompatible_child_unit" ||
+    code === "missing_conversion_snapshot"
+  ) {
+    return "A Recipe input needs compatible unit or conversion evidence.";
+  }
+  if (code === "archived_dependency") {
+    return "A pinned prepared Recipe dependency is archived.";
+  }
+  if (code === "cross_business_dependency") {
+    return "A Recipe dependency is unavailable in this business.";
+  }
+  if (
+    code === "node_limit_exceeded" ||
+    code === "edge_limit_exceeded" ||
+    code === "depth_limit_exceeded" ||
+    code === "provenance_limit_exceeded"
+  ) {
+    return "The Recipe dependency graph exceeds safe planning limits.";
+  }
+  if (code === "invalid_cost") {
+    return "A Recipe input has invalid cost evidence.";
+  }
+  return "Recipe dependency information needs review.";
+}
 
 function persistenceCostToGraph(
   state: RecipeVersionCostState,
@@ -98,6 +153,179 @@ function mapPersistedGraph(
     status: version.status,
     lines: (linesByVersion.get(version.id) ?? []).map(mapPersistedLine),
   }));
+}
+
+/**
+ * Read-only compatibility bridge for native immutable Recipe versions.
+ * Entries returned here are deliberately separate from the legacy flat
+ * production executor and this function performs no writes or reservations.
+ */
+export async function loadNativeProductionReadiness(
+  db: RepositoryDatabase = openKitamoDatabase(),
+): Promise<NativeProductionReadinessEntry[]> {
+  await runMigrations(db);
+  const owner = await loadOwnerSetupStatus(db);
+  if (!owner.activeBusiness) return [];
+  const rows = await db.getAllAsync<{
+    recipe_id: string;
+    version_id: string;
+    catalog_item_id: string;
+    product_id: string | null;
+    name: string;
+    classification: "finished_product" | "prepared_base";
+    expected_output_quantity: number;
+    expected_output_unit: string;
+    graph_state: "complete" | "incomplete" | "legacy_review";
+    version_cost_state: RecipeVersionCostState;
+    cost_status: NativeProductionReadinessEntry["costStatus"];
+  }>(
+    `
+      SELECT recipe.id AS recipe_id, version.id AS version_id,
+        item.id AS catalog_item_id,
+        product_projection.id AS product_id,
+        version.name_snapshot AS name, item.classification,
+        version.expected_output_quantity, version.expected_output_unit,
+        version.graph_state, version.cost_state AS version_cost_state,
+        summary.status AS cost_status
+      FROM recipes recipe
+      INNER JOIN recipe_versions version
+        ON version.id = recipe.active_version_id
+        AND version.business_id = recipe.business_id
+        AND version.status = 'published'
+        AND version.deleted_at IS NULL
+      INNER JOIN catalog_items item
+        ON item.id = version.output_catalog_item_id
+        AND item.business_id = recipe.business_id
+        AND item.source_type = 'native'
+        AND item.classification IN ('finished_product', 'prepared_base')
+        AND item.lifecycle_status <> 'archived'
+        AND item.deleted_at IS NULL
+      LEFT JOIN legacy_item_bindings product_binding
+        ON product_binding.catalog_item_id = item.id
+        AND product_binding.business_id = recipe.business_id
+        AND product_binding.entity_kind = 'product'
+        AND product_binding.binding_status = 'active'
+        AND product_binding.deleted_at IS NULL
+      LEFT JOIN products product_projection
+        ON product_projection.id = product_binding.legacy_entity_id
+        AND product_projection.business_id = recipe.business_id
+        AND product_projection.active = 1
+        AND product_projection.deleted_at IS NULL
+        AND (
+          product_projection.branch_id IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM branches product_branch
+            WHERE product_branch.id = product_projection.branch_id
+              AND product_branch.business_id = recipe.business_id
+              AND product_branch.active = 1
+              AND product_branch.deleted_at IS NULL
+          )
+        )
+      LEFT JOIN recipe_version_cost_summaries summary
+        ON summary.recipe_version_id = version.id
+        AND summary.deleted_at IS NULL
+      WHERE recipe.business_id = ? AND recipe.is_active = 1
+        AND recipe.deleted_at IS NULL
+      ORDER BY version.name_snapshot COLLATE NOCASE ASC, version.id ASC
+    `,
+    [owner.activeBusiness.id],
+  );
+
+  return Promise.all(
+    rows.map(async (row): Promise<NativeProductionReadinessEntry> => {
+      let snapshot: Awaited<ReturnType<typeof loadRecipeVersionGraph>>;
+      try {
+        snapshot = await loadRecipeVersionGraph(row.version_id, 500, db);
+      } catch {
+        return {
+          recipeId: row.recipe_id,
+          versionId: row.version_id,
+          catalogItemId: row.catalog_item_id,
+          productId: row.product_id,
+          name: row.name,
+          classification: row.classification,
+          expectedOutputQuantity: row.expected_output_quantity,
+          expectedOutputUnit: row.expected_output_unit,
+          kind: "blocked",
+          status: "blocked",
+          costStatus: row.cost_status,
+          missingRequirements: [
+            "Recipe dependency information could not be loaded safely.",
+          ],
+        };
+      }
+      const versions = mapPersistedGraph(snapshot.versions, snapshot.lines);
+      const validation = validateRecipeGraph(versions, row.version_id);
+      const rootLines = snapshot.lines.filter(
+        (line) => line.recipeVersionId === row.version_id,
+      );
+      const nested = snapshot.lines.some(
+        (line) => line.sourceKind === "child_recipe_version",
+      );
+      const missingRequirements: string[] = [];
+      if (!validation.ok) {
+        missingRequirements.push(
+          safeRecipeGraphRequirement(validation.error.code),
+        );
+      }
+      if (row.graph_state !== "complete") {
+        missingRequirements.push("Recipe graph needs review.");
+      }
+      if (rootLines.length === 0) {
+        missingRequirements.push("Published Recipe has no input lines.");
+      }
+      const missingProductProjection = !row.product_id;
+      if (missingProductProjection) {
+        missingRequirements.push(
+          "Recipe has no active Paninda Product projection.",
+        );
+      }
+      const costIncomplete =
+        row.cost_status === "incomplete" ||
+        row.cost_status === "no_price" ||
+        row.cost_status === null ||
+        row.version_cost_state === "unknown" ||
+        row.version_cost_state === "partial" ||
+        row.version_cost_state === "legacy_zero_unresolved" ||
+        row.version_cost_state === "legacy_review";
+      if (costIncomplete) {
+        missingRequirements.push(
+          "Cost is incomplete; no profit or production cost will be fabricated.",
+        );
+      }
+      const graphBlocked =
+        !validation.ok ||
+        row.graph_state !== "complete" ||
+        rootLines.length === 0 ||
+        missingProductProjection;
+      const executionBlocked = graphBlocked || costIncomplete;
+      return {
+        recipeId: row.recipe_id,
+        versionId: row.version_id,
+        catalogItemId: row.catalog_item_id,
+        productId: row.product_id,
+        name: row.name,
+        classification: row.classification,
+        expectedOutputQuantity: row.expected_output_quantity,
+        expectedOutputUnit: row.expected_output_unit,
+        kind: graphBlocked
+          ? "blocked"
+          : nested
+            ? "nested"
+            : row.classification === "prepared_base"
+              ? "prepared_batch"
+              : "finished_per_unit",
+        status: executionBlocked
+          ? "blocked"
+          : nested
+            ? "staged_execution_deferred"
+            : "ready_for_planning",
+        costStatus: row.cost_status,
+        missingRequirements,
+      };
+    }),
+  );
 }
 
 function aggregateCostState(

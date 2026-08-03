@@ -69,6 +69,30 @@ async function requireContext(db: RepositoryDatabase) {
   return status;
 }
 
+async function assertLegacyFlatProductionBoundary(
+  recipeId: string,
+  businessId: string,
+  db: RepositoryDatabase,
+) {
+  const boundary = await db.getFirstAsync<{
+    versioning_state: "legacy_compat" | "native" | "review_required";
+    active_version_id: string | null;
+  }>(
+    `
+      SELECT versioning_state, active_version_id
+      FROM recipes
+      WHERE id = ? AND business_id = ? AND is_active = 1
+        AND deleted_at IS NULL
+    `,
+    [recipeId, businessId],
+  );
+  if (!boundary || boundary.versioning_state !== "legacy_compat") {
+    throw new Error(
+      "Native and review-required Recipes cannot use the protected legacy flat production executor.",
+    );
+  }
+}
+
 async function buildPlanForRecipe(
   recipe: Recipe,
   producedQuantity: number,
@@ -133,6 +157,7 @@ export async function recordProduction(
   if (!recipe || recipe.businessId !== business.id || !recipe.isActive) {
     throw new Error("Recipe not found. Refresh and try again.");
   }
+  await assertLegacyFlatProductionBoundary(recipe.id, business.id, db);
 
   const product: Product | null = recipe.outputProductId ? await getProductById(recipe.outputProductId, db) : null;
   if (!product || product.businessId !== business.id) {

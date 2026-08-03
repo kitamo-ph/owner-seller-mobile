@@ -15,6 +15,10 @@ import { planProduction } from "@/domain/productionMath";
 import { loadGroceryPoolSnapshot, type GroceryPoolSnapshot } from "@/services/groceryPool";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
 import { listRecentProduction, recordProduction, type ProductionResult } from "@/services/production";
+import {
+  loadNativeProductionReadiness,
+  type NativeProductionReadinessEntry,
+} from "@/services/productionPlanner";
 import { buildCostingLines, loadRecipesOverview, type RecipesOverview } from "@/services/recipes";
 import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
@@ -32,6 +36,9 @@ export default function OwnerProductionScreen() {
   const [overview, setOverview] = useState<RecipesOverview | null>(null);
   const [grocery, setGrocery] = useState<GroceryPoolSnapshot | null>(null);
   const [recent, setRecent] = useState<ProductionBatchWithNames[]>([]);
+  const [nativeReadiness, setNativeReadiness] = useState<
+    NativeProductionReadinessEntry[]
+  >([]);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -54,15 +61,24 @@ export default function OwnerProductionScreen() {
     const nextOverview = await loadRecipesOverview();
     const nextGrocery = await loadGroceryPoolSnapshot();
     const nextRecent = await listRecentProduction(6);
+    const nextNativeReadiness = await loadNativeProductionReadiness();
+    const nativeRecipeIds = new Set(
+      nextNativeReadiness.map((entry) => entry.recipeId),
+    );
     const activeBranches = nextStatus.branches.filter((branch) => branch.active);
     const selectableRecipes = nextOverview.items.filter(
-      (item) => item.recipe.isActive && item.lines.length > 0 && item.recipe.productionMode === "prepared_before_selling",
+      (item) =>
+        !nativeRecipeIds.has(item.recipe.id) &&
+        item.recipe.isActive &&
+        item.lines.length > 0 &&
+        item.recipe.productionMode === "prepared_before_selling",
     );
 
     setStatus(nextStatus);
     setOverview(nextOverview);
     setGrocery(nextGrocery);
     setRecent(nextRecent);
+    setNativeReadiness(nextNativeReadiness);
     setSelectedBranchId((current) => {
       if (current && activeBranches.some((branch) => branch.id === current)) return current;
       if (nextStatus.activeBranch && activeBranches.some((branch) => branch.id === nextStatus.activeBranch?.id)) {
@@ -99,12 +115,31 @@ export default function OwnerProductionScreen() {
   );
 
   const branches = useMemo(() => (status?.branches ?? []).filter((branch) => branch.active), [status?.branches]);
+  const nativeRecipeIds = useMemo(
+    () => new Set(nativeReadiness.map((entry) => entry.recipeId)),
+    [nativeReadiness],
+  );
+  const orderedNativeReadiness = useMemo(() => {
+    if (!requestedRecipeId) return nativeReadiness;
+    const requested = nativeReadiness.find(
+      (entry) => entry.recipeId === requestedRecipeId,
+    );
+    if (!requested) return nativeReadiness;
+    return [
+      requested,
+      ...nativeReadiness.filter((entry) => entry.recipeId !== requestedRecipeId),
+    ];
+  }, [nativeReadiness, requestedRecipeId]);
   const activeRecipes = useMemo(
     () =>
       (overview?.items ?? []).filter(
-        (item) => item.recipe.isActive && item.lines.length > 0 && item.recipe.productionMode === "prepared_before_selling",
+        (item) =>
+          !nativeRecipeIds.has(item.recipe.id) &&
+          item.recipe.isActive &&
+          item.lines.length > 0 &&
+          item.recipe.productionMode === "prepared_before_selling",
       ),
-    [overview?.items],
+    [nativeRecipeIds, overview?.items],
   );
   const cookOnlyRecipes = useMemo(
     () =>
@@ -283,7 +318,10 @@ export default function OwnerProductionScreen() {
           </GabiCard>
         ) : null}
 
-        {ready && hasBusiness && activeRecipes.length === 0 ? (
+        {ready &&
+        hasBusiness &&
+        activeRecipes.length === 0 &&
+        nativeReadiness.length === 0 ? (
           <GabiCard>
             <GabiEmptyState
               actionLabel="Buksan ang Recipes"
@@ -297,6 +335,38 @@ export default function OwnerProductionScreen() {
               title="Walang recipe para sa production"
             />
           </GabiCard>
+        ) : null}
+
+        {ready && hasBusiness && nativeReadiness.length > 0 ? (
+          <>
+            <GabiSectionHeader title="Native Recipe production readiness" />
+            <GabiNotice
+              message="This is definition-only, read-only planning context. It validates published Recipe identity, graph, and cost evidence without calculating stock allocations or entering the protected legacy production transaction. Reviewing it does not reserve, deduct, or add stock."
+              title="Definition-only · no inventory mutation"
+              tone="owner"
+            />
+            <View style={styles.selectionList}>
+              {orderedNativeReadiness.map((entry) => (
+                <NativeProductionReadinessCard
+                  entry={entry}
+                  key={entry.versionId}
+                  onOpenRecipe={() =>
+                    router.push({
+                      pathname: "/owner/recipes",
+                      params: {
+                        group:
+                          entry.classification === "prepared_base"
+                            ? "prepared"
+                            : "selling",
+                        publishedItemId: entry.catalogItemId,
+                      },
+                    })
+                  }
+                  requested={entry.recipeId === requestedRecipeId}
+                />
+              ))}
+            </View>
+          </>
         ) : null}
 
         {ready && hasBusiness && branches.length > 0 && activeRecipes.length > 0 ? (
@@ -645,6 +715,91 @@ export default function OwnerProductionScreen() {
   );
 }
 
+function NativeProductionReadinessCard({
+  entry,
+  onOpenRecipe,
+  requested,
+}: {
+  entry: NativeProductionReadinessEntry;
+  onOpenRecipe: () => void;
+  requested: boolean;
+}) {
+  const { palette } = useGabiTheme();
+  const statusLabel =
+    entry.status === "blocked"
+      ? "Blocked"
+      : entry.status === "staged_execution_deferred"
+        ? "Staged definition"
+        : "Definition only";
+  const statusTone =
+    entry.status === "blocked"
+      ? "danger"
+      : "success";
+  const kindLabel =
+    entry.kind === "nested"
+      ? "Nested staged Recipe"
+      : entry.kind === "prepared_batch"
+        ? "Prepared batch"
+        : entry.kind === "finished_per_unit"
+          ? "Finished per-unit Recipe"
+          : "Recipe needs review";
+
+  return (
+    <GabiCard
+      raised
+      style={
+        requested
+          ? { borderColor: palette.primary, borderWidth: 2 }
+          : undefined
+      }
+    >
+      {requested ? (
+        <GabiChip
+          icon="navigate-circle-outline"
+          label="Requested from Paninda"
+          tone="primary"
+        />
+      ) : null}
+      <View style={styles.nativeReadinessHeader}>
+        <View style={styles.nativeReadinessCopy}>
+          <GabiText variant="cardTitle">{entry.name}</GabiText>
+          <GabiText tone="muted" variant="caption">
+            {kindLabel} · {formatQuantity(entry.expectedOutputQuantity)} {entry.expectedOutputUnit} expected output
+          </GabiText>
+        </View>
+        <GabiChip label={statusLabel} tone={statusTone} />
+      </View>
+
+      {entry.status === "staged_execution_deferred" ? (
+        <GabiNotice
+          message="Preparation plan ready; staged production will be enabled in the next production phase."
+          tone="warning"
+        />
+      ) : entry.status === "ready_for_planning" ? (
+        <GabiNotice
+          message="The published definition is eligible for a future read-only stock plan. Stock allocation has not been calculated here, and native stock execution remains intentionally disabled."
+          tone="success"
+        />
+      ) : null}
+
+      {entry.missingRequirements.map((requirement) => (
+        <GabiNotice
+          key={requirement}
+          message={requirement}
+          tone={entry.status === "blocked" ? "danger" : "warning"}
+        />
+      ))}
+
+      <GabiSoftButton
+        compact
+        icon="book-outline"
+        label="Buksan ang Recipe Book"
+        onPress={onOpenRecipe}
+      />
+    </GabiCard>
+  );
+}
+
 function SelectionRow({
   icon,
   title,
@@ -720,6 +875,16 @@ function QuickQuantity({
 }
 
 const styles = StyleSheet.create({
+  nativeReadinessHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  nativeReadinessCopy: {
+    flex: 1,
+    gap: spacing.xs,
+  },
   selectionList: {
     gap: spacing.sm,
   },
