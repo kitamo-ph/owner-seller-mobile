@@ -28,6 +28,7 @@
     "check:paninda-stabilization": "tsc src/domain/catalogItems.ts --outDir node_modules/.cache/kitamo-paninda-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-paninda-stabilization.js",
     "check:paninda-lifecycle-transactions": "node scripts/check-paninda-lifecycle-transactions.js",
     "check:paninda-action-sheet-behavior": "node scripts/check-paninda-action-sheet-behavior.js",
+    "check:paninda-action-sheet-structure": "node scripts/check-paninda-action-sheet-structure.js",
     "check:grocery-production-stabilization": "node scripts/check-grocery-production-stabilization.js",
     "check:recipe-graph": "tsc src/domain/recipeGraph.ts --outDir node_modules/.cache/kitamo-recipe-graph-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-recipe-graph.js",
     "check:recipe-versioning": "tsc src/domain/recipeVersioning.ts --outDir node_modules/.cache/kitamo-recipe-versioning-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-recipe-versioning.js",

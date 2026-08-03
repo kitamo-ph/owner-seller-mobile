@@ -50,7 +50,10 @@ const categories = [
     ],
   },
   {
-    title: "UI behavioral checks",
+    // Renamed from "UI behavioral checks": these exercise extracted view models
+    // that the screens consume, not host-rendered components. Rendered-structure
+    // evidence is reported separately below.
+    title: "View-model behavioral checks",
     checks: [
       "check:paninda-action-sheet-behavior",
       "check:recipe-ingredient-picker-behavior",
@@ -58,6 +61,14 @@ const categories = [
       "check:recipe-stabilization-behavior",
       "check:paninda-stabilization",
     ],
+  },
+  {
+    // AST conformance over the shipped JSX. React Native components cannot be
+    // host-rendered here (react-test-renderer/react-native-web/jsdom absent and
+    // dependency additions are gated), so the real element tree is asserted
+    // directly instead of being described by a parallel model.
+    title: "Rendered structure conformance",
+    checks: ["check:paninda-action-sheet-structure"],
   },
   {
     title: "Source-contract guards",

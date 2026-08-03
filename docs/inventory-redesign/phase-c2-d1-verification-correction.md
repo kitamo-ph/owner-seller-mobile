@@ -68,12 +68,41 @@ not first-class executable umbrella categories:
 * protected-artifact verification as an npm-registered check with explicit
   pass/fail/skip semantics
 * reusable phase-preflight guard that fails closed on dirty worktrees
-* rendered Paninda action-sheet behavior distinct from source-text matching
-* rendered ingredient-library picker behavior distinct from source-text matching
+* Paninda action-sheet behavior distinct from source-text matching
+* ingredient-library picker behavior distinct from source-text matching
 * Step 2 / Step 3 resolved identity presentation as a pure behavioral model
 
 Phase C2–D1R adds executable coverage for those gaps and categorizes umbrella
 output so skipped protected-AAB verification cannot appear as passed.
+
+## Follow-up correction — rendered-structure evidence
+
+An independent pass after C2–D1R found that the action-sheet and picker suites
+exercise extracted view models, not host-rendered components, and that the
+umbrella category "UI behavioral checks" therefore overstated them. React Native
+components cannot be host-rendered in this repository: `react-test-renderer`,
+`react-native-web`, and `jsdom` are absent, and dependency additions are gated.
+
+Two corrections were applied without changing product behavior:
+
+1. The umbrella category was renamed to `View-model behavioral checks`, and a
+   separate `Rendered structure conformance` category was added.
+2. `scripts/check-paninda-action-sheet-structure.js` asserts the **real JSX** of
+   `ProductActionSheet` in `app/owner/inventory.tsx` through the TypeScript
+   compiler API — true AST parent, child, and sibling relationships rather than
+   source-text matching. It proves the Modal roots the sheet with Android Back
+   wired, the scrim closes it, bounded height and bottom inset are bound to
+   `buildPanindaActionSheetLayout`, exactly one `ScrollView` holds the actions,
+   the fixed header and close action are preceding siblings never nested inside
+   that `ScrollView`, and the action list is produced from
+   `buildPanindaActionDescriptors`. It additionally pins the test-only
+   `buildPanindaActionSheetTree` model to the same invariants so the model
+   cannot drift away from the component it describes.
+
+The guard was mutation-tested. Unbinding `maxHeight` from the layout model,
+removing `onRequestClose`, and moving the fixed header inside the action
+`ScrollView` each fail it, while the pre-existing view-model suite passes on all
+three — which is the coverage gap this correction closes.
 
 ## Approved design deviations
 
