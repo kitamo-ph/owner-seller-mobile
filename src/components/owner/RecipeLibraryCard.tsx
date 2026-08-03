@@ -42,16 +42,32 @@ export function RecipeLibraryCard({
   onOpen,
   onProduce,
   onMoreActions,
+  highlighted = false,
 }: {
   item: RecipeLibraryCardView;
   onOpen: () => void;
   onProduce?: () => void;
   onMoreActions: () => void;
+  highlighted?: boolean;
 }) {
   const { palette } = useGabiTheme();
 
   return (
-    <GabiCard raised>
+    <GabiCard
+      raised
+      style={
+        highlighted
+          ? { borderColor: palette.primary, borderWidth: 2 }
+          : undefined
+      }
+    >
+      {highlighted ? (
+        <GabiChip
+          icon="checkmark-circle-outline"
+          label="Recipe ready — just published"
+          tone="success"
+        />
+      ) : null}
       <Pressable
         accessibilityHint="Open this item in the Recipe editor"
         accessibilityLabel={`${item.name}, ${item.classificationLabel}, ${item.statusLabel}`}

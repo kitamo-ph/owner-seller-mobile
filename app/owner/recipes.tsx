@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -209,7 +209,6 @@ function matchesGroup(
 
 function sectionKey(entry: RecipeFirstLibraryEntry): RecipeLibraryGroup {
   if (entry.draftId) return "drafts";
-  if (entry.activeVersionId) return "recipes";
   if (entry.classification === "prepared_base") return "prepared";
   if (
     entry.ingredientId ||
@@ -219,32 +218,43 @@ function sectionKey(entry: RecipeFirstLibraryEntry): RecipeLibraryGroup {
     return "ingredients";
   }
   if (
-    entry.classification === "direct_resale_product" ||
-    (entry.productId && !entry.activeVersionId)
-  ) {
-    return "resale";
-  }
-  if (
     entry.classification === "finished_product" ||
     entry.classification === "bundle_combo"
   ) {
     return "selling";
+  }
+  if (entry.activeVersionId) return "recipes";
+  if (
+    entry.classification === "direct_resale_product" ||
+    (entry.productId && !entry.activeVersionId)
+  ) {
+    return "resale";
   }
   return "all";
 }
 
 const sectionTitles: Record<RecipeLibraryGroup, string> = {
   all: "Other items",
-  recipes: "Recipes",
-  prepared: "Prepared Bases",
+  recipes: "Needs Review",
+  prepared: "Prepared Recipes",
   ingredients: "Ingredients",
-  selling: "Selling Items",
+  selling: "Finished Recipes",
   resale: "Resale Products",
   drafts: "Drafts",
   archived: "Archived",
 };
 
 export default function OwnerRecipesScreen() {
+  const params = useLocalSearchParams<{
+    publishedItemId?: string | string[];
+    group?: string | string[];
+  }>();
+  const publishedItemId = Array.isArray(params.publishedItemId)
+    ? params.publishedItemId[0]
+    : params.publishedItemId;
+  const requestedGroup = Array.isArray(params.group)
+    ? params.group[0]
+    : params.group;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { palette, extended } = useGabiTheme();
@@ -260,6 +270,7 @@ export default function OwnerRecipesScreen() {
   const [actions, setActions] = useState<ActionState>(null);
   const [busy, setBusy] = useState(false);
   const actionLock = useRef(false);
+  const handledPublishedItem = useRef<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -279,7 +290,23 @@ export default function OwnerRecipesScreen() {
       setLoading(true);
       void refresh()
         .then(() => {
-          if (active) setLoadError(null);
+          if (active) {
+            setLoadError(null);
+            if (
+              publishedItemId &&
+              handledPublishedItem.current !== publishedItemId
+            ) {
+              handledPublishedItem.current = publishedItemId;
+              setSearch("");
+              setCostFilter("all");
+              setGroup(
+                requestedGroup === "prepared" || requestedGroup === "selling"
+                  ? requestedGroup
+                  : "all",
+              );
+              setSnackbar("Recipe ready — review production setup next");
+            }
+          }
         })
         .catch((error) => {
           logDevError("OwnerRecipes.recipeFirstLibrary", error);
@@ -295,7 +322,7 @@ export default function OwnerRecipesScreen() {
       return () => {
         active = false;
       };
-    }, [refresh]),
+    }, [publishedItemId, refresh, requestedGroup]),
   );
 
   const filtered = useMemo(() => {
@@ -326,12 +353,12 @@ export default function OwnerRecipesScreen() {
         : [];
     }
     const order: RecipeLibraryGroup[] = [
-      "drafts",
-      "recipes",
-      "prepared",
-      "ingredients",
       "selling",
+      "prepared",
+      "drafts",
+      "ingredients",
       "resale",
+      "recipes",
       "all",
     ];
     return order
@@ -523,7 +550,7 @@ export default function OwnerRecipesScreen() {
         <View />
         <AppTopBar
           eyebrow="Tindahan"
-          subtitle="Recipes, prepared bases, ingredients, selling items, and drafts"
+          subtitle="Finished recipes, prepared recipes, drafts, ingredients, and resale products"
           title="Recipe Book"
         />
         <TindahanTabs active="recipes" />
@@ -615,6 +642,7 @@ export default function OwnerRecipesScreen() {
               const view = cardView(entry);
               return (
                 <RecipeLibraryCard
+                  highlighted={entry.catalogItemId === publishedItemId}
                   item={view}
                   key={entry.catalogItemId}
                   onMoreActions={() =>

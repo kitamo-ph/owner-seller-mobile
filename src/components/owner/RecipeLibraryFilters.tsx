@@ -31,12 +31,12 @@ const groups: {
   icon: IoniconName;
 }[] = [
   { value: "all", label: "All", icon: "apps-outline" },
-  { value: "recipes", label: "Recipes", icon: "restaurant-outline" },
-  { value: "prepared", label: "Prepared Bases", icon: "flask-outline" },
-  { value: "ingredients", label: "Ingredients", icon: "leaf-outline" },
-  { value: "selling", label: "Selling Items", icon: "pricetag-outline" },
-  { value: "resale", label: "Resale Products", icon: "basket-outline" },
+  { value: "selling", label: "Finished Recipes", icon: "pricetag-outline" },
+  { value: "prepared", label: "Prepared Recipes", icon: "flask-outline" },
   { value: "drafts", label: "Drafts", icon: "document-text-outline" },
+  { value: "ingredients", label: "Ingredients", icon: "leaf-outline" },
+  { value: "resale", label: "Resale Products", icon: "basket-outline" },
+  { value: "recipes", label: "Needs Review", icon: "alert-circle-outline" },
   { value: "archived", label: "Archived", icon: "archive-outline" },
 ];
 
