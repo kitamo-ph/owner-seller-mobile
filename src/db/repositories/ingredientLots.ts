@@ -2,6 +2,11 @@ import { z } from "zod";
 
 import type { CostState } from "@/domain/costState";
 import { makeIngredientLotId, makeIngredientMovementId } from "@/domain/ids";
+import {
+  normalizePracticalRecipeUnit,
+  recipeUnitStandard,
+  validateRecipeConversionSnapshotEvidence,
+} from "@/domain/recipeConversionChains";
 import type {
   IngredientLot,
   IngredientLotStatus,
@@ -30,6 +35,10 @@ const createIngredientLotSchema = z.object({
   supplierId: z.string().nullable().optional(),
   purchaseReceiptId: z.string().nullable().optional(),
   sourceMetadataJson: z.string().nullable().optional(),
+  enteredQuantity: z.number().positive().nullable().optional(),
+  enteredUnit: z.string().trim().min(1).nullable().optional(),
+  unitStandardSnapshot: z.string().trim().min(1).nullable().optional(),
+  conversionChainJson: z.string().trim().min(1).nullable().optional(),
   notes: z.string().nullable().optional(),
 });
 
@@ -70,6 +79,10 @@ type IngredientLotRow = {
   recorded_total_cost: number | null;
   recorded_cost_per_unit: number | null;
   source_metadata_json: string | null;
+  entered_quantity: number | null;
+  entered_unit: string | null;
+  unit_standard_snapshot: string | null;
+  conversion_chain_json: string | null;
   notes: string | null;
   status: IngredientLotStatus;
   created_at: string;
@@ -92,6 +105,10 @@ export type IngredientLotCostRecord = IngredientLot & {
   recordedTotalCost: number | null;
   recordedCostPerUnit: number | null;
   sourceMetadataJson: string | null;
+  enteredQuantity: number;
+  enteredUnit: string;
+  unitStandardSnapshot: string | null;
+  conversionChainJson: string | null;
 };
 
 export type IngredientLotWithName = IngredientLotCostRecord & {
@@ -127,6 +144,10 @@ function mapIngredientLot(row: IngredientLotRow): IngredientLotCostRecord {
     recordedTotalCost: row.recorded_total_cost,
     recordedCostPerUnit: row.recorded_cost_per_unit,
     sourceMetadataJson: row.source_metadata_json,
+    enteredQuantity: row.entered_quantity ?? row.purchased_quantity,
+    enteredUnit: row.entered_unit ?? row.unit,
+    unitStandardSnapshot: row.unit_standard_snapshot,
+    conversionChainJson: row.conversion_chain_json,
     notes: row.notes,
     status: row.status,
     createdAt: row.created_at,
@@ -143,6 +164,51 @@ function mapIngredientLotWithName(row: IngredientLotWithNameRow): IngredientLotW
     ingredientLowStockThreshold: row.ingredient_low_stock_threshold,
     ingredientDefaultUnit: row.ingredient_default_unit,
   };
+}
+
+function sameConversionValue(left: number, right: number) {
+  return (
+    Math.abs(left - right) <=
+    1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
+  );
+}
+
+function validateIngredientLotConversionEvidence(
+  lot: IngredientLotCostRecord,
+) {
+  const inputUnit = normalizePracticalRecipeUnit(lot.enteredUnit);
+  const outputUnit = normalizePracticalRecipeUnit(lot.unit);
+  const factor = lot.purchasedQuantity / lot.enteredQuantity;
+  if (!lot.conversionChainJson) {
+    if (
+      inputUnit !== outputUnit ||
+      !sameConversionValue(factor, 1)
+    ) {
+      throw new Error(
+        "Ingredient-lot normalized quantity requires conversion evidence.",
+      );
+    }
+    if (
+      lot.unitStandardSnapshot &&
+      (!inputUnit ||
+        lot.unitStandardSnapshot !== recipeUnitStandard(inputUnit))
+    ) {
+      throw new Error("Ingredient-lot unit standard is inconsistent.");
+    }
+    return;
+  }
+  const validation = validateRecipeConversionSnapshotEvidence({
+    conversionChainJson: lot.conversionChainJson,
+    unitStandardSnapshot: lot.unitStandardSnapshot,
+    expectedInputUnit: lot.enteredUnit,
+    expectedOutputUnit: lot.unit,
+    expectedOutputQuantityPerInputUnit: factor,
+  });
+  if (!validation.ok) {
+    throw new Error(
+      `Ingredient-lot conversion evidence is inconsistent (${validation.reason}).`,
+    );
+  }
 }
 
 export async function createIngredientLot(input: CreateIngredientLotInput, db?: RepositoryDatabase) {
@@ -170,6 +236,15 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
       : recordedTotalCost / parsed.purchasedQuantity;
   const compatibilityTotalCost = recordedTotalCost ?? 0;
   const compatibilityCostPerUnit = recordedCostPerUnit ?? 0;
+  const hasEnteredQuantity =
+    parsed.enteredQuantity !== null && parsed.enteredQuantity !== undefined;
+  const hasEnteredUnit =
+    parsed.enteredUnit !== null && parsed.enteredUnit !== undefined;
+  if (hasEnteredQuantity !== hasEnteredUnit) {
+    throw new Error(
+      "Ingredient-lot entered quantity and unit must be recorded together.",
+    );
+  }
   const lot: IngredientLotCostRecord = {
     id: parsed.id ?? makeIngredientLotId(),
     businessId: parsed.businessId,
@@ -190,6 +265,10 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
     recordedTotalCost,
     recordedCostPerUnit,
     sourceMetadataJson: parsed.sourceMetadataJson ?? null,
+    enteredQuantity: parsed.enteredQuantity ?? parsed.purchasedQuantity,
+    enteredUnit: parsed.enteredUnit?.trim() || parsed.unit,
+    unitStandardSnapshot: parsed.unitStandardSnapshot?.trim() || null,
+    conversionChainJson: parsed.conversionChainJson?.trim() || null,
     notes: parsed.notes?.trim() || null,
     status: "active",
     createdAt,
@@ -197,6 +276,7 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
     syncStatus: "local",
     deletedAt: null,
   };
+  validateIngredientLotConversionEvidence(lot);
 
   const ingredient = await database.getFirstAsync<{ business_id: string }>(
     `
@@ -260,8 +340,9 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
         notes, status, created_at, updated_at, sync_status, deleted_at,
         expiry_date, supplier_id, purchase_receipt_id, provenance_state,
         cost_state, recorded_total_cost, recorded_cost_per_unit,
-        source_metadata_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_metadata_json, entered_quantity, entered_unit,
+        unit_standard_snapshot, conversion_chain_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       lot.id,
@@ -289,10 +370,109 @@ export async function createIngredientLot(input: CreateIngredientLotInput, db?: 
       lot.recordedTotalCost,
       lot.recordedCostPerUnit,
       lot.sourceMetadataJson,
+      lot.enteredQuantity,
+      lot.enteredUnit,
+      lot.unitStandardSnapshot,
+      lot.conversionChainJson,
     ],
   );
 
   return lot;
+}
+
+/**
+ * Completes previously missing purchase-price evidence. This deliberately is
+ * not a general price editor: known evidence and historical snapshots are
+ * never rewritten through this boundary.
+ */
+export async function completeIngredientLotCost(
+  lotId: string,
+  totalCost: number,
+  expectedUpdatedAt: string,
+  db?: RepositoryDatabase,
+) {
+  if (!Number.isFinite(totalCost) || totalCost < 0) {
+    throw new Error("Completed purchase cost must be zero or higher.");
+  }
+  const database = getRepositoryDatabase(db);
+  const existing = await getIngredientLotById(lotId, database);
+  if (!existing) throw new Error("Grocery lot not found.");
+  if (existing.costState === "known") {
+    if (existing.recordedTotalCost === totalCost) return existing;
+    throw new Error(
+      "This lot already has authoritative cost evidence. Record new evidence instead of rewriting history.",
+    );
+  }
+
+  const costPerUnit = totalCost / existing.purchasedQuantity;
+  const updatedAt = nowIso();
+  const result = await database.runAsync(
+    `
+      UPDATE ingredient_lots
+      SET total_cost = ?, cost_per_unit = ?, cost_state = 'known',
+        recorded_total_cost = ?, recorded_cost_per_unit = ?,
+        updated_at = ?, sync_status = 'local'
+      WHERE id = ? AND deleted_at IS NULL AND updated_at = ?
+        AND cost_state IN ('unknown', 'legacy_zero_unresolved')
+        AND recorded_total_cost IS NULL AND recorded_cost_per_unit IS NULL
+    `,
+    [
+      totalCost,
+      costPerUnit,
+      totalCost,
+      costPerUnit,
+      updatedAt,
+      lotId,
+      expectedUpdatedAt,
+    ],
+  );
+  if (result.changes !== 1) {
+    throw new Error("Grocery lot changed before its missing price was completed.");
+  }
+  const completed = await getIngredientLotById(lotId, database);
+  if (!completed) throw new Error("Completed grocery lot is unavailable.");
+  return completed;
+}
+
+/**
+ * Updates descriptive lot metadata only. Quantity, entered-unit, purchase-cost,
+ * and historical calculation evidence are intentionally outside this boundary.
+ */
+export async function updateIngredientLotMetadata(
+  lotId: string,
+  input: {
+    brandName: string | null;
+    sourceName: string | null;
+    notes: string | null;
+    expectedUpdatedAt: string;
+  },
+  db?: RepositoryDatabase,
+) {
+  const database = getRepositoryDatabase(db);
+  const updatedAt = nowIso();
+  const result = await database.runAsync(
+    `
+      UPDATE ingredient_lots
+      SET brand_name = ?, source_name = ?, notes = ?, updated_at = ?,
+        sync_status = 'local'
+      WHERE id = ? AND deleted_at IS NULL AND status <> 'archived'
+        AND updated_at = ?
+    `,
+    [
+      input.brandName?.trim() || null,
+      input.sourceName?.trim() || null,
+      input.notes?.trim() || null,
+      updatedAt,
+      lotId,
+      input.expectedUpdatedAt,
+    ],
+  );
+  if (result.changes !== 1) {
+    throw new Error("Grocery lot changed before its metadata was saved.");
+  }
+  const updated = await getIngredientLotById(lotId, database);
+  if (!updated) throw new Error("Updated grocery lot is unavailable.");
+  return updated;
 }
 
 export async function createIngredientMovement(input: CreateIngredientMovementInput, db?: RepositoryDatabase) {
@@ -435,6 +615,41 @@ export async function setIngredientLotRemainingQuantity(
     throw new Error("Remaining stock cannot be more than the purchased quantity.");
   }
 
+  return true;
+}
+
+export async function compareAndSetIngredientLotRemainingQuantity(
+  lotId: string,
+  newRemainingQuantity: number,
+  expectedUpdatedAt: string,
+  db?: RepositoryDatabase,
+) {
+  if (!Number.isFinite(newRemainingQuantity) || newRemainingQuantity < 0) {
+    throw new Error("Remaining stock cannot be negative.");
+  }
+
+  const database = getRepositoryDatabase(db);
+  const updatedAt = nowIso();
+  const nextStatus = newRemainingQuantity <= 0 ? "depleted" : "active";
+  const result = await database.runAsync(
+    `
+      UPDATE ingredient_lots
+      SET remaining_quantity = ?, status = ?, updated_at = ?, sync_status = 'local'
+      WHERE id = ? AND deleted_at IS NULL AND status != 'archived'
+        AND purchased_quantity >= ? AND updated_at = ?
+    `,
+    [
+      newRemainingQuantity,
+      nextStatus,
+      updatedAt,
+      lotId,
+      newRemainingQuantity,
+      expectedUpdatedAt,
+    ],
+  );
+  if (result.changes !== 1) {
+    throw new Error("Grocery lot changed before its stock adjustment was saved.");
+  }
   return true;
 }
 

@@ -4,6 +4,9 @@ import {
   createIngredient,
   createIngredientLot,
   createIngredientMovement,
+  archiveCatalogItemInTransaction,
+  completeIngredientLotCost,
+  compareAndSetIngredientLotRemainingQuantity,
   findIngredientByName,
   getIngredientLotById,
   listIngredientLotsForBusiness,
@@ -11,22 +14,51 @@ import {
   listIngredientsForBusiness,
   listRecipeLinesForBusiness,
   searchIngredientLots,
-  setIngredientLotRemainingQuantity,
   updateIngredient,
+  updateIngredientLotMetadata,
   type IngredientLotWithName,
+  type IngredientLotCostRecord,
   type RepositoryDatabase,
 } from "@/db/repositories";
-import type { Ingredient, IngredientLot, IngredientUnit } from "@/domain/types";
+import {
+  buildRecipeConversionChain,
+  normalizePracticalRecipeUnit,
+  recipeUnitStandard,
+  serializeRecipeConversionChain,
+  standardRecipeUnitFactor,
+} from "@/domain/recipeConversionChains";
+import type { Ingredient, IngredientUnit } from "@/domain/types";
 
 import { loadOwnerSetupStatus } from "./ownerSetup";
+import {
+  listGroceryMissingPrices,
+  type GroceryMissingPriceEntry,
+} from "./groceryRequirements";
+
+export const groceryPurchaseUnits = [
+  "g",
+  "kg",
+  "ml",
+  "L",
+  "pcs",
+  "pack",
+  "metric_cup",
+  "us_cup",
+  "custom_cup",
+  "us_gallon",
+  "imperial_gallon",
+] as const;
+
+export type GroceryPurchaseUnit = (typeof groceryPurchaseUnits)[number];
 
 export type AddGroceryPurchaseInput = {
   ingredientName: string;
   brandName?: string | null;
   sourceName?: string | null;
   quantity: number;
-  unit: IngredientUnit;
-  totalCost: number;
+  unit: GroceryPurchaseUnit;
+  customCupMilliliters?: number | null;
+  totalCost: number | null;
   purchaseDate?: string | null;
   lowStockThreshold?: number | null;
   category?: string | null;
@@ -35,8 +67,8 @@ export type AddGroceryPurchaseInput = {
 
 export type AddGroceryPurchaseResult = {
   ingredient: Ingredient;
-  lot: IngredientLot;
-  costPerUnit: number;
+  lot: IngredientLotCostRecord;
+  costPerUnit: number | null;
   createdNewIngredient: boolean;
 };
 
@@ -51,6 +83,8 @@ export type GroceryPoolSnapshot = {
   lotCount: number;
   recentLotCount: number;
   totalRemainingValue: number;
+  missingPriceLotCount: number;
+  missingPrices: GroceryMissingPriceEntry[];
   lowStockIngredients: LowStockIngredientSummary[];
   recipeUsageCountByLot: Record<string, number>;
   lots: IngredientLotWithName[];
@@ -62,8 +96,9 @@ export type IngredientCostHistoryEntry = {
   brandName: string | null;
   sourceName: string | null;
   unit: IngredientUnit;
-  costPerUnit: number;
-  totalCost: number;
+  costState: IngredientLotCostRecord["costState"];
+  costPerUnit: number | null;
+  totalCost: number | null;
   purchasedQuantity: number;
 };
 
@@ -94,6 +129,74 @@ export function convertIngredientQuantity(quantity: number, fromUnit: Ingredient
   }
 
   return null;
+}
+
+type NormalizedGroceryPurchase = {
+  quantity: number;
+  unit: IngredientUnit;
+  enteredQuantity: number;
+  enteredUnit: GroceryPurchaseUnit;
+  unitStandardSnapshot: string;
+  conversionChainJson: string | null;
+};
+
+function normalizeGroceryPurchase(input: {
+  quantity: number;
+  unit: GroceryPurchaseUnit;
+  customCupMilliliters?: number | null;
+}): NormalizedGroceryPurchase {
+  const practical = normalizePracticalRecipeUnit(input.unit);
+  if (!practical) throw new Error("Purchase unit is unavailable.");
+  const standard = recipeUnitStandard(practical);
+  if (
+    input.unit !== "metric_cup" &&
+    input.unit !== "us_cup" &&
+    input.unit !== "custom_cup" &&
+    input.unit !== "us_gallon" &&
+    input.unit !== "imperial_gallon"
+  ) {
+    return {
+      quantity: input.quantity,
+      unit: input.unit,
+      enteredQuantity: input.quantity,
+      enteredUnit: input.unit,
+      unitStandardSnapshot: standard,
+      conversionChainJson: null,
+    };
+  }
+
+  const factor =
+    input.unit === "custom_cup"
+      ? input.customCupMilliliters ?? null
+      : standardRecipeUnitFactor(input.unit, "ml");
+  if (!Number.isFinite(factor) || (factor as number) <= 0) {
+    throw new Error("Enter the exact milliliters used by your business cup.");
+  }
+  const meaning =
+    input.unit === "custom_cup"
+      ? `Business cup = ${factor} mL`
+      : `${input.unit} converted to milliliters using ${standard}`;
+  const chain = buildRecipeConversionChain([
+    {
+      fromQuantity: 1,
+      fromUnit: input.unit,
+      toQuantity: factor as number,
+      toUnit: "ml",
+      standard,
+      meaning,
+    },
+  ]);
+  if (!chain.ok) {
+    throw new Error(`Purchase-unit conversion is invalid: ${chain.reason}.`);
+  }
+  return {
+    quantity: input.quantity * (factor as number),
+    unit: "ml",
+    enteredQuantity: input.quantity,
+    enteredUnit: input.unit,
+    unitStandardSnapshot: chain.snapshot.unitStandardSummary,
+    conversionChainJson: serializeRecipeConversionChain(chain.snapshot),
+  };
 }
 
 function toLocalIsoDate(date: Date) {
@@ -130,17 +233,27 @@ export async function addGroceryPurchase(
     throw new Error("Quantity must be greater than zero.");
   }
 
-  if (!Number.isFinite(input.totalCost) || input.totalCost <= 0) {
-    throw new Error("Total cost must be greater than zero.");
+  if (
+    input.totalCost !== null &&
+    (!Number.isFinite(input.totalCost) || input.totalCost < 0)
+  ) {
+    throw new Error("Total cost must be zero or higher when entered.");
   }
 
   const business = await requireActiveBusiness(db);
   const existingIngredient = await findIngredientByName(business.id, name, db);
+  if (existingIngredient && !existingIngredient.isActive) {
+    throw new Error(
+      "This Grocery ingredient is archived. Restore it before adding another purchase.",
+    );
+  }
   const purchaseDate = input.purchaseDate?.trim() || todayIsoDate();
-  const costPerUnit = input.totalCost / input.quantity;
+  const normalized = normalizeGroceryPurchase(input);
+  const costPerUnit =
+    input.totalCost === null ? null : input.totalCost / normalized.quantity;
 
   let ingredient: Ingredient | null = null;
-  let lot: IngredientLot | null = null;
+  let lot: IngredientLotCostRecord | null = null;
 
   await db.withExclusiveTransactionAsync(async (txn) => {
     if (existingIngredient) {
@@ -153,7 +266,7 @@ export async function addGroceryPurchase(
         {
           businessId: business.id,
           name,
-          defaultUnit: input.unit,
+          defaultUnit: normalized.unit,
           category: input.category?.trim() || "General",
           lowStockThreshold: input.lowStockThreshold ?? 0,
         },
@@ -168,9 +281,14 @@ export async function addGroceryPurchase(
         brandName: input.brandName ?? null,
         sourceName: input.sourceName ?? null,
         purchaseDate,
-        purchasedQuantity: input.quantity,
-        unit: input.unit,
+        purchasedQuantity: normalized.quantity,
+        unit: normalized.unit,
         totalCost: input.totalCost,
+        costState: input.totalCost === null ? "unknown" : "known",
+        enteredQuantity: normalized.enteredQuantity,
+        enteredUnit: normalized.enteredUnit,
+        unitStandardSnapshot: normalized.unitStandardSnapshot,
+        conversionChainJson: normalized.conversionChainJson,
         notes: input.notes ?? null,
       },
       txn,
@@ -182,8 +300,8 @@ export async function addGroceryPurchase(
         ingredientId: ingredient.id,
         lotId: lot.id,
         movementType: "purchase",
-        quantity: input.quantity,
-        unit: input.unit,
+        quantity: normalized.quantity,
+        unit: normalized.unit,
         unitCost: costPerUnit,
         totalCost: input.totalCost,
         reason: [
@@ -195,6 +313,36 @@ export async function addGroceryPurchase(
           .join(" "),
       },
       txn,
+    );
+
+    await txn.runAsync(
+      `
+        UPDATE catalog_items
+        SET purchase_cost_state = CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM legacy_item_bindings binding
+            INNER JOIN ingredient_lots known_lot
+              ON known_lot.ingredient_id = binding.legacy_entity_id
+              AND known_lot.deleted_at IS NULL
+              AND known_lot.status <> 'archived'
+              AND known_lot.cost_state = 'known'
+              AND known_lot.recorded_cost_per_unit IS NOT NULL
+            WHERE binding.catalog_item_id = catalog_items.id
+              AND binding.entity_kind = 'ingredient'
+              AND binding.deleted_at IS NULL
+          ) THEN 'known'
+          ELSE 'unknown'
+        END,
+        updated_at = ?, sync_status = 'local'
+        WHERE id = (
+          SELECT catalog_item_id
+          FROM legacy_item_bindings
+          WHERE entity_kind = 'ingredient' AND legacy_entity_id = ?
+            AND deleted_at IS NULL
+        ) AND business_id = ? AND deleted_at IS NULL
+      `,
+      [new Date().toISOString(), ingredient.id, business.id],
     );
   });
 
@@ -224,6 +372,8 @@ async function loadGroceryPoolSnapshotInternal(
       lotCount: 0,
       recentLotCount: 0,
       totalRemainingValue: 0,
+      missingPriceLotCount: 0,
+      missingPrices: [],
       lowStockIngredients: [],
       recipeUsageCountByLot: {},
       lots: [],
@@ -234,7 +384,14 @@ async function loadGroceryPoolSnapshotInternal(
   const ingredients = await listIngredientsForBusiness(businessId, db);
   const lots = await listIngredientLotsForBusiness(businessId, db);
   const recipeLines = includeRecipeUsage ? await listRecipeLinesForBusiness(businessId, db) : [];
-  const visibleLots = lots.filter((lot) => lot.status !== "archived");
+  const activeIngredients = ingredients.filter((ingredient) => ingredient.isActive);
+  const activeIngredientIds = new Set(
+    activeIngredients.map((ingredient) => ingredient.id),
+  );
+  const visibleLots = lots.filter(
+    (lot) => lot.status !== "archived" && activeIngredientIds.has(lot.ingredientId),
+  );
+  const missingPrices = await listGroceryMissingPrices(businessId, db);
 
   const recipeIdsByLot = new Map<string, Set<string>>();
   for (const line of recipeLines) {
@@ -250,7 +407,16 @@ async function loadGroceryPoolSnapshotInternal(
     [...recipeIdsByLot.entries()].map(([lotId, recipeIds]) => [lotId, recipeIds.size]),
   );
 
-  const totalRemainingValue = visibleLots.reduce((total, lot) => total + lot.remainingQuantity * lot.costPerUnit, 0);
+  const totalRemainingValue = visibleLots.reduce(
+    (total, lot) =>
+      lot.costState === "known" && lot.recordedCostPerUnit !== null
+        ? total + lot.remainingQuantity * lot.recordedCostPerUnit
+        : total,
+    0,
+  );
+  const missingPriceLotCount = visibleLots.filter(
+    (lot) => lot.costState !== "known",
+  ).length;
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -258,7 +424,7 @@ async function loadGroceryPoolSnapshotInternal(
   const recentLotCount = visibleLots.filter((lot) => lot.purchaseDate >= sevenDaysAgoIso).length;
 
   const lowStockIngredients: LowStockIngredientSummary[] = [];
-  for (const ingredient of ingredients) {
+  for (const ingredient of activeIngredients) {
     if (!ingredient.isActive || ingredient.lowStockThreshold <= 0) {
       continue;
     }
@@ -282,13 +448,15 @@ async function loadGroceryPoolSnapshotInternal(
 
   return {
     hasBusiness: true,
-    ingredientCount: ingredients.length,
+    ingredientCount: activeIngredients.length,
     lotCount: visibleLots.length,
     recentLotCount,
     totalRemainingValue,
+    missingPriceLotCount,
+    missingPrices,
     lowStockIngredients,
     recipeUsageCountByLot,
-    lots,
+    lots: visibleLots,
   };
 }
 
@@ -331,10 +499,106 @@ export async function getIngredientCostHistory(
     brandName: lot.brandName,
     sourceName: lot.sourceName,
     unit: lot.unit,
-    costPerUnit: lot.costPerUnit,
-    totalCost: lot.totalCost,
+    costState: lot.costState,
+    costPerUnit:
+      lot.costState === "known" ? lot.recordedCostPerUnit : null,
+    totalCost: lot.costState === "known" ? lot.recordedTotalCost : null,
     purchasedQuantity: lot.purchasedQuantity,
   }));
+}
+
+export async function completeGroceryLotPrice(
+  input: { lotId: string; totalCost: number; expectedUpdatedAt: string },
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  let completed: IngredientLotCostRecord | null = null;
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const completedLot = await completeIngredientLotCost(
+      input.lotId,
+      input.totalCost,
+      input.expectedUpdatedAt,
+      txn,
+    );
+    completed = completedLot;
+    await txn.runAsync(
+      `
+        UPDATE catalog_items
+        SET purchase_cost_state = 'known', updated_at = ?, sync_status = 'local'
+        WHERE id = (
+          SELECT catalog_item_id
+          FROM legacy_item_bindings
+          WHERE entity_kind = 'ingredient' AND legacy_entity_id = ?
+            AND deleted_at IS NULL
+        ) AND business_id = ? AND deleted_at IS NULL
+      `,
+      [
+        new Date().toISOString(),
+        completedLot.ingredientId,
+        completedLot.businessId,
+      ],
+    );
+  });
+  if (!completed) throw new Error("Missing grocery price was not completed.");
+  return completed;
+}
+
+export async function updateGroceryLotMetadata(
+  input: {
+    lotId: string;
+    brandName: string | null;
+    sourceName: string | null;
+    notes: string | null;
+    expectedUpdatedAt: string;
+  },
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  return updateIngredientLotMetadata(input.lotId, input, db);
+}
+
+export async function markGroceryLotEmpty(
+  lotId: string,
+  reason: string,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  const note = reason.trim();
+  if (!note) throw new Error("A reason is required to mark a lot empty.");
+  return adjustLotRemainingQuantity(
+    lotId,
+    0,
+    `Mark lot empty: ${note}`,
+    db,
+  );
+}
+
+export async function archiveGroceryIngredient(
+  ingredientId: string,
+  ownerAuthorized: boolean,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const binding = await txn.getFirstAsync<{ catalog_item_id: string }>(
+      `
+        SELECT catalog_item_id
+        FROM legacy_item_bindings
+        WHERE entity_kind = 'ingredient' AND legacy_entity_id = ?
+          AND binding_status IN ('active', 'archived')
+          AND deleted_at IS NULL
+      `,
+      [ingredientId],
+    );
+    if (!binding) {
+      throw new Error("Grocery ingredient identity is unavailable.");
+    }
+    await archiveCatalogItemInTransaction(
+      binding.catalog_item_id,
+      ownerAuthorized,
+      txn,
+    );
+    await updateIngredient(ingredientId, { isActive: false }, txn);
+  });
 }
 
 export async function adjustLotRemainingQuantity(
@@ -344,6 +608,10 @@ export async function adjustLotRemainingQuantity(
   db: RepositoryDatabase = openKitamoDatabase(),
 ) {
   await runMigrations(db);
+  const adjustmentReason = reason.trim();
+  if (!adjustmentReason) {
+    throw new Error("A stock-adjustment reason is required.");
+  }
 
   const lot = await getIngredientLotById(lotId, db);
   if (!lot) {
@@ -351,9 +619,17 @@ export async function adjustLotRemainingQuantity(
   }
 
   const delta = newRemainingQuantity - lot.remainingQuantity;
+  if (delta === 0) {
+    throw new Error("Enter a different remaining quantity for this adjustment.");
+  }
 
   await db.withExclusiveTransactionAsync(async (txn) => {
-    await setIngredientLotRemainingQuantity(lotId, newRemainingQuantity, txn);
+    await compareAndSetIngredientLotRemainingQuantity(
+      lotId,
+      newRemainingQuantity,
+      lot.updatedAt,
+      txn,
+    );
     await createIngredientMovement(
       {
         businessId: lot.businessId,
@@ -362,9 +638,13 @@ export async function adjustLotRemainingQuantity(
         movementType: "adjustment",
         quantity: delta,
         unit: lot.unit,
-        unitCost: lot.costPerUnit,
-        totalCost: lot.costPerUnit * delta,
-        reason,
+        unitCost:
+          lot.costState === "known" ? lot.recordedCostPerUnit : null,
+        totalCost:
+          lot.costState === "known" && lot.recordedCostPerUnit !== null
+            ? lot.recordedCostPerUnit * delta
+            : null,
+        reason: adjustmentReason,
       },
       txn,
     );

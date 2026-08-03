@@ -367,7 +367,7 @@ export async function initializeReviewedLegacyProductBalance(
   const database = getRepositoryDatabase(db);
   let initialized: ProductStockLotRecord | null = null;
 
-  await database.withExclusiveTransactionAsync(async (txn) => {
+  const apply = async (txn: RepositoryDatabase) => {
     const prior = await txn.getFirstAsync<ProductStockLotRow>(
       `
         SELECT *
@@ -491,7 +491,13 @@ export async function initializeReviewedLegacyProductBalance(
     );
     if (!row) throw new Error("Legacy Product balance was not recorded.");
     initialized = mapLot(row);
-  });
+  };
+
+  if (db) {
+    await apply(database);
+  } else {
+    await database.withExclusiveTransactionAsync(apply);
+  }
 
   if (!initialized) throw new Error("Product-lot initialization failed.");
   return initialized;
@@ -549,7 +555,7 @@ export async function addProductStockLotWithScalarProjection(
   const timestamp = nowIso();
   const id = input.id ?? makeProductStockLotId();
 
-  await database.withExclusiveTransactionAsync(async (txn) => {
+  const apply = async (txn: RepositoryDatabase) => {
     const { product, lots } = await readProductAndLots(
       input.productId,
       input.businessId,
@@ -660,7 +666,13 @@ export async function addProductStockLotWithScalarProjection(
         timestamp,
       ],
     );
-  });
+  };
+
+  if (db) {
+    await apply(database);
+  } else {
+    await database.withExclusiveTransactionAsync(apply);
+  }
 
   const row = await database.getFirstAsync<ProductStockLotRow>(
     "SELECT * FROM product_stock_lots WHERE id = ?",
