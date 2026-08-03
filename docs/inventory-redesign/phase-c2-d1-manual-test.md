@@ -1,5 +1,10 @@
 # Phase C2–D1 Recipe, Paninda, and Grocery owner test guide
 
+Verification governance for the accepted implementation is corrected in
+[phase-c2-d1-verification-correction.md](./phase-c2-d1-verification-correction.md).
+Approved persistence and confirmation deviations are recorded in
+[phase-c2-d1-design-decisions.md](./phase-c2-d1-design-decisions.md).
+
 ## Purpose and release boundary
 
 Use this guide on a physical Android phone through Expo Go after the automated
