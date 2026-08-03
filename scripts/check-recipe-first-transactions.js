@@ -40,6 +40,7 @@ const migrationSources = [
   ["013_inventory_planning_and_adjustments.ts", "inventoryPlanningAndAdjustmentsMigration"],
   ["014_supply_order_costs.ts", "supplyOrderCostsMigration"],
   ["015_recipe_first_costs.ts", "recipeFirstCostsMigration"],
+  ["016_recipe_usability.ts", "recipeUsabilityMigration"],
 ];
 
 function compileMigrations() {
@@ -149,11 +150,17 @@ function loadCostEvidenceValidators() {
       repositoryCompiledDirectory,
       "db/repositories/recipeVersions.js",
     ));
+    const conversionChains = require(path.join(
+      repositoryCompiledDirectory,
+      "domain/recipeConversionChains.js",
+    ));
     return {
       validateDraft:
         drafts.validateRecipeDraftLineCostEvidenceInTransaction,
       validateVersion:
         versions.validateRecipeVersionLineCostEvidenceInTransaction,
+      buildConversionChain: conversionChains.buildRecipeConversionChain,
+      serializeConversionChain: conversionChains.serializeRecipeConversionChain,
     };
   } finally {
     Module._load = originalLoad;
@@ -1211,10 +1218,17 @@ function checkRecipeFirstSchemaConstraints() {
 
 async function checkRepositoryCostEvidenceGuards() {
   compileCostEvidenceRepositories();
-  const { validateDraft, validateVersion } =
+  const {
+    validateDraft,
+    validateVersion,
+    buildConversionChain,
+    serializeConversionChain,
+  } =
     loadCostEvidenceValidators();
   assert.equal(typeof validateDraft, "function");
   assert.equal(typeof validateVersion, "function");
+  assert.equal(typeof buildConversionChain, "function");
+  assert.equal(typeof serializeConversionChain, "function");
 
   const lots = {
     "lot-rice": {
@@ -1301,6 +1315,34 @@ async function checkRepositoryCostEvidenceGuards() {
       throw new Error(`Unexpected cost-evidence query: ${statement}`);
     },
   };
+  const standardGramToKilogram = buildConversionChain([
+    {
+      fromQuantity: 1_000,
+      fromUnit: "g",
+      toQuantity: 1,
+      toUnit: "kg",
+      standard: "metric",
+      meaning: "Grams used from exact kilogram lot evidence",
+    },
+  ]);
+  assert.equal(standardGramToKilogram.ok, true);
+  const standardGramToKilogramJson = serializeConversionChain(
+    standardGramToKilogram.snapshot,
+  );
+  const packageToKilogram = buildConversionChain([
+    {
+      fromQuantity: 1,
+      fromUnit: "package",
+      toQuantity: 2,
+      toUnit: "kg",
+      standard: "item_specific",
+      meaning: "Owner-recorded kilograms per package",
+    },
+  ]);
+  assert.equal(packageToKilogram.ok, true);
+  const packageToKilogramJson = serializeConversionChain(
+    packageToKilogram.snapshot,
+  );
   const draftLine = {
     sourceKind: "catalog_item",
     catalogItemId: "catalog-rice",
@@ -1326,6 +1368,47 @@ async function checkRepositoryCostEvidenceGuards() {
   await assert.doesNotReject(() =>
     validateDraft(draftLine, 0, "business-1", evidenceDb),
   );
+  const draftLineWithStandardChain = {
+    ...draftLine,
+    conversionChainJson: standardGramToKilogramJson,
+    unitStandardSnapshot: "metric",
+  };
+  await assert.doesNotReject(() =>
+    validateDraft(
+      draftLineWithStandardChain,
+      0,
+      "business-1",
+      evidenceDb,
+    ),
+  );
+  await assert.rejects(
+    () =>
+      validateDraft(
+        {
+          ...draftLineWithStandardChain,
+          unitStandardSnapshot: "imperial",
+        },
+        0,
+        "business-1",
+        evidenceDb,
+      ),
+    /unit_standard_mismatch/,
+    "draft save must reject a conversion with a mismatched unit standard",
+  );
+  await assert.rejects(
+    () =>
+      validateDraft(
+        {
+          ...draftLineWithStandardChain,
+          unit: "kg",
+        },
+        0,
+        "business-1",
+        evidenceDb,
+      ),
+    /input_unit_mismatch/,
+    "draft save must reject a reversed conversion direction",
+  );
   await assert.rejects(
     () =>
       validateDraft(
@@ -1347,12 +1430,49 @@ async function checkRepositoryCostEvidenceGuards() {
         normalizedUnit: "kg",
         conversionId: "conversion-package-kg",
         conversionFactorSnapshot: 2,
+        conversionChainJson: packageToKilogramJson,
+        unitStandardSnapshot: "item_specific",
         costOverride: 160,
       },
       0,
       "business-1",
       evidenceDb,
     ),
+  );
+  const wrongPackageFactor = buildConversionChain([
+    {
+      fromQuantity: 1,
+      fromUnit: "package",
+      toQuantity: 3,
+      toUnit: "kg",
+      standard: "item_specific",
+      meaning: "Contradictory kilograms per package",
+    },
+  ]);
+  assert.equal(wrongPackageFactor.ok, true);
+  await assert.rejects(
+    () =>
+      validateDraft(
+        {
+          ...draftLine,
+          quantity: 1,
+          unit: "package",
+          normalizedQuantity: 2,
+          normalizedUnit: "kg",
+          conversionId: "conversion-package-kg",
+          conversionFactorSnapshot: 2,
+          conversionChainJson: serializeConversionChain(
+            wrongPackageFactor.snapshot,
+          ),
+          unitStandardSnapshot: "item_specific",
+          costOverride: 160,
+        },
+        0,
+        "business-1",
+        evidenceDb,
+      ),
+    /factor_mismatch/,
+    "draft save must reject a chain factor detached from persisted conversion evidence",
   );
   await assert.doesNotReject(() =>
     validateDraft(
@@ -1473,12 +1593,32 @@ async function checkRepositoryCostEvidenceGuards() {
   };
   await assert.doesNotReject(() =>
     validateVersion(
-      versionLotLine,
+      {
+        ...versionLotLine,
+        conversionChainJson: standardGramToKilogramJson,
+        unitStandardSnapshot: "metric",
+      },
       0,
       "business-1",
       "lot-rice",
       evidenceDb,
     ),
+  );
+  await assert.rejects(
+    () =>
+      validateVersion(
+        {
+          ...versionLotLine,
+          conversionChainJson: standardGramToKilogramJson,
+          unitStandardSnapshot: "imperial",
+        },
+        0,
+        "business-1",
+        "lot-rice",
+        evidenceDb,
+      ),
+    /unit_standard_mismatch/,
+    "publication must reject a conversion standard detached from its immutable chain",
   );
   await assert.rejects(
     () =>
@@ -1736,7 +1876,7 @@ async function main() {
   try {
     compileMigrations();
     const migrations = loadMigrations();
-    assert.equal(migrations.length, 15);
+    assert.equal(migrations.length, 16);
     checkMigration015Atomicity(migrations);
 
     applyMigrations(databasePath, migrations);

@@ -30,7 +30,47 @@ const migrationSources = [
   ["012_recipe_versions_and_drafts.ts", "recipeVersionsAndDraftsMigration"],
   ["013_inventory_planning_and_adjustments.ts", "inventoryPlanningAndAdjustmentsMigration"],
   ["014_supply_order_costs.ts", "supplyOrderCostsMigration"],
+  ["015_recipe_first_costs.ts", "recipeFirstCostsMigration"],
+  ["016_recipe_usability.ts", "recipeUsabilityMigration"],
 ];
+
+let recipeConversionChainsModule;
+
+function loadRecipeConversionChainsModule() {
+  if (recipeConversionChainsModule) return recipeConversionChainsModule;
+  const absolutePath = path.join(
+    workspace,
+    "src/domain/recipeConversionChains.ts",
+  );
+  const output = ts.transpileModule(fs.readFileSync(absolutePath, "utf8"), {
+    fileName: absolutePath,
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      strict: true,
+    },
+  }).outputText;
+  const loaded = { exports: {} };
+  const execute = new Function(
+    "exports",
+    "require",
+    "module",
+    "__filename",
+    "__dirname",
+    output,
+  );
+  execute(
+    loaded.exports,
+    (request) => {
+      throw new Error(`Unexpected conversion-check import: ${request}`);
+    },
+    loaded,
+    absolutePath,
+    path.dirname(absolutePath),
+  );
+  recipeConversionChainsModule = loaded.exports;
+  return recipeConversionChainsModule;
+}
 
 function compileMigrations() {
   fs.rmSync(compiledDirectory, { force: true, recursive: true });
@@ -106,6 +146,9 @@ function loadRepositoryModule(relativePath) {
   };
   const localRequire = (request) => {
     if (request === "@/domain/ids") return ids;
+    if (request === "@/domain/recipeConversionChains") {
+      return loadRecipeConversionChainsModule();
+    }
     if (request === "./shared") return shared;
     throw new Error(`Unexpected repository-check import: ${request}`);
   };

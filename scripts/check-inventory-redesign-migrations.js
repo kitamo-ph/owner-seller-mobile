@@ -26,6 +26,7 @@ const migrationSources = [
   ["013_inventory_planning_and_adjustments.ts", "inventoryPlanningAndAdjustmentsMigration"],
   ["014_supply_order_costs.ts", "supplyOrderCostsMigration"],
   ["015_recipe_first_costs.ts", "recipeFirstCostsMigration"],
+  ["016_recipe_usability.ts", "recipeUsabilityMigration"],
 ];
 const expectedNewTableColumns = {
   catalog_items: [
@@ -65,6 +66,7 @@ const expectedNewTableColumns = {
     "legacy_ingredient_id_snapshot", "legacy_ingredient_lot_id",
     "source_label_snapshot", "original_legacy_line_id", "notes_snapshot", "created_at",
     "updated_at", "sync_status", "deleted_at", "cost_source", "cost_profile_id",
+    "conversion_chain_json", "unit_standard_snapshot",
   ],
   catalog_item_recipe_roles: [
     "id", "business_id", "output_catalog_item_id", "recipe_id", "role", "status",
@@ -89,6 +91,7 @@ const expectedNewTableColumns = {
     "cost_state", "allocation_mode", "legacy_ingredient_lot_id", "notes",
     "created_at", "updated_at", "sync_status", "deleted_at", "cost_source",
     "cost_profile_id",
+    "conversion_chain_json", "unit_standard_snapshot",
   ],
   catalog_cost_profiles: [
     "id", "business_id", "catalog_item_id", "source_kind", "total_cost",
@@ -207,7 +210,8 @@ const expectedAlteredColumns = {
   ingredient_lots: [
     "expiry_date", "supplier_id", "purchase_receipt_id", "provenance_state",
     "cost_state", "recorded_total_cost", "recorded_cost_per_unit",
-    "source_metadata_json",
+    "source_metadata_json", "entered_quantity", "entered_unit",
+    "unit_standard_snapshot", "conversion_chain_json",
   ],
   production_batches: [
     "recipe_version_id", "production_plan_stage_id", "expected_output_quantity",
@@ -482,8 +486,8 @@ function assertRunnerRegistration(migrations) {
   }
 
   const schemaSource = fs.readFileSync(path.join(workspace, "src/db/schema.ts"), "utf8");
-  assert.match(schemaSource, /export const schemaVersion = 15;/);
-  assert.equal(migrations.length, 15);
+  assert.match(schemaSource, /export const schemaVersion = 16;/);
+  assert.equal(migrations.length, 16);
 }
 
 function seedPopulatedV10(dbPath) {
@@ -874,7 +878,7 @@ function assertResetCoverage(dbPath) {
   for (const tableName of tableOrder) {
     assert.equal(Number(sql(dbPath, `SELECT COUNT(*) FROM ${tableName};`)), 0);
   }
-  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 15);
+  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 16);
   assertHealthy(dbPath);
 }
 
@@ -900,13 +904,14 @@ try {
       "013_inventory_planning_and_adjustments",
       "014_supply_order_costs",
       "015_recipe_first_costs",
+      "016_recipe_usability",
     ],
   );
 
   const freshDb = path.join(temporaryRoot, "fresh.sqlite");
-  assert.equal(applyMigrations(freshDb, migrations), 15, "fresh database must apply 15 migrations");
+  assert.equal(applyMigrations(freshDb, migrations), 16, "fresh database must apply 16 migrations");
   assert.equal(applyMigrations(freshDb, migrations), 0, "fresh replay must apply zero migrations");
-  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 15);
+  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 16);
   assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM catalog_items;")), 0);
   assertSchemaInventory(freshDb);
   assertHealthy(freshDb);
@@ -915,9 +920,38 @@ try {
   assert.equal(applyMigrations(populatedDb, migrations, 10), 10);
   seedPopulatedV10(populatedDb);
   const beforeFingerprint = legacyFingerprint(populatedDb);
-  assert.equal(applyMigrations(populatedDb, migrations), 5);
+  assert.equal(applyMigrations(populatedDb, migrations), 6);
   assert.equal(applyMigrations(populatedDb, migrations), 0);
   assert.deepEqual(legacyFingerprint(populatedDb), beforeFingerprint, "legacy facts must remain unchanged");
+  assert.deepEqual(
+    JSON.parse(
+      sql(
+        populatedDb,
+        `SELECT id, entered_quantity, entered_unit,
+           unit_standard_snapshot, conversion_chain_json
+         FROM ingredient_lots
+         ORDER BY id ASC;`,
+        true,
+      ),
+    ),
+    [
+      {
+        id: "lot-positive",
+        entered_quantity: 1000,
+        entered_unit: "g",
+        unit_standard_snapshot: null,
+        conversion_chain_json: null,
+      },
+      {
+        id: "lot-zero",
+        entered_quantity: 10,
+        entered_unit: "g",
+        unit_standard_snapshot: null,
+        conversion_chain_json: null,
+      },
+    ],
+    "016 must backfill original entered quantity and unit without inventing conversion evidence",
+  );
 
   assert.equal(Number(sql(populatedDb, "SELECT COUNT(*) FROM catalog_items;")), 2);
   assert.equal(Number(sql(populatedDb, "SELECT COUNT(*) FROM legacy_item_bindings;")), 2);
@@ -1272,6 +1306,7 @@ try {
     ["product_stock_lots", ["ingredient_lots", "cost_state"]],
     ["supply_usage_rules", null],
     ["catalog_cost_profiles", ["recipe_draft_lines", "cost_source"]],
+    [null, ["recipe_draft_lines", "conversion_chain_json"]],
   ];
   for (let index = 10; index < migrations.length; index += 1) {
     const migration = migrations[index];
@@ -1300,7 +1335,9 @@ try {
       `${migration.id} must roll back seeded legacy data changes`,
     );
     const [tableName, alteredColumn] = rollbackSentinels[index - 10];
-    assert.equal(tableExists(retryDb, tableName), false, `${tableName} DDL must roll back`);
+    if (tableName) {
+      assert.equal(tableExists(retryDb, tableName), false, `${tableName} DDL must roll back`);
+    }
     if (alteredColumn) {
       assert.equal(
         columnExists(retryDb, alteredColumn[0], alteredColumn[1]),
@@ -1318,13 +1355,13 @@ try {
   }
   assert.equal(applyMigrations(retryDb, migrations), 0);
 
-  console.log("fresh 001-015 migration and replay: passed");
+  console.log("fresh 001-016 migration and replay: passed");
   console.log("populated v10 preservation and deterministic import: passed");
   console.log("legacy zero, selected-lot, and historical-version handling: passed");
   console.log("binding and one-primary-recipe constraints: passed");
   console.log("native unknown/known-zero persistence constraints: passed");
   console.log("representative child-first pilot reset with migration ledger retained: passed");
-  console.log("forced rollback and restart for 011-015: passed");
+  console.log("forced rollback and restart for 011-016: passed");
   console.log("integrity_check and foreign_key_check: passed");
   console.log("ALL INVENTORY REDESIGN MIGRATION CHECKS PASSED");
 } finally {

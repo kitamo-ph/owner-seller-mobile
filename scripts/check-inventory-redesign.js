@@ -15,10 +15,16 @@ const checks = [
   "check:migrations",
   "check:problem-reports",
   "check:inventory-domain",
+  "check:paninda-stabilization",
+  "check:paninda-lifecycle-transactions",
+  "check:grocery-production-stabilization",
   "check:recipe-graph",
   "check:recipe-versioning",
   "check:recipe-drafts",
   "check:recipe-first",
+  "check:recipe-conversion-chains",
+  "check:apple-cider-recipe-chain",
+  "check:recipe-stabilization",
   "check:recipe-first-transactions",
   "check:recipe-first-orchestration",
   "check:production-planner",
@@ -36,4 +42,6 @@ for (const check of checks) {
   });
 }
 
-console.log("\nALL INVENTORY REDESIGN PHASE B AND PHASE C1 CHECKS PASSED");
+console.log(
+  "\nALL INVENTORY REDESIGN PHASE B THROUGH PHASE C2-D1 CHECKS PASSED",
+);
