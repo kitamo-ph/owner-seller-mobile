@@ -5,6 +5,7 @@ import type {
   CatalogSourceType,
 } from "@/domain/catalogItems";
 import type { CostState } from "@/domain/costState";
+import type { Product } from "@/domain/types";
 
 import {
   getRepositoryDatabase,
@@ -120,6 +121,47 @@ export type KioskCatalogProduct = CatalogItemRecord & {
 type KioskCatalogProductRow = CatalogItemRow & {
   product_id: string;
   compatibility_mode: CatalogCompatibilityMode;
+};
+
+export type PanindaCatalogProductRecord = {
+  item: CatalogItemRecord;
+  product: Product;
+  compatibilityMode: CatalogCompatibilityMode;
+  bindingStatus: "active" | "archived";
+  projectionRole: LegacyProjectionRole;
+  bindingReviewRequired: boolean;
+  draftId: string | null;
+  activeRecipeId: string | null;
+  activeVersionId: string | null;
+};
+
+type PanindaCatalogProductRow = CatalogItemRow & {
+  compatibility_mode: CatalogCompatibilityMode;
+  binding_status: "active" | "archived";
+  projection_role: LegacyProjectionRole;
+  binding_review_required: number;
+  product_id: string;
+  product_business_id: string;
+  product_branch_id: string | null;
+  product_name: string;
+  product_category: string;
+  product_price: number;
+  product_cost: number;
+  product_stock_qty: number;
+  product_unit_type: Product["unitType"];
+  product_low_stock_threshold: number;
+  product_bundle_quantity: number | null;
+  product_bundle_price: number | null;
+  product_bundle_label: string | null;
+  product_active: number;
+  product_type: Product["productType"];
+  product_created_at: string;
+  product_updated_at: string;
+  product_sync_status: Product["syncStatus"];
+  product_deleted_at: string | null;
+  draft_id: string | null;
+  active_recipe_id: string | null;
+  active_version_id: string | null;
 };
 
 function mapCatalogItem(row: CatalogItemRow): CatalogItemRecord {
@@ -256,6 +298,164 @@ export async function listCatalogItemsMissingPrices(
     [businessId],
   );
   return rows.map(mapCatalogItem);
+}
+
+/**
+ * Catalog-aware Paninda reader. The legacy Product reader deliberately remains
+ * unchanged because reports, transfer compatibility, and Kiosk migration paths
+ * still consume it.
+ */
+export async function listPanindaCatalogProductsForBusiness(
+  businessId: string,
+  db?: RepositoryDatabase,
+): Promise<PanindaCatalogProductRecord[]> {
+  const rows =
+    await getRepositoryDatabase(db).getAllAsync<PanindaCatalogProductRow>(
+      `
+        SELECT item.*,
+          binding.compatibility_mode,
+          binding.binding_status,
+          binding.projection_role,
+          binding.review_required AS binding_review_required,
+          product.id AS product_id,
+          product.business_id AS product_business_id,
+          product.branch_id AS product_branch_id,
+          product.name AS product_name,
+          product.category AS product_category,
+          product.price AS product_price,
+          product.cost AS product_cost,
+          product.stock_qty AS product_stock_qty,
+          product.unit_type AS product_unit_type,
+          product.low_stock_threshold AS product_low_stock_threshold,
+          product.bundle_quantity AS product_bundle_quantity,
+          product.bundle_price AS product_bundle_price,
+          product.bundle_label AS product_bundle_label,
+          product.active AS product_active,
+          product.product_type,
+          product.created_at AS product_created_at,
+          product.updated_at AS product_updated_at,
+          product.sync_status AS product_sync_status,
+          product.deleted_at AS product_deleted_at,
+          (
+            SELECT draft.id
+            FROM recipe_drafts draft
+            WHERE draft.output_catalog_item_id = item.id
+              AND draft.lifecycle_status IN ('editing', 'ready')
+              AND draft.deleted_at IS NULL
+            ORDER BY draft.updated_at DESC, draft.id DESC
+            LIMIT 1
+          ) AS draft_id,
+          COALESCE(
+            (
+              SELECT recipe.id
+              FROM catalog_item_recipe_roles role
+              INNER JOIN recipes recipe
+                ON recipe.id = role.recipe_id
+                AND recipe.is_active = 1
+                AND recipe.deleted_at IS NULL
+              WHERE role.output_catalog_item_id = item.id
+                AND role.status = 'active'
+                AND role.deleted_at IS NULL
+              ORDER BY CASE role.role
+                WHEN 'primary' THEN 0
+                WHEN 'kiosk_cook_upon_order' THEN 1
+                ELSE 2
+              END, role.effective_at DESC, role.id DESC
+              LIMIT 1
+            ),
+            (
+              SELECT recipe.id
+              FROM recipes recipe
+              WHERE recipe.output_product_id = product.id
+                AND recipe.is_active = 1
+                AND recipe.deleted_at IS NULL
+              ORDER BY recipe.updated_at DESC, recipe.id DESC
+              LIMIT 1
+            )
+          ) AS active_recipe_id,
+          COALESCE(
+            (
+              SELECT recipe.active_version_id
+              FROM catalog_item_recipe_roles role
+              INNER JOIN recipes recipe
+                ON recipe.id = role.recipe_id
+                AND recipe.is_active = 1
+                AND recipe.deleted_at IS NULL
+              INNER JOIN recipe_versions version
+                ON version.id = recipe.active_version_id
+                AND version.status = 'published'
+                AND version.deleted_at IS NULL
+              WHERE role.output_catalog_item_id = item.id
+                AND role.status = 'active'
+                AND role.deleted_at IS NULL
+              ORDER BY CASE role.role
+                WHEN 'primary' THEN 0
+                WHEN 'kiosk_cook_upon_order' THEN 1
+                ELSE 2
+              END, role.effective_at DESC, role.id DESC
+              LIMIT 1
+            ),
+            (
+              SELECT recipe.active_version_id
+              FROM recipes recipe
+              INNER JOIN recipe_versions version
+                ON version.id = recipe.active_version_id
+                AND version.status = 'published'
+                AND version.deleted_at IS NULL
+              WHERE recipe.output_product_id = product.id
+                AND recipe.is_active = 1
+                AND recipe.deleted_at IS NULL
+              ORDER BY recipe.updated_at DESC, recipe.id DESC
+              LIMIT 1
+            )
+          ) AS active_version_id
+        FROM catalog_items item
+        INNER JOIN legacy_item_bindings binding
+          ON binding.catalog_item_id = item.id
+          AND binding.entity_kind = 'product'
+          AND binding.deleted_at IS NULL
+        INNER JOIN products product
+          ON product.id = binding.legacy_entity_id
+          AND product.business_id = item.business_id
+          AND product.deleted_at IS NULL
+        WHERE item.business_id = ?
+          AND item.deleted_at IS NULL
+        ORDER BY item.normalized_name ASC, item.id ASC
+      `,
+      [businessId],
+    );
+
+  return rows.map((row) => ({
+    item: mapCatalogItem(row),
+    compatibilityMode: row.compatibility_mode,
+    bindingStatus: row.binding_status,
+    projectionRole: row.projection_role,
+    bindingReviewRequired: toBoolean(row.binding_review_required),
+    draftId: row.draft_id,
+    activeRecipeId: row.active_recipe_id,
+    activeVersionId: row.active_version_id,
+    product: {
+      id: row.product_id,
+      businessId: row.product_business_id,
+      branchId: row.product_branch_id,
+      name: row.product_name,
+      category: row.product_category,
+      price: row.product_price,
+      cost: row.product_cost,
+      stockQty: row.product_stock_qty,
+      unitType: row.product_unit_type,
+      lowStockThreshold: row.product_low_stock_threshold,
+      bundleQuantity: row.product_bundle_quantity,
+      bundlePrice: row.product_bundle_price,
+      bundleLabel: row.product_bundle_label,
+      active: toBoolean(row.product_active),
+      productType: row.product_type,
+      createdAt: row.product_created_at,
+      updatedAt: row.product_updated_at,
+      syncStatus: row.product_sync_status,
+      deletedAt: row.product_deleted_at,
+    },
+  }));
 }
 
 /**

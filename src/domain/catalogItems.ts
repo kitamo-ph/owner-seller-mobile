@@ -25,6 +25,38 @@ export type CatalogCompatibilityMode = "native" | "reviewed_legacy" | "legacy_un
 export type CatalogSourceType = "native" | "legacy_product" | "legacy_ingredient";
 export type CatalogProjectionKind = "product" | "ingredient";
 
+export type PanindaSection =
+  | "active"
+  | "needs_setup"
+  | "archived"
+  | "excluded";
+
+export type PanindaCatalogPolicyInput = {
+  classification: CatalogClassification;
+  lifecycle: CatalogLifecycle;
+  readinessState: CatalogReadinessState;
+  compatibilityMode: CatalogCompatibilityMode;
+  sourceType: CatalogSourceType;
+  bindingStatus: "active" | "archived";
+  stockPolicy: "untracked" | "ingredient_lots" | "product_scalar" | "product_lots";
+  productActive: boolean;
+  hasDraft: boolean;
+  hasRecipe: boolean;
+  hasPublishedRecipe: boolean;
+};
+
+export type PanindaActionPolicy = {
+  openRecipe: boolean;
+  produceFromRecipe: boolean;
+  editSellingItem: boolean;
+  addPurchasedStock: boolean;
+  manualCompatibilityStockIn: boolean;
+  recordSpoilage: boolean;
+  transferStock: boolean;
+  archive: boolean;
+  requestPermanentDelete: boolean;
+};
+
 export type CatalogReadinessInput = {
   classification: CatalogClassification;
   lifecycle: CatalogLifecycle;
@@ -112,6 +144,107 @@ const PRODUCIBLE_CLASSIFICATIONS: readonly CatalogClassification[] = [
   "prepared_base",
   "finished_product",
 ];
+
+export function isLegacyPanindaCompatibility(
+  input: Pick<
+    PanindaCatalogPolicyInput,
+    "classification" | "compatibilityMode" | "sourceType"
+  >,
+) {
+  return (
+    input.sourceType === "legacy_product" &&
+    input.classification === "legacy_unclassified" &&
+    input.compatibilityMode === "legacy_unclassified"
+  );
+}
+
+/**
+ * Keeps the legacy Product list intact while applying catalog lifecycle rules
+ * to native and owner-reviewed records. Recipe drafts and prepared bases remain
+ * in Recipe Book, never in ordinary Paninda management.
+ */
+export function resolvePanindaSection(
+  input: PanindaCatalogPolicyInput,
+): PanindaSection {
+  const productOwnedClassification =
+    input.classification === "legacy_unclassified" ||
+    input.classification === "direct_resale_product" ||
+    input.classification === "finished_product" ||
+    input.classification === "bundle_combo";
+
+  if (
+    input.lifecycle === "archived" ||
+    input.bindingStatus === "archived"
+  ) {
+    return productOwnedClassification ? "archived" : "excluded";
+  }
+
+  if (isLegacyPanindaCompatibility(input)) {
+    return "active";
+  }
+
+  if (input.classification === "direct_resale_product") {
+    return input.lifecycle === "active" && input.productActive
+      ? "active"
+      : "needs_setup";
+  }
+
+  if (input.classification === "bundle_combo") {
+    return input.lifecycle === "active" && input.productActive
+      ? "active"
+      : "needs_setup";
+  }
+
+  if (input.classification === "finished_product") {
+    if (input.hasDraft && !input.hasPublishedRecipe) return "excluded";
+    if (!input.hasPublishedRecipe) return "excluded";
+    return input.lifecycle === "active" &&
+      input.readinessState === "ready" &&
+      input.productActive
+      ? "active"
+      : "needs_setup";
+  }
+
+  return "excluded";
+}
+
+/**
+ * Native lot-tracked Products never receive a legacy scalar-stock action.
+ * Those records navigate to Recipe/Production until exact lot mutation exists.
+ */
+export function resolvePanindaActionPolicy(
+  input: PanindaCatalogPolicyInput,
+): PanindaActionPolicy {
+  const section = resolvePanindaSection(input);
+  const legacyCompatibility = isLegacyPanindaCompatibility(input);
+  const recipeBacked =
+    (input.classification === "finished_product" || legacyCompatibility) &&
+    (input.hasDraft || input.hasRecipe);
+  const scalarCompatibility =
+    legacyCompatibility || input.stockPolicy === "product_scalar";
+  const normalItem = section === "active" || section === "needs_setup";
+
+  return {
+    openRecipe: normalItem && recipeBacked,
+    produceFromRecipe: normalItem && recipeBacked && input.hasRecipe,
+    editSellingItem:
+      normalItem &&
+      (legacyCompatibility ||
+        (!recipeBacked &&
+          (input.classification === "direct_resale_product" ||
+            input.classification === "bundle_combo"))),
+    addPurchasedStock:
+      normalItem &&
+      !recipeBacked &&
+      (legacyCompatibility || input.classification === "direct_resale_product"),
+    manualCompatibilityStockIn: normalItem && legacyCompatibility,
+    recordSpoilage: normalItem && scalarCompatibility,
+    transferStock: normalItem && scalarCompatibility,
+    archive: section !== "archived" && section !== "excluded",
+    requestPermanentDelete:
+      normalItem && !input.hasDraft && !input.hasRecipe,
+  };
+}
 
 export function requiredProjectionForClassification(
   classification: CatalogClassification,

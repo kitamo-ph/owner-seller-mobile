@@ -3,17 +3,29 @@ import { runMigrations } from "@/db/migrations";
 import {
   getCatalogItemById,
   listLegacyBindingsForCatalogItem,
+  listPanindaCatalogProductsForBusiness,
   type CatalogItemRecord,
+  type CatalogStockPolicy,
+  type LegacyProjectionRole,
   type RepositoryDatabase,
 } from "@/db/repositories";
 import {
   evaluateCatalogReadiness,
   requiredProjectionForClassification,
+  resolvePanindaActionPolicy,
+  resolvePanindaSection,
   type CatalogClassification,
+  type CatalogCompatibilityMode,
+  type CatalogLifecycle,
   type CatalogReadiness,
+  type CatalogReadinessState,
+  type CatalogSourceType,
+  type PanindaActionPolicy,
+  type PanindaSection,
 } from "@/domain/catalogItems";
 import type { CostEvidence, CostState } from "@/domain/costState";
 import { makeCatalogItemId } from "@/domain/ids";
+import type { Product } from "@/domain/types";
 
 export type CatalogReadinessSnapshot = {
   item: CatalogItemRecord;
@@ -21,6 +33,72 @@ export type CatalogReadinessSnapshot = {
   productId: string | null;
   ingredientId: string | null;
 };
+
+export type PanindaCatalogEntry = {
+  catalogItemId: string;
+  product: Product;
+  classification: CatalogClassification;
+  lifecycle: CatalogLifecycle;
+  readinessState: CatalogReadinessState;
+  sourceType: CatalogSourceType;
+  compatibilityMode: CatalogCompatibilityMode;
+  bindingStatus: "active" | "archived";
+  projectionRole: LegacyProjectionRole;
+  stockPolicy: CatalogStockPolicy;
+  reviewRequired: boolean;
+  draftId: string | null;
+  activeRecipeId: string | null;
+  activeVersionId: string | null;
+  section: Exclude<PanindaSection, "excluded">;
+  actions: PanindaActionPolicy;
+};
+
+export async function loadPanindaCatalog(
+  businessId: string,
+  db: RepositoryDatabase = openKitamoDatabase(),
+): Promise<PanindaCatalogEntry[]> {
+  await runMigrations(db);
+  const records = await listPanindaCatalogProductsForBusiness(businessId, db);
+
+  return records.flatMap((record) => {
+    const policyInput = {
+      classification: record.item.classification,
+      lifecycle: record.item.lifecycle,
+      readinessState: record.item.readinessState,
+      compatibilityMode: record.compatibilityMode,
+      sourceType: record.item.sourceType,
+      bindingStatus: record.bindingStatus,
+      stockPolicy: record.item.stockPolicy,
+      productActive: record.product.active,
+      hasDraft: record.draftId !== null,
+      hasRecipe: record.activeRecipeId !== null,
+      hasPublishedRecipe: record.activeVersionId !== null,
+    } as const;
+    const section = resolvePanindaSection(policyInput);
+    if (section === "excluded") return [];
+
+    return [{
+      catalogItemId: record.item.id,
+      product: record.product,
+      classification: record.item.classification,
+      lifecycle: record.item.lifecycle,
+      readinessState: record.item.readinessState,
+      sourceType: record.item.sourceType,
+      compatibilityMode: record.compatibilityMode,
+      bindingStatus: record.bindingStatus,
+      projectionRole: record.projectionRole,
+      stockPolicy: record.item.stockPolicy,
+      reviewRequired:
+        record.item.classificationReviewRequired ||
+        record.bindingReviewRequired,
+      draftId: record.draftId,
+      activeRecipeId: record.activeRecipeId,
+      activeVersionId: record.activeVersionId,
+      section,
+      actions: resolvePanindaActionPolicy(policyInput),
+    }];
+  });
+}
 
 function costEvidence(
   state: CostState,

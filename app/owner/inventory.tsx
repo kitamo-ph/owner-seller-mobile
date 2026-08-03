@@ -1,7 +1,16 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { type ComponentProps, useCallback, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { NetworkStatusBadge } from "@/components/common/NetworkStatusBadge";
 import { GabiPrimaryButton, GabiSoftButton } from "@/components/gabi/GabiButton";
@@ -12,9 +21,19 @@ import { GabiText } from "@/components/gabi/GabiText";
 import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { createProduct, updateProduct } from "@/db/repositories";
+import type { PanindaSection } from "@/domain/catalogItems";
 import { bundleLabelFor, hasBundlePricing } from "@/domain/pricing";
 import type { Product, ProductType, UnitType } from "@/domain/types";
+import {
+  loadPanindaCatalog,
+  type PanindaCatalogEntry,
+} from "@/services/catalogItems";
+import {
+  archiveInventoryCatalogItem,
+  permanentlyDeleteInventoryCatalogItem,
+} from "@/services/itemLifecycle";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
+import { addDirectResalePurchase } from "@/services/productPurchases";
 import { recordCookedBatch, recordSpoilage } from "@/services/stockOps";
 import { spacing } from "@/theme/spacing";
 import { useGabiTheme } from "@/theme/useGabiTheme";
@@ -25,6 +44,7 @@ const unitTypes: UnitType[] = ["piece", "bottle", "pack", "sachet", "kilo", "ser
 
 type ProductForm = {
   id: string | null;
+  stockEditable: boolean;
   name: string;
   category: string;
   productType: ProductType;
@@ -41,6 +61,7 @@ type ProductForm = {
 
 const emptyProductForm: ProductForm = {
   id: null,
+  stockEditable: true,
   name: "",
   category: "",
   productType: "retail item",
@@ -70,11 +91,23 @@ type SpoilageForm = {
   reason: string;
 };
 
+type PurchaseForm = {
+  quantity: string;
+  totalCost: string;
+  notes: string;
+};
+
 const emptyCookForm: CookForm = { productId: null, quantity: "", note: "" };
 const emptySpoilageForm: SpoilageForm = { productId: null, quantity: "", reason: "" };
+const emptyPurchaseForm: PurchaseForm = {
+  quantity: "",
+  totalCost: "",
+  notes: "",
+};
 
 export default function OwnerInventoryScreen() {
   const [status, setStatus] = useState<OwnerSetupStatus | null>(null);
+  const [panindaEntries, setPanindaEntries] = useState<PanindaCatalogEntry[]>([]);
   const [productForm, setProductForm] = useState<ProductForm>(emptyProductForm);
   const [showProductForm, setShowProductForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,19 +115,27 @@ export default function OwnerInventoryScreen() {
   const [messageIsError, setMessageIsError] = useState(false);
   const [cookForm, setCookForm] = useState<CookForm>(emptyCookForm);
   const [spoilageForm, setSpoilageForm] = useState<SpoilageForm>(emptySpoilageForm);
+  const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(emptyPurchaseForm);
+  const [purchaseEntry, setPurchaseEntry] = useState<PanindaCatalogEntry | null>(null);
   const [cookMessage, setCookMessage] = useState<string | null>(null);
   const [cookIsError, setCookIsError] = useState(false);
   const [spoilageMessage, setSpoilageMessage] = useState<string | null>(null);
   const [spoilageIsError, setSpoilageIsError] = useState(false);
   const [cookSaving, setCookSaving] = useState(false);
   const [spoilageSaving, setSpoilageSaving] = useState(false);
+  const [purchaseSaving, setPurchaseSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
+  const [sectionFilter, setSectionFilter] =
+    useState<Exclude<PanindaSection, "excluded">>("active");
   const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
   const [productRenderLimit, setProductRenderLimit] = useState(productRenderBatch);
   const [openProductActionsId, setOpenProductActionsId] = useState<string | null>(null);
-  const [stockAction, setStockAction] = useState<"cook" | "spoilage" | null>(null);
+  const [stockAction, setStockAction] = useState<"cook" | "spoilage" | "purchase" | null>(null);
+  const [lifecycleSaving, setLifecycleSaving] = useState(false);
   const cookLock = useRef(false);
   const spoilageLock = useRef(false);
+  const purchaseLock = useRef(false);
+  const lifecycleLock = useRef(false);
   const router = useRouter();
 
   function setNotice(text: string) {
@@ -109,7 +150,11 @@ export default function OwnerInventoryScreen() {
 
   const refresh = useCallback(async () => {
     const nextStatus = await loadOwnerSetupStatus();
+    const nextEntries = nextStatus.activeBusiness
+      ? await loadPanindaCatalog(nextStatus.activeBusiness.id)
+      : [];
     setStatus(nextStatus);
+    setPanindaEntries(nextEntries);
   }, []);
 
   useFocusEffect(
@@ -182,29 +227,36 @@ export default function OwnerInventoryScreen() {
       const sharedFields = {
         name,
         category: productForm.category.trim() || "General",
-        productType: productForm.productType,
-        unitType: productForm.unitType,
+        productType: productForm.id ? productForm.productType : "retail item",
         lowStockThreshold,
         price,
-        cost,
         bundleQuantity,
         bundlePrice,
         bundleLabel: productForm.bundleLabel.trim() || null,
       };
 
       if (productForm.id) {
-        const stockChanged = productForm.stockQty.trim() !== (productForm.initialStockQty ?? "").trim();
+        const stockChanged =
+          productForm.stockEditable &&
+          productForm.stockQty.trim() !==
+            (productForm.initialStockQty ?? "").trim();
         await updateProduct(productForm.id, {
           ...sharedFields,
+          ...(productForm.stockEditable
+            ? { unitType: productForm.unitType, cost }
+            : {}),
           ...(stockChanged ? { stockQty } : {}),
         });
       } else {
         await createProduct({
           ...sharedFields,
+          unitType: productForm.unitType,
+          cost,
           stockQty,
           branchId: status.activeBranch?.id ?? null,
           active: true,
           businessId: status.activeBusiness.id,
+          catalogMode: "direct_resale",
         });
       }
 
@@ -314,11 +366,12 @@ export default function OwnerInventoryScreen() {
     }
   }
 
-  function editProduct(product: Product) {
+  function editProduct(product: Product, stockEditable = true) {
     setOpenProductActionsId(null);
     setShowProductForm(true);
     setProductForm({
       id: product.id,
+      stockEditable,
       name: product.name,
       category: product.category,
       productType: product.productType,
@@ -332,6 +385,64 @@ export default function OwnerInventoryScreen() {
       bundlePrice: product.bundlePrice === null ? "" : String(product.bundlePrice),
       bundleLabel: product.bundleLabel ?? "",
     });
+  }
+
+  function addPurchasedStock(entry: PanindaCatalogEntry) {
+    setOpenProductActionsId(null);
+    if (entry.stockPolicy !== "product_lots") {
+      editProduct(entry.product);
+      return;
+    }
+    setPurchaseEntry(entry);
+    setPurchaseForm(emptyPurchaseForm);
+    setStockAction("purchase");
+  }
+
+  async function savePurchasedStock() {
+    if (purchaseLock.current || !purchaseEntry) return;
+    const quantity = parseRequiredNumber(purchaseForm.quantity, 0);
+    const totalCost = parseOptionalStrictNumber(purchaseForm.totalCost);
+    if (quantity === "invalid" || totalCost === "invalid") {
+      setError(numbersOnlyMessage);
+      return;
+    }
+    if (quantity <= 0) {
+      setError("Purchased quantity must be greater than zero.");
+      return;
+    }
+    if (totalCost !== null && totalCost < 0) {
+      setError("Purchase cost cannot be negative.");
+      return;
+    }
+
+    purchaseLock.current = true;
+    setPurchaseSaving(true);
+    setMessage(null);
+    try {
+      await addDirectResalePurchase({
+        catalogItemId: purchaseEntry.catalogItemId,
+        productId: purchaseEntry.product.id,
+        quantity,
+        totalCost,
+        notes: purchaseForm.notes,
+      });
+      const purchasedName = purchaseEntry.product.name;
+      setPurchaseEntry(null);
+      setPurchaseForm(emptyPurchaseForm);
+      setStockAction(null);
+      await refresh();
+      setNotice(
+        `${quantity} ${purchaseEntry.product.unitType} added to ${purchasedName} as a purchase lot.`,
+      );
+    } catch (error) {
+      logDevError("OwnerInventory.savePurchasedStock", error);
+      setError(
+        getUserSafeErrorMessage(error, "Could not record the purchased stock."),
+      );
+    } finally {
+      purchaseLock.current = false;
+      setPurchaseSaving(false);
+    }
   }
 
   function openManualCook(product: Product) {
@@ -350,21 +461,162 @@ export default function OwnerInventoryScreen() {
     setStockAction("spoilage");
   }
 
+  function openRecipe(entry: PanindaCatalogEntry) {
+    setOpenProductActionsId(null);
+    if (entry.draftId) {
+      router.push({
+        pathname: "/owner/recipe-editor" as never,
+        params: { draftId: entry.draftId },
+      });
+      return;
+    }
+    if (entry.activeRecipeId) {
+      router.push({
+        pathname: "/owner/recipe-detail",
+        params: { recipeId: entry.activeRecipeId },
+      });
+      return;
+    }
+    router.push("/owner/recipes");
+  }
+
+  async function performArchive(entry: PanindaCatalogEntry) {
+    if (lifecycleLock.current) return;
+    lifecycleLock.current = true;
+    setLifecycleSaving(true);
+    setOpenProductActionsId(null);
+    try {
+      await archiveInventoryCatalogItem(entry.catalogItemId, true);
+      await refresh();
+      setSectionFilter("archived");
+      setNotice(`${entry.product.name} archived. History remains available.`);
+    } catch (error) {
+      logDevError("OwnerInventory.archive", error);
+      setError(getUserSafeErrorMessage(error, "Could not archive this item."));
+    } finally {
+      lifecycleLock.current = false;
+      setLifecycleSaving(false);
+    }
+  }
+
+  function confirmArchive(entry: PanindaCatalogEntry) {
+    setOpenProductActionsId(null);
+    Alert.alert(
+      `Archive ${entry.product.name}?`,
+      "It will leave normal Paninda and Kiosk selection. Sales, production, recipes, lots, movements, and reports remain preserved.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive Item",
+          style: "destructive",
+          onPress: () => void performArchive(entry),
+        },
+      ],
+    );
+  }
+
+  async function performPermanentDelete(entry: PanindaCatalogEntry) {
+    if (lifecycleLock.current) return;
+    lifecycleLock.current = true;
+    setLifecycleSaving(true);
+    setOpenProductActionsId(null);
+    try {
+      const result = await permanentlyDeleteInventoryCatalogItem(
+        entry.catalogItemId,
+        true,
+      );
+      if (result.outcome === "deleted") {
+        await refresh();
+        setNotice(`${entry.product.name} permanently deleted.`);
+        return;
+      }
+      if (result.outcome === "archive_required") {
+        Alert.alert(
+          "This item has history",
+          "Permanent delete is not safe because this item is referenced by stock, Recipe, production, sale, transfer, or other historical evidence. Archive keeps that history intact.",
+          [
+            { text: "Keep Item", style: "cancel" },
+            {
+              text: "Archive Instead",
+              onPress: () => confirmArchive(entry),
+            },
+          ],
+        );
+        return;
+      }
+      Alert.alert(
+        "Permanent delete unavailable",
+        result.outcome === "owner_authorization_required"
+          ? "Owner authorization is required."
+          : "The complete reference check could not be proven, so deletion was denied safely. You can archive the item instead.",
+        [
+          { text: "Close", style: "cancel" },
+          {
+            text: "Archive Instead",
+            onPress: () => confirmArchive(entry),
+          },
+        ],
+      );
+    } catch (error) {
+      logDevError("OwnerInventory.permanentDelete", error);
+      setError(
+        getUserSafeErrorMessage(error, "Could not safely delete this item."),
+      );
+    } finally {
+      lifecycleLock.current = false;
+      setLifecycleSaving(false);
+    }
+  }
+
+  function confirmPermanentDelete(entry: PanindaCatalogEntry) {
+    setOpenProductActionsId(null);
+    Alert.alert(
+      `Permanently delete ${entry.product.name}?`,
+      "The app will recheck every historical reference inside the delete transaction. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Permanently",
+          style: "destructive",
+          onPress: () => void performPermanentDelete(entry),
+        },
+      ],
+    );
+  }
+
   const canEditProducts = Boolean(status?.activeBusiness);
-  const products = status?.products ?? [];
-  const lowStockCount = products.filter((product) => product.stockQty <= product.lowStockThreshold).length;
-  const stockValue = products.reduce((total, product) => total + product.stockQty * product.cost, 0);
-  const productFormVisible = Boolean(status) && (products.length === 0 || showProductForm || Boolean(productForm.id));
-  const visibleProducts = products.filter((product) => {
+  const activeEntries = panindaEntries.filter((entry) => entry.section === "active");
+  const activeProducts = activeEntries.map((entry) => entry.product);
+  const compatibilityCookProducts = activeEntries
+    .filter((entry) => entry.actions.manualCompatibilityStockIn)
+    .map((entry) => entry.product);
+  const spoilageProducts = activeEntries
+    .filter((entry) => entry.actions.recordSpoilage)
+    .map((entry) => entry.product);
+  const lowStockCount = activeProducts.filter(
+    (product) => product.stockQty <= product.lowStockThreshold,
+  ).length;
+  const stockValue = activeProducts.reduce(
+    (total, product) => total + product.stockQty * product.cost,
+    0,
+  );
+  const productFormVisible =
+    Boolean(status) && (showProductForm || Boolean(productForm.id));
+  const visibleEntries = panindaEntries.filter((entry) => {
+    if (entry.section !== sectionFilter) return false;
+    const product = entry.product;
     const matchesSearch = `${product.name} ${product.category}`.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase());
     const matchesStock =
       stockFilter === "all" ||
       (stockFilter === "out" ? product.stockQty <= 0 : product.stockQty > 0 && product.stockQty <= product.lowStockThreshold);
     return matchesSearch && matchesStock;
   });
-  const renderedProducts = visibleProducts.slice(0, productRenderLimit);
-  const remainingProductCount = Math.max(0, visibleProducts.length - renderedProducts.length);
-  const actionProduct = products.find((product) => product.id === openProductActionsId) ?? null;
+  const renderedEntries = visibleEntries.slice(0, productRenderLimit);
+  const remainingProductCount = Math.max(0, visibleEntries.length - renderedEntries.length);
+  const actionEntry =
+    panindaEntries.find(
+      (entry) => entry.catalogItemId === openProductActionsId,
+    ) ?? null;
 
   const openProductForm = () => {
     setProductForm(emptyProductForm);
@@ -413,7 +665,7 @@ export default function OwnerInventoryScreen() {
 
           <GabiCard>
             <View style={styles.summaryGrid}>
-              <SummaryMetric icon="cube-outline" label="Paninda" value={String(products.length)} />
+              <SummaryMetric icon="cube-outline" label="Active" value={String(activeEntries.length)} />
               <SummaryMetric
                 icon="warning-outline"
                 label="Paubos / ubos"
@@ -430,7 +682,7 @@ export default function OwnerInventoryScreen() {
               title="Listahan"
             />
 
-            {products.length > 0 ? (
+            {panindaEntries.length > 0 ? (
               <>
                 <GabiField
                   label="Hanapin"
@@ -441,6 +693,32 @@ export default function OwnerInventoryScreen() {
                   placeholder="Pangalan o category"
                   value={productSearch}
                 />
+                <ScrollView
+                  contentContainerStyle={styles.filterRow}
+                  horizontal
+                  keyboardShouldPersistTaps="handled"
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {(["active", "needs_setup", "archived"] as const).map(
+                    (option) => (
+                      <FilterChip
+                        active={sectionFilter === option}
+                        key={option}
+                        label={
+                          option === "active"
+                            ? "Active"
+                            : option === "needs_setup"
+                              ? "Needs Setup"
+                              : "Archived"
+                        }
+                        onPress={() => {
+                          setSectionFilter(option);
+                          setProductRenderLimit(productRenderBatch);
+                        }}
+                      />
+                    ),
+                  )}
+                </ScrollView>
                 <ScrollView
                   contentContainerStyle={styles.filterRow}
                   horizontal
@@ -462,7 +740,7 @@ export default function OwnerInventoryScreen() {
               </>
             ) : null}
 
-            {products.length === 0 ? (
+            {panindaEntries.length === 0 ? (
               <GabiEmptyState
                 actionLabel="Magdagdag ng paninda"
                 icon="cube-outline"
@@ -470,7 +748,7 @@ export default function OwnerInventoryScreen() {
                 onAction={openProductForm}
                 title="Wala pang paninda"
               />
-            ) : visibleProducts.length === 0 ? (
+            ) : visibleEntries.length === 0 ? (
               <GabiEmptyState
                 actionLabel="I-reset ang filter"
                 icon="search-outline"
@@ -478,19 +756,26 @@ export default function OwnerInventoryScreen() {
                 onAction={() => {
                   setProductSearch("");
                   setStockFilter("all");
+                  setSectionFilter("active");
                   setProductRenderLimit(productRenderBatch);
                 }}
                 title="Walang nahanap"
               />
             ) : (
               <View style={styles.productList}>
-                {renderedProducts.map((product) => (
+                {renderedEntries.map((entry) => (
                   <InventoryProductRow
-                    actionsOpen={openProductActionsId === product.id}
-                    disabled={saving}
-                    key={product.id}
-                    onToggleActions={() => setOpenProductActionsId((current) => current === product.id ? null : product.id)}
-                    product={product}
+                    actionsOpen={openProductActionsId === entry.catalogItemId}
+                    disabled={saving || lifecycleSaving}
+                    entry={entry}
+                    key={entry.catalogItemId}
+                    onToggleActions={() =>
+                      setOpenProductActionsId((current) =>
+                        current === entry.catalogItemId
+                          ? null
+                          : entry.catalogItemId,
+                      )
+                    }
                   />
                 ))}
                 {remainingProductCount > 0 ? (
@@ -509,6 +794,71 @@ export default function OwnerInventoryScreen() {
             <FlowLink icon="swap-horizontal-outline" label="Ilipat ang stock" onPress={() => router.push("/owner/transfers")} />
           </View>
 
+          {stockAction === "purchase" && purchaseEntry ? (
+            <GabiCard raised>
+              <GabiSectionHeader
+                action={<GabiChip label="Exact purchase lot" tone="success" />}
+                title={`Add purchased stock · ${purchaseEntry.product.name}`}
+              />
+              <GabiNotice
+                message={`The stock unit is fixed at ${purchaseEntry.product.unitType}. Saving creates purchase, lot, movement, and scalar compatibility evidence atomically.`}
+                tone="owner"
+              />
+              <View style={styles.twoColumn}>
+                <FormField
+                  editable={!purchaseSaving}
+                  keyboardType="decimal-pad"
+                  label={`Quantity (${purchaseEntry.product.unitType})`}
+                  onChangeText={(quantity) =>
+                    setPurchaseForm((form) => ({ ...form, quantity }))
+                  }
+                  placeholder="0"
+                  value={purchaseForm.quantity}
+                />
+                <FormField
+                  editable={!purchaseSaving}
+                  keyboardType="decimal-pad"
+                  label="Total purchase cost"
+                  onChangeText={(totalCost) =>
+                    setPurchaseForm((form) => ({ ...form, totalCost }))
+                  }
+                  placeholder="Optional · No Price"
+                  value={purchaseForm.totalCost}
+                />
+              </View>
+              <GabiField
+                disabled={purchaseSaving}
+                label="Purchase note"
+                onChangeText={(notes) =>
+                  setPurchaseForm((form) => ({ ...form, notes }))
+                }
+                placeholder="Optional reference or supplier note"
+                value={purchaseForm.notes}
+              />
+              <View style={styles.formActions}>
+                <View style={styles.primaryAction}>
+                  <GabiPrimaryButton
+                    disabled={purchaseSaving}
+                    icon="bag-add-outline"
+                    label={purchaseSaving ? "Saving purchase..." : "Save purchase lot"}
+                    loading={purchaseSaving}
+                    onPress={() => void savePurchasedStock()}
+                  />
+                </View>
+                <GabiSoftButton
+                  disabled={purchaseSaving}
+                  icon="close"
+                  label="Close"
+                  onPress={() => {
+                    setPurchaseEntry(null);
+                    setPurchaseForm(emptyPurchaseForm);
+                    setStockAction(null);
+                  }}
+                />
+              </View>
+            </GabiCard>
+          ) : null}
+
           {stockAction === "cook" ? (
             <GabiCard raised>
               <GabiSectionHeader
@@ -522,7 +872,7 @@ export default function OwnerInventoryScreen() {
               <ProductChips
                 disabled={cookSaving}
                 onSelect={(productId) => setCookForm((form) => ({ ...form, productId }))}
-                products={products}
+                products={compatibilityCookProducts}
                 selectedId={cookForm.productId}
               />
               <View style={styles.twoColumn}>
@@ -561,12 +911,12 @@ export default function OwnerInventoryScreen() {
 
           {stockAction === "spoilage" ? (
             <GabiCard raised>
-              <GabiSectionHeader action={<GabiChip label="Stock out" tone="danger" />} title="Nasayang" />
+              <GabiSectionHeader action={<GabiChip label="Stock out" tone="danger" />} title="Record spoilage" />
               <GabiNotice message="Ibabawas ito sa stock at isasama sa spoilage loss. Hindi puwedeng lumampas sa kasalukuyang stock." tone="warning" />
               <ProductChips
                 disabled={spoilageSaving}
                 onSelect={(productId) => setSpoilageForm((form) => ({ ...form, productId }))}
-                products={products}
+                products={spoilageProducts}
                 selectedId={spoilageForm.productId}
               />
               <View style={styles.twoColumn}>
@@ -591,8 +941,8 @@ export default function OwnerInventoryScreen() {
                 <View style={styles.primaryAction}>
                   <GabiPrimaryButton
                     disabled={spoilageSaving}
-                    icon="trash-outline"
-                    label={spoilageSaving ? "Sine-save..." : "I-save ang nasayang"}
+                    icon="remove-circle-outline"
+                    label={spoilageSaving ? "Sine-save..." : "Record spoilage"}
                     loading={spoilageSaving}
                     onPress={saveSpoilage}
                   />
@@ -605,9 +955,25 @@ export default function OwnerInventoryScreen() {
           {productFormVisible ? (
             <GabiCard raised>
               <GabiSectionHeader
-                action={products.length > 0 ? <GabiSoftButton compact disabled={saving} icon="close" label="Isara" onPress={closeProductForm} /> : undefined}
-                title={productForm.id ? "I-edit ang paninda" : "Bagong paninda"}
+                action={panindaEntries.length > 0 ? <GabiSoftButton compact disabled={saving} icon="close" label="Isara" onPress={closeProductForm} /> : undefined}
+                title={productForm.id ? "I-edit ang paninda" : "Bagong direct-resale item"}
               />
+              {!productForm.id ? (
+                <>
+                  <GabiNotice
+                    message="Bagong Paninda is for items bought and resold as-is, such as bottled water, biscuits, or canned goods."
+                    tone="owner"
+                  />
+                  <GabiSoftButton
+                    icon="restaurant-outline"
+                    label="Cooking or preparing this item? Create it in Recipe Book"
+                    onPress={() => {
+                      closeProductForm();
+                      router.push("/owner/recipes");
+                    }}
+                  />
+                </>
+              ) : null}
               <GabiField
                 disabled={!canEditProducts}
                 label="Pangalan"
@@ -622,27 +988,35 @@ export default function OwnerInventoryScreen() {
                 placeholder="Drinks, meals, snacks"
                 value={productForm.category}
               />
+              {productForm.id ? (
+                <OptionGroup
+                  disabled={!canEditProducts}
+                  label="Legacy product type"
+                  onSelect={(productType) => setProductForm((form) => ({ ...form, productType }))}
+                  options={productTypes}
+                  selected={productForm.productType}
+                />
+              ) : null}
               <OptionGroup
-                disabled={!canEditProducts}
-                label="Uri ng paninda"
-                onSelect={(productType) => setProductForm((form) => ({ ...form, productType }))}
-                options={productTypes}
-                selected={productForm.productType}
-              />
-              <OptionGroup
-                disabled={!canEditProducts}
+                disabled={!canEditProducts || !productForm.stockEditable}
                 label="Unit"
                 onSelect={(unitType) => setProductForm((form) => ({ ...form, unitType }))}
                 options={unitTypes}
                 selected={productForm.unitType}
               />
               <View style={styles.twoColumn}>
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Stock qty" onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))} placeholder="0" value={productForm.stockQty} />
+                <FormField editable={canEditProducts && productForm.stockEditable} keyboardType="decimal-pad" label="Stock qty" onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))} placeholder="0" value={productForm.stockQty} />
                 <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Paubos kapag" onChangeText={(lowStockThreshold) => setProductForm((form) => ({ ...form, lowStockThreshold }))} placeholder="0" value={productForm.lowStockThreshold} />
               </View>
+              {productForm.id && !productForm.stockEditable ? (
+                <GabiNotice
+                  message="Stock is lot-tracked. Edit selling details here; use the lot-aware purchase, Recipe, or Production flow to change stock."
+                  tone="owner"
+                />
+              ) : null}
               <View style={styles.twoColumn}>
                 <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Presyo" onChangeText={(price) => setProductForm((form) => ({ ...form, price }))} placeholder="0" value={productForm.price} />
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Unit cost" onChangeText={(cost) => setProductForm((form) => ({ ...form, cost }))} placeholder="0" value={productForm.cost} />
+                <FormField editable={canEditProducts && productForm.stockEditable} keyboardType="decimal-pad" label="Unit cost" onChangeText={(cost) => setProductForm((form) => ({ ...form, cost }))} placeholder="0" value={productForm.cost} />
               </View>
               <GabiNotice message="Optional ang bundle. Parehong quantity at presyo ang kailangan para ma-apply ito sa BENTA." />
               <View style={styles.twoColumn}>
@@ -673,17 +1047,36 @@ export default function OwnerInventoryScreen() {
         </>
       )}
 
-      {actionProduct ? (
+      {actionEntry ? (
         <ProductActionSheet
           onClose={() => setOpenProductActionsId(null)}
-          onCook={() => openManualCook(actionProduct)}
-          onEdit={() => editProduct(actionProduct)}
-          onSpoilage={() => openSpoilage(actionProduct)}
+          onAddPurchasedStock={() => addPurchasedStock(actionEntry)}
+          onArchive={() => confirmArchive(actionEntry)}
+          onCook={() => openManualCook(actionEntry.product)}
+          onDelete={() => confirmPermanentDelete(actionEntry)}
+          onEdit={() =>
+            editProduct(
+              actionEntry.product,
+              actionEntry.stockPolicy !== "product_lots",
+            )
+          }
+          onOpenRecipe={() => openRecipe(actionEntry)}
+          onProduce={() => {
+            setOpenProductActionsId(null);
+            router.push({
+              pathname: "/owner/production",
+              params: actionEntry.activeRecipeId
+                ? { recipeId: actionEntry.activeRecipeId }
+                : {},
+            });
+          }}
+          onSpoilage={() => openSpoilage(actionEntry.product)}
           onTransfer={() => {
             setOpenProductActionsId(null);
             router.push("/owner/transfers");
           }}
-          product={actionProduct}
+          busy={lifecycleSaving}
+          entry={actionEntry}
         />
       ) : null}
 
@@ -878,19 +1271,30 @@ function FilterChip({ active, label, onPress }: { active: boolean; label: string
   );
 }
 
+function panindaClassificationLabel(entry: PanindaCatalogEntry) {
+  if (entry.classification === "finished_product") return "Recipe-backed item";
+  if (entry.classification === "direct_resale_product") return "Direct resale";
+  if (entry.classification === "bundle_combo") return "Bundle";
+  if (entry.compatibilityMode === "legacy_unclassified") {
+    return "Legacy selling item";
+  }
+  return "Selling item";
+}
+
 type InventoryProductRowProps = {
-  product: Product;
+  entry: PanindaCatalogEntry;
   actionsOpen: boolean;
   disabled: boolean;
   onToggleActions: () => void;
 };
 
 function InventoryProductRow({
-  product,
+  entry,
   actionsOpen,
   disabled,
   onToggleActions,
 }: InventoryProductRowProps) {
+  const product = entry.product;
   const { palette, extended } = useGabiTheme();
   const outOfStock = product.stockQty <= 0;
   const lowStock = !outOfStock && product.stockQty <= product.lowStockThreshold;
@@ -915,9 +1319,17 @@ function InventoryProductRow({
         </View>
         <View style={styles.productCopy}>
           <GabiText adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} variant="cardTitle">{product.name}</GabiText>
-          <GabiText tone="muted" variant="caption">{product.category} · {product.productType}</GabiText>
+          <GabiText tone="muted" variant="caption">
+            {product.category} · {panindaClassificationLabel(entry)}
+          </GabiText>
           <View style={styles.productChips}>
             <GabiChip label={stateLabel} tone={stateTone} />
+            {entry.section === "needs_setup" ? (
+              <GabiChip label="Needs setup" tone="warning" />
+            ) : null}
+            {entry.section === "archived" ? (
+              <GabiChip label="Archived" tone="neutral" />
+            ) : null}
             {bundleLabel ? <GabiChip icon="pricetag-outline" label={bundleLabel} tone="primary" /> : null}
             {!product.active ? <GabiChip label="Naka-off" tone="neutral" /> : null}
           </View>
@@ -948,50 +1360,191 @@ function InventoryProductRow({
 }
 
 function ProductActionSheet({
-  product,
+  entry,
+  busy,
   onClose,
+  onOpenRecipe,
+  onProduce,
+  onAddPurchasedStock,
   onCook,
   onSpoilage,
   onTransfer,
   onEdit,
+  onArchive,
+  onDelete,
 }: {
-  product: Product;
+  entry: PanindaCatalogEntry;
+  busy: boolean;
   onClose: () => void;
+  onOpenRecipe: () => void;
+  onProduce: () => void;
+  onAddPurchasedStock: () => void;
   onCook: () => void;
   onSpoilage: () => void;
   onTransfer: () => void;
   onEdit: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
 }) {
+  const product = entry.product;
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const { palette, extended } = useGabiTheme();
+  const hasAnyAction = Object.values(entry.actions).some(Boolean);
+  const showManualCompatibilityStockIn =
+    entry.actions.manualCompatibilityStockIn &&
+    (entry.actions.openRecipe || product.productType !== "retail item");
   return (
-    <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible>
-      <View style={styles.modalRoot}>
+    <Modal
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      transparent
+      visible
+    >
+      <View accessibilityViewIsModal style={styles.modalRoot}>
         <Pressable accessibilityLabel="Isara ang product actions" onPress={onClose} style={[styles.modalScrim, { backgroundColor: extended.scrim }]} />
-        <View style={[styles.actionSheet, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+        <View
+          style={[
+            styles.actionSheet,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              maxHeight: Math.max(200, height - insets.top - spacing.lg),
+              paddingBottom: Math.max(insets.bottom, spacing.md),
+            },
+          ]}
+        >
           <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetTitle}>
-              <GabiText variant="h2">{product.name}</GabiText>
+              <GabiText numberOfLines={2} variant="h2">{product.name}</GabiText>
               <GabiText tone="muted" variant="caption">{product.stockQty} {product.unitType} sa stock · {formatPeso(product.price)}</GabiText>
             </View>
             <GabiSoftButton compact icon="close" label="Isara" onPress={onClose} />
           </View>
-          <View style={[styles.sheetActions, { backgroundColor: palette.softPrimary }]}>
-            <MenuAction icon="flame-outline" label="Dagdag luto (walang recipe)" onPress={onCook} />
-            <MenuAction danger icon="trash-outline" label="Nasayang" onPress={onSpoilage} />
-            <MenuAction icon="swap-horizontal-outline" label="Ilipat sa ibang stall" onPress={onTransfer} />
-            <MenuAction icon="create-outline" label="I-edit ang paninda" onPress={onEdit} />
-          </View>
+          <ScrollView
+            contentContainerStyle={styles.sheetScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+            style={styles.sheetScroll}
+          >
+            <View style={styles.sheetSummary}>
+              <GabiChip
+                label={panindaClassificationLabel(entry)}
+                tone="primary"
+              />
+              {entry.section === "needs_setup" ? (
+                <GabiChip label="Needs setup" tone="warning" />
+              ) : null}
+              {entry.section === "archived" ? (
+                <GabiChip label="Archived" tone="neutral" />
+              ) : null}
+            </View>
+            {entry.stockPolicy === "product_lots" ? (
+              <GabiNotice
+                message="This item uses native lot evidence. Stock changes stay in a lot-aware purchase, Recipe, or Production flow so no partial scalar-only mutation is created."
+                tone="owner"
+              />
+            ) : null}
+            <View style={[styles.sheetActions, { backgroundColor: palette.softPrimary }]}>
+              {entry.actions.openRecipe ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="book-outline"
+                  label="Open Recipe"
+                  onPress={onOpenRecipe}
+                />
+              ) : null}
+              {entry.actions.produceFromRecipe ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="restaurant-outline"
+                  label="Produce from Recipe"
+                  onPress={onProduce}
+                />
+              ) : null}
+              {entry.actions.addPurchasedStock ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="basket-outline"
+                  label="Add purchased stock"
+                  onPress={onAddPurchasedStock}
+                />
+              ) : null}
+              {entry.actions.editSellingItem ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="create-outline"
+                  label="Edit selling item"
+                  onPress={onEdit}
+                />
+              ) : null}
+              {showManualCompatibilityStockIn ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="add-circle-outline"
+                  label="Manual stock in (legacy compatibility)"
+                  onPress={onCook}
+                />
+              ) : null}
+              {entry.actions.recordSpoilage ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="remove-circle-outline"
+                  label="Record spoilage"
+                  onPress={onSpoilage}
+                />
+              ) : null}
+              {entry.actions.transferStock ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="swap-horizontal-outline"
+                  label="Transfer stock"
+                  onPress={onTransfer}
+                />
+              ) : null}
+              {entry.actions.archive ? (
+                <MenuAction
+                  disabled={busy}
+                  icon="archive-outline"
+                  label="Archive"
+                  onPress={onArchive}
+                />
+              ) : null}
+              {entry.actions.requestPermanentDelete ? (
+                <MenuAction
+                  danger
+                  disabled={busy}
+                  icon="trash-outline"
+                  label="Delete permanently"
+                  onPress={onDelete}
+                />
+              ) : null}
+              {!hasAnyAction ? (
+                <GabiText tone="muted" variant="caption">
+                  This archived item is read-only. Its historical records remain preserved.
+                </GabiText>
+              ) : null}
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
   );
 }
 
-function MenuAction({ icon, label, onPress, danger = false }: { icon: IconName; label: string; onPress: () => void; danger?: boolean }) {
+function MenuAction({ icon, label, onPress, danger = false, disabled = false }: { icon: IconName; label: string; onPress: () => void; danger?: boolean; disabled?: boolean }) {
   const { palette } = useGabiTheme();
   return (
-    <Pressable accessibilityLabel={label} accessibilityRole="button" onPress={onPress} style={styles.menuAction}>
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.menuAction, disabled ? styles.disabledAction : null]}
+    >
       <Ionicons color={danger ? palette.danger : palette.primary} name={icon} size={18} />
       <GabiText style={danger ? { color: palette.danger } : undefined} variant="buttonSm">{label}</GabiText>
     </Pressable>
@@ -1110,7 +1663,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     borderWidth: 1,
     gap: spacing.md,
-    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
@@ -1135,12 +1687,27 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: spacing.xs,
   },
+  sheetScroll: {
+    flexShrink: 1,
+  },
+  sheetScrollContent: {
+    gap: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  sheetSummary: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
   menuAction: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.sm,
     minHeight: 44,
     paddingHorizontal: spacing.sm,
+  },
+  disabledAction: {
+    opacity: 0.48,
   },
   chipRow: {
     flexDirection: "row",

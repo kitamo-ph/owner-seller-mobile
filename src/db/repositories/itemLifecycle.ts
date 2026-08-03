@@ -62,6 +62,8 @@ export async function getCatalogItemReferenceCounts(
     orderSupplyUsage,
     adjustment,
     configurationReference,
+    transferReference,
+    alertReference,
   ] = await Promise.all([
     count(
       database,
@@ -98,9 +100,17 @@ export async function getCatalogItemReferenceCounts(
           SELECT COUNT(*)
           FROM product_stock_lots
           WHERE catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*)
+          FROM products product
+          INNER JOIN legacy_item_bindings binding
+            ON binding.entity_kind = 'product'
+            AND binding.legacy_entity_id = product.id
+          WHERE binding.catalog_item_id = ?
+            AND ABS(product.stock_qty) > 0.000001
         ) AS count
       `,
-      [catalogItemId, catalogItemId],
+      [catalogItemId, catalogItemId, catalogItemId],
     ),
     count(
       database,
@@ -184,14 +194,34 @@ export async function getCatalogItemReferenceCounts(
         ) + (
           SELECT COUNT(*)
           FROM production_batches batch
-          INNER JOIN recipes recipe ON recipe.id = batch.recipe_id
+          WHERE batch.output_product_id IN (
+            SELECT legacy_entity_id
+            FROM legacy_item_bindings
+            WHERE catalog_item_id = ? AND entity_kind = 'product'
+          ) OR batch.recipe_id IN (
+            SELECT recipe.id
+            FROM recipes recipe
+            INNER JOIN legacy_item_bindings binding
+              ON binding.entity_kind = 'product'
+              AND binding.legacy_entity_id = recipe.output_product_id
+            WHERE binding.catalog_item_id = ?
+          )
+        ) + (
+          SELECT COUNT(*)
+          FROM production_ingredient_usages usage
           INNER JOIN legacy_item_bindings binding
-            ON binding.entity_kind = 'product'
-            AND binding.legacy_entity_id = recipe.output_product_id
+            ON binding.entity_kind = 'ingredient'
+            AND binding.legacy_entity_id = usage.ingredient_id
           WHERE binding.catalog_item_id = ?
         ) AS count
       `,
-      [catalogItemId, catalogItemId, catalogItemId],
+      [
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+        catalogItemId,
+      ],
     ),
     count(
       database,
@@ -206,9 +236,16 @@ export async function getCatalogItemReferenceCounts(
             ON binding.entity_kind = 'product'
             AND binding.legacy_entity_id = item.product_id
           WHERE binding.catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*)
+          FROM sale_ingredient_usages usage
+          INNER JOIN legacy_item_bindings binding
+            ON binding.entity_kind = 'ingredient'
+            AND binding.legacy_entity_id = usage.ingredient_id
+          WHERE binding.catalog_item_id = ?
         ) AS count
       `,
-      [catalogItemId, catalogItemId],
+      [catalogItemId, catalogItemId, catalogItemId],
     ),
     count(
       database,
@@ -245,9 +282,43 @@ export async function getCatalogItemReferenceCounts(
     count(
       database,
       `
+        SELECT (
+          SELECT COUNT(*) FROM item_unit_conversions
+          WHERE catalog_item_id = ?
+        ) + (
+          SELECT COUNT(*) FROM catalog_cost_profiles
+          WHERE catalog_item_id = ?
+        ) AS count
+      `,
+      [catalogItemId, catalogItemId],
+    ),
+    count(
+      database,
+      `
         SELECT COUNT(*) AS count
-        FROM item_unit_conversions
-        WHERE catalog_item_id = ?
+        FROM product_transfers transfer
+        WHERE transfer.from_product_id IN (
+          SELECT legacy_entity_id
+          FROM legacy_item_bindings
+          WHERE catalog_item_id = ? AND entity_kind = 'product'
+        ) OR transfer.to_product_id IN (
+          SELECT legacy_entity_id
+          FROM legacy_item_bindings
+          WHERE catalog_item_id = ? AND entity_kind = 'product'
+        )
+      `,
+      [catalogItemId, catalogItemId],
+    ),
+    count(
+      database,
+      `
+        SELECT COUNT(*) AS count
+        FROM owner_alerts alert
+        WHERE alert.product_id IN (
+          SELECT legacy_entity_id
+          FROM legacy_item_bindings
+          WHERE catalog_item_id = ? AND entity_kind = 'product'
+        )
       `,
       parameter,
     ),
@@ -262,7 +333,9 @@ export async function getCatalogItemReferenceCounts(
     recipeVersionReference +
     production +
     sale +
-    configurationReference;
+    configurationReference +
+    transferReference +
+    alertReference;
 
   return {
     purchase,
@@ -308,67 +381,239 @@ export async function evaluateCatalogItemPermanentDelete(
   }
 }
 
+export type CatalogItemPermanentDeleteResult =
+  | { outcome: "deleted"; catalogItemId: string }
+  | Exclude<PermanentDeleteEligibility, { outcome: "allowed" }>;
+
+/**
+ * Rechecks every protected reference and removes the catalog identity plus its
+ * exact unused legacy projection in one exclusive transaction. Any audit or
+ * write uncertainty fails closed and leaves the item available for Archive.
+ */
+export async function permanentlyDeleteCatalogItem(
+  catalogItemId: string,
+  ownerAuthorized: boolean,
+  db?: RepositoryDatabase,
+): Promise<CatalogItemPermanentDeleteResult> {
+  if (!ownerAuthorized) {
+    return {
+      outcome: "owner_authorization_required",
+      blockingReferences: [],
+    };
+  }
+
+  const database = getRepositoryDatabase(db);
+  let result: CatalogItemPermanentDeleteResult = {
+    outcome: "denied_fail_closed",
+    blockingReferences: [],
+  };
+
+  try {
+    await database.withExclusiveTransactionAsync(async (txn) => {
+      const item = await txn.getFirstAsync<{
+        business_id: string;
+      }>(
+        `
+          SELECT business_id
+          FROM catalog_items
+          WHERE id = ? AND deleted_at IS NULL
+        `,
+        [catalogItemId],
+      );
+      if (!item) {
+        throw new Error("Catalog item is unavailable for permanent delete.");
+      }
+
+      const referenceCounts = await getCatalogItemReferenceCounts(
+        catalogItemId,
+        txn,
+      );
+      const eligibility = evaluatePermanentDeleteEligibility({
+        ownerAuthorized: true,
+        referenceCounts,
+      });
+      if (eligibility.outcome !== "allowed") {
+        result = eligibility;
+        return;
+      }
+
+      const bindings = await txn.getAllAsync<{
+        entity_kind: "product" | "ingredient";
+        legacy_entity_id: string;
+      }>(
+        `
+          SELECT entity_kind, legacy_entity_id
+          FROM legacy_item_bindings
+          WHERE catalog_item_id = ? AND deleted_at IS NULL
+        `,
+        [catalogItemId],
+      );
+      if (bindings.length !== 1) {
+        throw new Error("Catalog projection identity is not exact.");
+      }
+
+      const binding = bindings[0];
+      const bindingRemoval = await txn.runAsync(
+        "DELETE FROM legacy_item_bindings WHERE catalog_item_id = ?",
+        [catalogItemId],
+      );
+      if (bindingRemoval.changes !== 1) {
+        throw new Error("Catalog binding changed before permanent delete.");
+      }
+
+      const projectionRemoval = await txn.runAsync(
+        binding.entity_kind === "product"
+          ? "DELETE FROM products WHERE id = ? AND business_id = ?"
+          : "DELETE FROM ingredients WHERE id = ? AND business_id = ?",
+        [binding.legacy_entity_id, item.business_id],
+      );
+      if (projectionRemoval.changes !== 1) {
+        throw new Error("Catalog projection changed before permanent delete.");
+      }
+
+      const itemRemoval = await txn.runAsync(
+        "DELETE FROM catalog_items WHERE id = ? AND business_id = ?",
+        [catalogItemId, item.business_id],
+      );
+      if (itemRemoval.changes !== 1) {
+        throw new Error("Catalog item changed before permanent delete.");
+      }
+      result = { outcome: "deleted", catalogItemId };
+    });
+  } catch {
+    return { outcome: "denied_fail_closed", blockingReferences: [] };
+  }
+
+  return result;
+}
+
 /**
  * Archive is the normal lifecycle action and retains every projection and
  * historical reference. Moving an unreviewed legacy binding out of
  * compatibility mode prevents the exact legacy Kiosk bypass from ignoring the
  * explicit archive.
  */
+export async function archiveCatalogItemInTransaction(
+  catalogItemId: string,
+  ownerAuthorized: boolean,
+  db: RepositoryDatabase,
+) {
+  const item = await db.getFirstAsync<{
+    lifecycle_status: "draft" | "ready" | "active" | "archived";
+  }>(
+    `
+      SELECT lifecycle_status
+      FROM catalog_items
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [catalogItemId],
+  );
+  if (!item) throw new Error("Catalog item is unavailable.");
+  const eligibility = evaluateArchiveEligibility({
+    ownerAuthorized,
+    lifecycle: item.lifecycle_status,
+  });
+  if (!eligibility.allowed) {
+    throw new Error("Owner authorization is required to archive an item.");
+  }
+  if (eligibility.alreadyArchived) return;
+
+  const timestamp = nowIso();
+  const result = await db.runAsync(
+    `
+      UPDATE catalog_items
+      SET lifecycle_status = 'archived', readiness_state = 'blocked',
+        sellable = 0, kiosk_enabled = 0, archived_at = ?,
+        updated_at = ?, sync_status = 'local'
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [timestamp, timestamp, catalogItemId],
+  );
+  if (result.changes !== 1) {
+    throw new Error("Catalog item changed before archive.");
+  }
+  await db.runAsync(
+    `
+      UPDATE products
+      SET active = 0, updated_at = ?, sync_status = 'local'
+      WHERE id IN (
+        SELECT legacy_entity_id
+        FROM legacy_item_bindings
+        WHERE catalog_item_id = ? AND entity_kind = 'product'
+          AND deleted_at IS NULL
+      ) AND deleted_at IS NULL
+    `,
+    [timestamp, catalogItemId],
+  );
+  await db.runAsync(
+    `
+      UPDATE legacy_item_bindings
+      SET compatibility_mode = CASE
+            WHEN compatibility_mode = 'legacy_unclassified'
+              THEN 'reviewed_legacy'
+            ELSE compatibility_mode
+          END,
+        binding_status = 'archived',
+        legacy_active_snapshot = 0,
+        reviewed_at = COALESCE(reviewed_at, ?),
+        updated_at = ?, sync_status = 'local'
+      WHERE catalog_item_id = ? AND deleted_at IS NULL
+    `,
+    [timestamp, timestamp, catalogItemId],
+  );
+  await db.runAsync(
+    `
+      UPDATE recipes
+      SET is_active = 0, updated_at = ?, sync_status = 'local'
+      WHERE output_product_id IN (
+        SELECT legacy_entity_id
+        FROM legacy_item_bindings
+        WHERE catalog_item_id = ? AND entity_kind = 'product'
+          AND deleted_at IS NULL
+      ) AND deleted_at IS NULL
+    `,
+    [timestamp, catalogItemId],
+  );
+  await db.runAsync(
+    `
+      UPDATE catalog_item_recipe_roles
+      SET status = 'archived', archived_at = ?, updated_at = ?,
+        sync_status = 'local'
+      WHERE output_catalog_item_id = ? AND status = 'active'
+        AND deleted_at IS NULL
+    `,
+    [timestamp, timestamp, catalogItemId],
+  );
+  await db.runAsync(
+    `
+      UPDATE recipe_drafts
+      SET lifecycle_status = 'abandoned',
+        autosave_revision = autosave_revision + 1,
+        last_saved_at = ?, updated_at = ?, sync_status = 'local'
+      WHERE output_catalog_item_id = ?
+        AND lifecycle_status IN ('editing', 'ready')
+        AND deleted_at IS NULL
+    `,
+    [timestamp, timestamp, catalogItemId],
+  );
+  await db.runAsync(
+    `
+      UPDATE catalog_cost_profiles
+      SET status = 'archived', updated_at = ?, sync_status = 'local'
+      WHERE catalog_item_id = ? AND status = 'active'
+        AND deleted_at IS NULL
+    `,
+    [timestamp, catalogItemId],
+  );
+}
+
 export async function archiveCatalogItem(
   catalogItemId: string,
   ownerAuthorized: boolean,
   db?: RepositoryDatabase,
 ) {
   const database = getRepositoryDatabase(db);
-  await database.withExclusiveTransactionAsync(async (txn) => {
-    const item = await txn.getFirstAsync<{
-      lifecycle_status: "draft" | "ready" | "active" | "archived";
-    }>(
-      `
-        SELECT lifecycle_status
-        FROM catalog_items
-        WHERE id = ? AND deleted_at IS NULL
-      `,
-      [catalogItemId],
-    );
-    if (!item) throw new Error("Catalog item is unavailable.");
-    const eligibility = evaluateArchiveEligibility({
-      ownerAuthorized,
-      lifecycle: item.lifecycle_status,
-    });
-    if (!eligibility.allowed) {
-      throw new Error("Owner authorization is required to archive an item.");
-    }
-    if (eligibility.alreadyArchived) return;
-
-    const timestamp = nowIso();
-    const result = await txn.runAsync(
-      `
-        UPDATE catalog_items
-        SET lifecycle_status = 'archived', readiness_state = 'blocked',
-          sellable = 0, kiosk_enabled = 0, archived_at = ?,
-          updated_at = ?, sync_status = 'local'
-        WHERE id = ? AND deleted_at IS NULL
-      `,
-      [timestamp, timestamp, catalogItemId],
-    );
-    if (result.changes !== 1) {
-      throw new Error("Catalog item changed before archive.");
-    }
-    await txn.runAsync(
-      `
-        UPDATE legacy_item_bindings
-        SET compatibility_mode = CASE
-              WHEN compatibility_mode = 'legacy_unclassified'
-                THEN 'reviewed_legacy'
-              ELSE compatibility_mode
-            END,
-          binding_status = 'archived',
-          reviewed_at = COALESCE(reviewed_at, ?),
-          updated_at = ?, sync_status = 'local'
-        WHERE catalog_item_id = ? AND deleted_at IS NULL
-      `,
-      [timestamp, timestamp, catalogItemId],
-    );
-  });
+  await database.withExclusiveTransactionAsync((txn) =>
+    archiveCatalogItemInTransaction(catalogItemId, ownerAuthorized, txn),
+  );
 }

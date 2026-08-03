@@ -21,6 +21,11 @@ const createProductSchema = z.object({
   bundleLabel: z.string().nullable().optional(),
   active: z.boolean().default(true),
   productType: z.string().default("retail item"),
+  /**
+   * Bagong Paninda creates reviewed direct-resale catalog identity.
+   * Pilot/transfer helpers keep the legacy unclassified compatibility path.
+   */
+  catalogMode: z.enum(["legacy_unclassified", "direct_resale"]).default("legacy_unclassified"),
 });
 
 // Separate schema without .default() values: zod v4 .partial() re-applies field
@@ -150,6 +155,8 @@ export async function createProduct(input: CreateProductInput, db?: RepositoryDa
     );
 
     const catalogItemId = `legacy:product:${product.id}`;
+    const directResale = parsed.catalogMode === "direct_resale";
+    const sellable = directResale && product.active && product.price > 0 ? 1 : 0;
     await txn.runAsync(
       `
         INSERT INTO catalog_items (
@@ -158,7 +165,7 @@ export async function createProduct(input: CreateProductInput, db?: RepositoryDa
           classification_review_required, sellable, kiosk_enabled,
           purchase_cost_state, selling_price_state, stock_policy, archived_at,
           created_at, updated_at, sync_status, deleted_at
-        ) VALUES (?, ?, ?, ?, ?, 'legacy_product', 'legacy_unclassified', 'draft', 'legacy_review', 1, 0, 0, ?, ?, 'product_scalar', NULL, ?, ?, 'local', NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'product_scalar', NULL, ?, ?, 'local', NULL)
       `,
       [
         catalogItemId,
@@ -166,8 +173,30 @@ export async function createProduct(input: CreateProductInput, db?: RepositoryDa
         product.branchId,
         product.name,
         product.name.toLocaleLowerCase().trim(),
-        product.cost > 0 ? "known" : "legacy_zero_unresolved",
-        product.price > 0 ? "known" : "legacy_zero_unresolved",
+        directResale ? "native" : "legacy_product",
+        directResale ? "direct_resale_product" : "legacy_unclassified",
+        directResale && product.active ? "active" : "draft",
+        directResale
+          ? product.price > 0
+            ? "ready"
+            : "incomplete"
+          : "legacy_review",
+        directResale ? 0 : 1,
+        sellable,
+        directResale
+          ? product.cost > 0
+            ? "known"
+            : "unknown"
+          : product.cost > 0
+            ? "known"
+            : "legacy_zero_unresolved",
+        directResale
+          ? product.price > 0
+            ? "known"
+            : "unknown"
+          : product.price > 0
+            ? "known"
+            : "legacy_zero_unresolved",
         product.createdAt,
         product.updatedAt,
       ],
@@ -180,14 +209,20 @@ export async function createProduct(input: CreateProductInput, db?: RepositoryDa
           review_required, legacy_active_snapshot,
           legacy_deleted_at_snapshot, migration_provenance, reviewed_at,
           native_activated_at, created_at, updated_at, sync_status, deleted_at
-        ) VALUES (?, ?, ?, 'product', ?, 'legacy_product', 'active', 'legacy_unclassified', 1, ?, NULL, 'migration_011', NULL, NULL, ?, ?, 'local', NULL)
+        ) VALUES (?, ?, ?, 'product', ?, ?, 'active', ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'local', NULL)
       `,
       [
         `binding:product:${product.id}`,
         product.businessId,
         catalogItemId,
         product.id,
+        directResale ? "sale_product" : "legacy_product",
+        directResale ? "reviewed_legacy" : "legacy_unclassified",
+        directResale ? 0 : 1,
         toInteger(product.active),
+        directResale ? "native" : "migration_011",
+        directResale ? product.createdAt : null,
+        directResale ? product.createdAt : null,
         product.createdAt,
         product.updatedAt,
       ],
@@ -216,7 +251,11 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
 
   const parsed = updateProductSchema.parse(input);
   const database = getRepositoryDatabase(db);
-  if (parsed.stockQty !== undefined) {
+  const changesStockAuthority =
+    parsed.stockQty !== undefined ||
+    parsed.unitType !== undefined ||
+    parsed.cost !== undefined;
+  if (changesStockAuthority) {
     const lotTracked = await database.getFirstAsync<{ id: string }>(
       `
         SELECT item.id
@@ -234,7 +273,7 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
     );
     if (lotTracked) {
       throw new Error(
-        "Lot-tracked Product stock must use an atomic lot-backed stock operation.",
+        "Lot-tracked Product stock, unit, and cost must use an atomic lot-backed stock operation.",
       );
     }
   }
@@ -259,21 +298,27 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
   };
 
   const applyUpdate = async (txn: RepositoryDatabase) => {
-    await txn.runAsync(
+    const result = await txn.runAsync(
     `
       UPDATE products
-      SET branch_id = ?, name = ?, category = ?, price = ?, cost = ?, stock_qty = ?,
-        unit_type = ?, low_stock_threshold = ?, bundle_quantity = ?, bundle_price = ?,
+      SET branch_id = ?, name = ?, category = ?, price = ?,
+        cost = CASE WHEN ? = 1 THEN ? ELSE cost END,
+        stock_qty = CASE WHEN ? = 1 THEN ? ELSE stock_qty END,
+        unit_type = CASE WHEN ? = 1 THEN ? ELSE unit_type END,
+        low_stock_threshold = ?, bundle_quantity = ?, bundle_price = ?,
         bundle_label = ?, active = ?, product_type = ?, updated_at = ?, sync_status = ?
-      WHERE id = ? AND deleted_at IS NULL
+      WHERE id = ? AND updated_at = ? AND deleted_at IS NULL
     `,
     [
       product.branchId,
       product.name,
       product.category,
       product.price,
+      parsed.cost === undefined ? 0 : 1,
       product.cost,
+      parsed.stockQty === undefined ? 0 : 1,
       product.stockQty,
+      parsed.unitType === undefined ? 0 : 1,
       product.unitType,
       product.lowStockThreshold,
       product.bundleQuantity,
@@ -284,8 +329,12 @@ export async function updateProduct(id: string, input: UpdateProductInput, db?: 
       product.updatedAt,
       product.syncStatus,
       product.id,
+      existing.updatedAt,
     ],
   );
+    if (result.changes !== 1) {
+      throw new Error("Product changed before the metadata update.");
+    }
     await txn.runAsync(
     `
       UPDATE catalog_items

@@ -3,6 +3,7 @@ import { runMigrations } from "@/db/migrations";
 import {
   archiveCatalogItem,
   evaluateCatalogItemPermanentDelete,
+  permanentlyDeleteCatalogItem,
   type RepositoryDatabase,
 } from "@/db/repositories";
 
@@ -15,10 +16,6 @@ export async function archiveInventoryCatalogItem(
   await archiveCatalogItem(catalogItemId, ownerAuthorized, db);
 }
 
-/**
- * Eligibility only. Permanent deletion is intentionally not exposed in Phase
- * B; the later owner workflow must re-run this check and delete atomically.
- */
 export async function inspectPermanentDeleteEligibility(
   catalogItemId: string,
   ownerAuthorized: boolean,
@@ -30,4 +27,13 @@ export async function inspectPermanentDeleteEligibility(
     ownerAuthorized,
     db,
   );
+}
+
+export async function permanentlyDeleteInventoryCatalogItem(
+  catalogItemId: string,
+  ownerAuthorized: boolean,
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  return permanentlyDeleteCatalogItem(catalogItemId, ownerAuthorized, db);
 }
