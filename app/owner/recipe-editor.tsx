@@ -69,6 +69,11 @@ import {
   type RecipeFirstUnit,
 } from "@/domain/recipeFirst";
 import {
+  RECIPE_INGREDIENT_PICKER_GROUPS,
+  buildRecipeIngredientPickerViewModel,
+} from "@/domain/recipeIngredientPickerView";
+import { presentRecipeLineIdentity } from "@/domain/recipeLinePresentation";
+import {
   addGroceryPurchase,
   loadGroceryPoolSnapshot,
 } from "@/services/groceryPool";
@@ -138,13 +143,7 @@ type OriginalConversionEvidence = {
   conversionChainJson: string | null;
   unitStandardSnapshot: string | null;
 };
-const PICKER_GROUPS = [
-  ["purchased", "Purchased Ingredients"],
-  ["prepared", "Prepared Recipes"],
-  ["estimated", "Estimated Prepared Items"],
-  ["drafts", "Prepared Drafts"],
-  ["legacy", "Legacy Recipe Inputs"],
-] as const;
+const PICKER_GROUPS = RECIPE_INGREDIENT_PICKER_GROUPS;
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -1171,17 +1170,18 @@ export default function OwnerRecipeEditorScreen() {
   const selectedLot =
     grocery?.lots.find((lot) => lot.id === selectedLotId) ?? null;
 
-  const preparedEntries = useMemo(() => {
-    const query = ingredientSearch.trim().toLocaleLowerCase();
-    return ingredientPicker.filter((entry) =>
-      query
-        ? [entry.name, entry.classification, entry.pickerGroup]
-            .join(" ")
-            .toLocaleLowerCase()
-            .includes(query)
-        : true,
-    );
-  }, [ingredientPicker, ingredientSearch]);
+  const preparedPickerModel = useMemo(
+    () =>
+      buildRecipeIngredientPickerViewModel({
+        libraryEntries: ingredientPicker,
+        query: ingredientSearch,
+      }),
+    [ingredientPicker, ingredientSearch],
+  );
+  const preparedEntries = useMemo(
+    () => preparedPickerModel.groups.flatMap((group) => group.entries),
+    [preparedPickerModel],
+  );
   const selectedPrepared =
     ingredientPicker.find(
       (entry) => entry.catalogItemId === selectedPreparedId,
@@ -2980,6 +2980,7 @@ export default function OwnerRecipeEditorScreen() {
         piecesPerPack={piecesPerPack}
         portionsPerPiece={portionsPerPiece}
         preparedEntries={preparedEntries}
+        preparedPickerEmptyState={preparedPickerModel.emptyState}
         preparedPreview={preparedPreview}
         pinnedPreparedLabel={pinnedPrepared?.resolved.displayName ?? null}
         pinnedPreparedVersionId={
@@ -3096,42 +3097,44 @@ function IngredientLine({
 }) {
   const { palette, extended } = useGabiTheme();
   const amount = lineAmount(line);
+  const presentation = presentRecipeLineIdentity({
+    lineId: line.id,
+    quantity: line.quantity,
+    unit: line.unit,
+    resolved,
+  });
 
   return (
     <View style={[styles.line, { borderColor: palette.border }]}>
       <View style={styles.lineCopy}>
-        <GabiText variant="buttonSm">
-          {resolved?.displayName?.trim() ||
-            "Ingredient information unavailable"}
-        </GabiText>
+        <GabiText variant="buttonSm">{presentation.displayName}</GabiText>
         <GabiText tone="muted" variant="caption">
           {[
-            resolved?.classification
-              ? resolved.classification.replaceAll("_", " ")
+            presentation.classification
+              ? presentation.classification.replaceAll("_", " ")
               : null,
-            resolved?.sourceLabel,
-            resolved?.costLabel,
+            presentation.sourceLabel,
+            presentation.costLabel,
           ]
             .filter(Boolean)
             .join(" · ") || "Unresolved ingredient"}
         </GabiText>
         <GabiText tone="muted" variant="caption">
-          {formatQuantity(line.quantity ?? 0)} {line.unit ?? "unit"}
-          {" per recipe"}
+          {presentation.quantityLabel}
         </GabiText>
-        {resolved?.category ? (
+        {presentation.category ? (
           <GabiText tone="faint" variant="caption">
-            {resolved.category}
+            {presentation.category}
           </GabiText>
         ) : null}
-        {resolved?.sourceDetail ? (
+        {presentation.sourceDetail ? (
           <GabiText tone="faint" variant="caption">
-            {resolved.sourceDetail}
+            {presentation.sourceDetail}
           </GabiText>
         ) : null}
-        {resolved?.conversionSummary ? (
+        {presentation.conversionSummary ? (
           <GabiText tone="muted" variant="caption">
-            {resolved.conversionSummary}
+            {presentation.conversionSummary}
           </GabiText>
         ) : null}
         <GabiText
@@ -3140,14 +3143,12 @@ function IngredientLine({
           variant="caption"
         >
           {amount === null
-            ? resolved?.costLabel ?? "Cost missing"
-            : `${formatPeso(amount)} ${
-                resolved?.costLabel?.toLocaleLowerCase() ?? "cost"
-              }`}
+            ? presentation.costLabel
+            : `${formatPeso(amount)} ${presentation.costLabel.toLocaleLowerCase()}`}
         </GabiText>
-        {resolved?.missingReason ? (
+        {presentation.missingReason ? (
           <GabiText tone="warning" variant="caption">
-            {resolved.missingReason}
+            {presentation.missingReason}
           </GabiText>
         ) : null}
       </View>
@@ -3168,10 +3169,7 @@ function IngredientLine({
                 onPress={onReplace}
               />
               <Pressable
-                accessibilityLabel={`Remove ${
-                  resolved?.displayName?.trim() ||
-                  "Ingredient information unavailable"
-                }`}
+                accessibilityLabel={`Remove ${presentation.displayName}`}
                 accessibilityRole="button"
                 onPress={onRemove}
                 style={[
@@ -3219,6 +3217,10 @@ type IngredientModalProps = {
   estimateUsageUnit: RecipeFirstUnit;
   estimateNotes: string;
   preparedEntries: RecipeIngredientPickerEntry[];
+  preparedPickerEmptyState: {
+    title: string;
+    message: string;
+  } | null;
   selectedPreparedId: string | null;
   pinnedPreparedLabel: string | null;
   pinnedPreparedVersionId: string | null;
@@ -3646,7 +3648,7 @@ function IngredientModal(props: IngredientModalProps) {
                                 {entry.activeVersionId
                                   ? `Pinned version · ${entry.activeVersionOutputQuantity ?? "?"} ${entry.activeVersionOutputUnit ?? "unit"}`
                                   : entry.action === "continue_draft"
-                                    ? "Continue Recipe draft"
+                                    ? "Continue Recipe"
                                     : entry.classification}
                               </GabiText>
                               <GabiText
@@ -3665,11 +3667,11 @@ function IngredientModal(props: IngredientModalProps) {
                     </View>
                   );
                 })}
-                {props.preparedEntries.length === 0 ? (
+                {props.preparedPickerEmptyState ? (
                   <GabiEmptyState
                     icon="layers-outline"
-                    message="Try another search, record a purchase, or create a prepared Recipe."
-                    title="No matching ingredient sources"
+                    message={props.preparedPickerEmptyState.message}
+                    title={props.preparedPickerEmptyState.title}
                   />
                 ) : null}
                 {props.selectedPreparedId || props.pinnedPreparedVersionId ? (

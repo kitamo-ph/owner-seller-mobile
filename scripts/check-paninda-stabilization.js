@@ -174,13 +174,13 @@ const inventorySource = fs.readFileSync(
 for (const required of [
   /useSafeAreaInsets/,
   /useWindowDimensions/,
-  /maxHeight:/,
+  /buildPanindaActionSheetLayout/,
+  /buildPanindaActionDescriptors/,
+  /maxHeight:\s*layout\.maxHeight/,
+  /paddingBottom:\s*layout\.paddingBottom/,
   /<ScrollView[\s\S]*?sheetScrollContent/,
   /sheetScroll:\s*\{[\s\S]*?flexShrink:\s*1/,
   /onRequestClose=\{onClose\}/,
-  /Record spoilage/,
-  /Delete permanently/,
-  /Archive/,
   /Needs Setup/,
   /Cooking or preparing this item\? Create it in Recipe Book/,
   /catalogMode:\s*"direct_resale"/,
@@ -188,6 +188,21 @@ for (const required of [
   /await addDirectResalePurchase\(/,
 ]) {
   assert.match(inventorySource, required);
+}
+
+const actionSheetDomain = fs.readFileSync(
+  path.join(workspace, "src/domain/panindaActionSheet.ts"),
+  "utf8",
+);
+for (const required of [
+  /label: "Record spoilage"/,
+  /label: "Delete permanently"/,
+  /label: "Archive"/,
+  /type: "ScrollView"/,
+  /testID: "sheet-header"/,
+  /onRequestClose: true/,
+]) {
+  assert.match(actionSheetDomain, required);
 }
 
 const productsRepositorySource = fs.readFileSync(

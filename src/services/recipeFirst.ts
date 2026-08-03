@@ -47,8 +47,15 @@ import {
   standardRecipeUnitFactor,
   validateRecipeConversionSnapshotEvidence,
 } from "@/domain/recipeConversionChains";
+import {
+  mapLibraryEntryToPickerEntry,
+  type RecipeIngredientPickerEntry,
+  type RecipeIngredientPickerGroup,
+} from "@/domain/recipeIngredientPickerView";
 
 import { publishValidatedRecipeDraftInTransaction } from "./recipeVersioning";
+
+export type { RecipeIngredientPickerEntry, RecipeIngredientPickerGroup };
 
 export type RecipeFirstMode =
   | "finished_per_unit"
@@ -144,20 +151,6 @@ export type RecipeFirstLibraryEntry = {
   activeCostTotal: number | null;
   activeCostReferenceQuantity: number | null;
   activeCostReferenceUnit: string | null;
-};
-
-export type RecipeIngredientPickerGroup =
-  | "purchased"
-  | "prepared"
-  | "estimated"
-  | "drafts"
-  | "legacy";
-
-export type RecipeIngredientPickerEntry = RecipeFirstLibraryEntry & {
-  pickerGroup: RecipeIngredientPickerGroup;
-  action: "select_version" | "select_estimate" | "continue_draft" | "unavailable";
-  selectable: boolean;
-  disabledReason: string | null;
 };
 
 type OutputRow = {
@@ -1002,73 +995,13 @@ export async function loadRecipeIngredientPicker(
   db: RepositoryDatabase = openKitamoDatabase(),
 ): Promise<RecipeIngredientPickerEntry[]> {
   const library = await loadRecipeLibrary(businessId, db);
-  return library
-    .filter((entry) => entry.lifecycle !== "archived")
-    .map((entry): RecipeIngredientPickerEntry => {
-      const selfReference = entry.catalogItemId === currentOutputCatalogItemId;
-      if (entry.activeVersionId) {
-        const canMeasure = Boolean(entry.activeVersionOutputUnit);
-        return {
-          ...entry,
-          pickerGroup:
-            entry.sourceType === "native" ? "prepared" : "legacy",
-          action: "select_version",
-          selectable: !selfReference && canMeasure,
-          disabledReason: selfReference
-            ? "A Recipe cannot directly use its own published version."
-            : canMeasure
-              ? null
-              : "This Recipe version has no usable output measurement.",
-        };
-      }
-      if (
-        entry.activeCostSource === "owner_estimate" &&
-        entry.activeCostProfileId &&
-        entry.activeCostReferenceQuantity &&
-        entry.activeCostReferenceUnit
-      ) {
-        return {
-          ...entry,
-          pickerGroup: "estimated",
-          action: "select_estimate",
-          selectable: !selfReference,
-          disabledReason: selfReference
-            ? "A Recipe cannot use its own estimate as an ingredient."
-            : null,
-        };
-      }
-      if (entry.draftId && !entry.activeVersionId) {
-        return {
-          ...entry,
-          pickerGroup: "drafts",
-          action: "continue_draft",
-          selectable: false,
-          disabledReason: selfReference
-            ? "A Recipe cannot use its own draft as an ingredient."
-            : "Continue this draft and publish a version before selecting it.",
-        };
-      }
-      if (
-        entry.ingredientId ||
-        entry.classification === "purchased_ingredient" ||
-        entry.classification === "supply_packaging"
-      ) {
-        return {
-          ...entry,
-          pickerGroup: "purchased",
-          action: "unavailable",
-          selectable: false,
-          disabledReason: "Choose an exact purchase lot from Grocery.",
-        };
-      }
-      return {
-        ...entry,
-        pickerGroup: "legacy",
-        action: "unavailable",
-        selectable: false,
-        disabledReason: "This legacy item has no selectable Recipe version.",
-      };
-    });
+  return library.flatMap((entry) => {
+    const mapped = mapLibraryEntryToPickerEntry(
+      entry,
+      currentOutputCatalogItemId,
+    );
+    return mapped ? [mapped] : [];
+  });
 }
 
 /**

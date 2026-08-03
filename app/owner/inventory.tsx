@@ -22,6 +22,10 @@ import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { createProduct, updateProduct } from "@/db/repositories";
 import type { PanindaSection } from "@/domain/catalogItems";
+import {
+  buildPanindaActionDescriptors,
+  buildPanindaActionSheetLayout,
+} from "@/domain/panindaActionSheet";
 import { bundleLabelFor, hasBundlePricing } from "@/domain/pricing";
 import type { Product, ProductType, UnitType } from "@/domain/types";
 import {
@@ -1390,10 +1394,39 @@ function ProductActionSheet({
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { palette, extended } = useGabiTheme();
-  const hasAnyAction = Object.values(entry.actions).some(Boolean);
-  const showManualCompatibilityStockIn =
-    entry.actions.manualCompatibilityStockIn &&
-    (entry.actions.openRecipe || product.productType !== "retail item");
+  const layout = buildPanindaActionSheetLayout({
+    windowHeight: height,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+    spacingLg: spacing.lg,
+    spacingMd: spacing.md,
+  });
+  const actionHandlers = {
+    openRecipe: onOpenRecipe,
+    produceFromRecipe: onProduce,
+    addPurchasedStock: onAddPurchasedStock,
+    editSellingItem: onEdit,
+    manualCompatibilityStockIn: onCook,
+    recordSpoilage: onSpoilage,
+    transferStock: onTransfer,
+    archive: onArchive,
+    requestPermanentDelete: onDelete,
+  } as const;
+  const actionIcons = {
+    openRecipe: "book-outline",
+    produceFromRecipe: "restaurant-outline",
+    addPurchasedStock: "basket-outline",
+    editSellingItem: "create-outline",
+    manualCompatibilityStockIn: "add-circle-outline",
+    recordSpoilage: "remove-circle-outline",
+    transferStock: "swap-horizontal-outline",
+    archive: "archive-outline",
+    requestPermanentDelete: "trash-outline",
+  } as const;
+  const actions = buildPanindaActionDescriptors({
+    actions: entry.actions,
+    productType: product.productType,
+  });
   return (
     <Modal
       animationType="slide"
@@ -1410,8 +1443,8 @@ function ProductActionSheet({
             {
               backgroundColor: palette.surface,
               borderColor: palette.border,
-              maxHeight: Math.max(200, height - insets.top - spacing.lg),
-              paddingBottom: Math.max(insets.bottom, spacing.md),
+              maxHeight: layout.maxHeight,
+              paddingBottom: layout.paddingBottom,
             },
           ]}
         >
@@ -1448,80 +1481,17 @@ function ProductActionSheet({
               />
             ) : null}
             <View style={[styles.sheetActions, { backgroundColor: palette.softPrimary }]}>
-              {entry.actions.openRecipe ? (
+              {actions.map((action) => (
                 <MenuAction
+                  danger={action.danger}
                   disabled={busy}
-                  icon="book-outline"
-                  label="Open Recipe"
-                  onPress={onOpenRecipe}
+                  icon={actionIcons[action.key]}
+                  key={action.key}
+                  label={action.label}
+                  onPress={actionHandlers[action.key]}
                 />
-              ) : null}
-              {entry.actions.produceFromRecipe ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="restaurant-outline"
-                  label="Produce from Recipe"
-                  onPress={onProduce}
-                />
-              ) : null}
-              {entry.actions.addPurchasedStock ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="basket-outline"
-                  label="Add purchased stock"
-                  onPress={onAddPurchasedStock}
-                />
-              ) : null}
-              {entry.actions.editSellingItem ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="create-outline"
-                  label="Edit selling item"
-                  onPress={onEdit}
-                />
-              ) : null}
-              {showManualCompatibilityStockIn ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="add-circle-outline"
-                  label="Manual stock in (legacy compatibility)"
-                  onPress={onCook}
-                />
-              ) : null}
-              {entry.actions.recordSpoilage ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="remove-circle-outline"
-                  label="Record spoilage"
-                  onPress={onSpoilage}
-                />
-              ) : null}
-              {entry.actions.transferStock ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="swap-horizontal-outline"
-                  label="Transfer stock"
-                  onPress={onTransfer}
-                />
-              ) : null}
-              {entry.actions.archive ? (
-                <MenuAction
-                  disabled={busy}
-                  icon="archive-outline"
-                  label="Archive"
-                  onPress={onArchive}
-                />
-              ) : null}
-              {entry.actions.requestPermanentDelete ? (
-                <MenuAction
-                  danger
-                  disabled={busy}
-                  icon="trash-outline"
-                  label="Delete permanently"
-                  onPress={onDelete}
-                />
-              ) : null}
-              {!hasAnyAction ? (
+              ))}
+              {actions.length === 0 ? (
                 <GabiText tone="muted" variant="caption">
                   This archived item is read-only. Its historical records remain preserved.
                 </GabiText>
