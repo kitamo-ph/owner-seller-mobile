@@ -47,6 +47,7 @@ import {
   standardRecipeUnitFactor,
   validateRecipeConversionSnapshotEvidence,
 } from "@/domain/recipeConversionChains";
+import { resolvePublishedReadinessState } from "@/domain/panindaListing";
 import {
   mapLibraryEntryToPickerEntry,
   type RecipeIngredientPickerEntry,
@@ -2818,12 +2819,20 @@ export async function publishRecipeFirstDraft(
 
     const projectionName = draft.name?.trim() || "Recipe";
     const projectionTimestamp = timestamp();
+    // Readiness is derived from the published definition. It used to be
+    // hard-coded to 'incomplete', which no writer could ever clear, so a
+    // published Recipe could never reach Paninda `Active`. Listing the item
+    // for sale remains a separate, explicit owner act (see panindaListing).
+    const publishedReadinessState = resolvePublishedReadinessState({
+      graphState: publication.version.graphState,
+      hasInputLines: lines.length > 0,
+    });
     if (isFirstPublication) {
       await txn.runAsync(
         `
           UPDATE catalog_items
           SET name = ?, normalized_name = ?, classification = ?,
-            lifecycle_status = 'ready', readiness_state = 'incomplete',
+            lifecycle_status = 'ready', readiness_state = ?,
             classification_review_required = 0, sellable = 0,
             kiosk_enabled = 0, selling_price_state = ?,
             updated_at = ?, sync_status = 'local'
@@ -2834,6 +2843,7 @@ export async function publishRecipeFirstDraft(
           projectionName,
           projectionName.toLocaleLowerCase(),
           classification,
+          publishedReadinessState,
           draft.sellingPriceState,
           projectionTimestamp,
           draft.outputCatalogItemId,
@@ -2845,6 +2855,7 @@ export async function publishRecipeFirstDraft(
         `
           UPDATE catalog_items
           SET name = ?, normalized_name = ?, classification = ?,
+            readiness_state = ?,
             classification_review_required = 0, selling_price_state = ?,
             updated_at = ?, sync_status = 'local'
           WHERE id = ? AND business_id = ? AND source_type = 'native'
@@ -2854,6 +2865,10 @@ export async function publishRecipeFirstDraft(
           projectionName,
           projectionName.toLocaleLowerCase(),
           classification,
+          // Republishing refreshes readiness from the new definition but never
+          // changes listing state: an item already on sale stays on sale, and
+          // an unlisted one is not silently listed.
+          publishedReadinessState,
           draft.sellingPriceState,
           projectionTimestamp,
           draft.outputCatalogItemId,

@@ -353,19 +353,27 @@ assertIncludes(
   "missingProductProjection",
   "missing Product projection blocker",
 );
+// Tenant and branch scoping stay mandatory. `product_projection.active = 1`
+// is deliberately NOT among them: producing stock is upstream of selling it,
+// and requiring the projection to be on sale made every freshly published
+// Recipe permanently unproducible. Existence of the bound record is enough.
 for (const projectionGuard of [
   "version.business_id = recipe.business_id",
   "item.business_id = recipe.business_id",
   "product_binding.business_id = recipe.business_id",
   "product_projection.business_id = recipe.business_id",
-  "product_projection.active = 1",
   "product_projection.deleted_at IS NULL",
   "product_branch.active = 1",
 ]) {
   assertIncludes(
     nativeReader,
     projectionGuard,
-    "active business-applicable Product projection guard",
+    "business-applicable Product projection guard",
+  );
+}
+if (nativeReader.includes("product_projection.active = 1")) {
+  throw new Error(
+    "native production readiness must not require the Paninda record to be on sale",
   );
 }
 assertIncludes(
@@ -815,11 +823,15 @@ try {
     "product_projection_active",
     "active business-wide Product projection is accepted",
   );
+  // An unlisted (inactive) projection is now RESOLVED rather than blocked.
+  // Production is upstream of selling: the owner must be able to cook stock
+  // before deciding to put the item on sale. Branch scoping and dangling
+  // bindings below stay blocking — those are correctness, not sale state.
   assertEqual(
     sqlite(`SELECT COALESCE(product_id, 'NULL') FROM (${fixtureReadinessSql})
       WHERE recipe_id = 'recipe_projection_inactive'`),
-    "NULL",
-    "inactive prepared-base Product projection remains blocked",
+    "product_projection_inactive",
+    "an unlisted Product projection is producible, not blocked",
   );
   assertEqual(
     sqlite(`SELECT COALESCE(product_id, 'NULL') FROM (${fixtureReadinessSql})

@@ -209,7 +209,6 @@ export async function loadNativeProductionReadiness(
       LEFT JOIN products product_projection
         ON product_projection.id = product_binding.legacy_entity_id
         AND product_projection.business_id = recipe.business_id
-        AND product_projection.active = 1
         AND product_projection.deleted_at IS NULL
         AND (
           product_projection.branch_id IS NULL
@@ -275,10 +274,14 @@ export async function loadNativeProductionReadiness(
       if (rootLines.length === 0) {
         missingRequirements.push("Published Recipe has no input lines.");
       }
+      // Producing stock is upstream of selling it. This used to additionally
+      // require `products.active = 1`, which conflated "on sale" with
+      // "producible" and made every freshly published Recipe unproducible.
+      // Only the existence of the bound Paninda record is required here.
       const missingProductProjection = !row.product_id;
       if (missingProductProjection) {
         missingRequirements.push(
-          "Recipe has no active Paninda Product projection.",
+          "Walang Paninda record ang Recipe na ito. Buksan ang Recipe at i-publish ulit.",
         );
       }
       const costIncomplete =

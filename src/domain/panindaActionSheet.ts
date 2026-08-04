@@ -6,7 +6,11 @@ export type PanindaActionPolicyLike = {
   manualCompatibilityStockIn: boolean;
   recordSpoilage: boolean;
   transferStock: boolean;
+  listForSale: boolean;
+  unlistFromSale: boolean;
+  changeSellingPrice: boolean;
   archive: boolean;
+  restoreFromArchive: boolean;
   requestPermanentDelete: boolean;
 };
 
@@ -25,6 +29,9 @@ export type PanindaActionSheetLayout = {
 
 export type PanindaActionDescriptor = {
   key:
+    | "listForSale"
+    | "unlistFromSale"
+    | "changeSellingPrice"
     | "openRecipe"
     | "produceFromRecipe"
     | "addPurchasedStock"
@@ -33,6 +40,7 @@ export type PanindaActionDescriptor = {
     | "recordSpoilage"
     | "transferStock"
     | "archive"
+    | "restoreFromArchive"
     | "requestPermanentDelete";
   label: string;
   danger: boolean;
@@ -77,6 +85,29 @@ export function buildPanindaActionDescriptors(input: {
     (input.actions.openRecipe || input.productType !== "retail item");
 
   const descriptors: PanindaActionDescriptor[] = [];
+  // Listing leads: for a freshly published Recipe this is the action that
+  // completes the lifecycle, so it must not be buried below the fold.
+  if (input.actions.listForSale) {
+    descriptors.push({
+      key: "listForSale",
+      label: "Ilagay sa Tindahan",
+      danger: false,
+    });
+  }
+  if (input.actions.changeSellingPrice) {
+    descriptors.push({
+      key: "changeSellingPrice",
+      label: "Palitan ang presyo",
+      danger: false,
+    });
+  }
+  if (input.actions.unlistFromSale) {
+    descriptors.push({
+      key: "unlistFromSale",
+      label: "Alisin sa Tindahan",
+      danger: false,
+    });
+  }
   if (input.actions.openRecipe) {
     descriptors.push({
       key: "openRecipe",
@@ -128,6 +159,13 @@ export function buildPanindaActionDescriptors(input: {
   }
   if (input.actions.archive) {
     descriptors.push({ key: "archive", label: "Archive", danger: false });
+  }
+  if (input.actions.restoreFromArchive) {
+    descriptors.push({
+      key: "restoreFromArchive",
+      label: "Ibalik mula sa Archive",
+      danger: false,
+    });
   }
   if (input.actions.requestPermanentDelete) {
     descriptors.push({

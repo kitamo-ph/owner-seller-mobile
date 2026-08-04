@@ -27,6 +27,7 @@
     "check:protected-artifacts": "node scripts/check-protected-artifacts.js",
     "check:paninda-stabilization": "tsc src/domain/catalogItems.ts --outDir node_modules/.cache/kitamo-paninda-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-paninda-stabilization.js",
     "check:paninda-lifecycle-transactions": "node scripts/check-paninda-lifecycle-transactions.js",
+    "check:paninda-listing-transactions": "node scripts/check-paninda-listing-transactions.js",
     "check:paninda-action-sheet-behavior": "node scripts/check-paninda-action-sheet-behavior.js",
     "check:paninda-action-sheet-structure": "node scripts/check-paninda-action-sheet-structure.js",
     "check:grocery-production-stabilization": "node scripts/check-grocery-production-stabilization.js",
@@ -81,6 +82,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@expo/ngrok": "^4.1.3",
     "@types/react": "~19.1.10",
     "eslint": "^9.39.4",
     "eslint-config-expo": "~10.0.0",

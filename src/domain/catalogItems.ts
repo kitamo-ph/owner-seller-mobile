@@ -53,9 +53,25 @@ export type PanindaActionPolicy = {
   manualCompatibilityStockIn: boolean;
   recordSpoilage: boolean;
   transferStock: boolean;
+  /** Put a ready item on sale — the transition that completes publication. */
+  listForSale: boolean;
+  /** Take an item off sale without touching history, stock, or its Recipe. */
+  unlistFromSale: boolean;
+  /** Reprice a listed item whose legacy edit form is withheld. */
+  changeSellingPrice: boolean;
   archive: boolean;
+  /** Return an archived item to `ready` so archiving is not a one-way trap. */
+  restoreFromArchive: boolean;
   requestPermanentDelete: boolean;
 };
+
+/** Classifications the owner may put on sale from Paninda. */
+export const LISTABLE_CLASSIFICATIONS: readonly CatalogClassification[] = [
+  "finished_product",
+  "direct_resale_product",
+  "bundle_combo",
+  "legacy_unclassified",
+] as const;
 
 export type CatalogReadinessInput = {
   classification: CatalogClassification;
@@ -224,9 +240,20 @@ export function resolvePanindaActionPolicy(
     legacyCompatibility || input.stockPolicy === "product_scalar";
   const normalItem = section === "active" || section === "needs_setup";
 
+  // Listing is the transition that completes Recipe publication. An item that
+  // is `needs_setup` only because it was never listed must be able to reach
+  // `active`; without this the lifecycle terminates at publication.
+  const listable =
+    LISTABLE_CLASSIFICATIONS.includes(input.classification) &&
+    (!recipeBacked || input.hasPublishedRecipe);
+
   return {
     openRecipe: normalItem && recipeBacked,
     produceFromRecipe: normalItem && recipeBacked && input.hasRecipe,
+    // Recipe-backed items deliberately keep the legacy edit form withheld:
+    // that form also renames the Product, which would desync from the Recipe
+    // name snapshot on the next publish. Their price is set through the
+    // dedicated listing/price transition instead.
     editSellingItem:
       normalItem &&
       (legacyCompatibility ||
@@ -240,7 +267,13 @@ export function resolvePanindaActionPolicy(
     manualCompatibilityStockIn: normalItem && legacyCompatibility,
     recordSpoilage: normalItem && scalarCompatibility,
     transferStock: normalItem && scalarCompatibility,
+    listForSale: normalItem && listable && !input.productActive,
+    unlistFromSale: normalItem && listable && input.productActive,
+    // Without this a listed Recipe-backed item could never be repriced:
+    // the legacy edit form is withheld and listing is already satisfied.
+    changeSellingPrice: normalItem && listable && input.productActive,
     archive: section !== "archived" && section !== "excluded",
+    restoreFromArchive: section === "archived",
     requestPermanentDelete:
       normalItem && !input.hasDraft && !input.hasRecipe,
   };

@@ -161,10 +161,16 @@ const archivedActions = domain.resolvePanindaActionPolicy({
   hasRecipe: true,
   hasPublishedRecipe: true,
 });
-assert.equal(
-  Object.values(archivedActions).some(Boolean),
-  false,
-  "archived Paninda records must remain read-only",
+// Archived records stay read-only with respect to stock, sales, and Recipe
+// history. Restore is the single deliberate exception: archiving without an
+// inverse was itself a one-way trap, and restoring mutates no history — it
+// returns the item to `ready`, where listing remains a separate explicit act.
+assert.deepEqual(
+  Object.entries(archivedActions)
+    .filter(([, allowed]) => allowed)
+    .map(([key]) => key),
+  ["restoreFromArchive"],
+  "an archived record must offer restore and nothing else",
 );
 
 const inventorySource = fs.readFileSync(
@@ -265,6 +271,94 @@ assert.match(
   lifecycleRepositorySource,
   /UPDATE products[\s\S]*?SET active = 0/,
   "archive must deactivate an exact Product projection",
+);
+
+// --- Listing lifecycle: publication must not be a terminal state ----------
+// A published Recipe used to land in needs_setup with no action that could
+// ever move it to active. These assertions pin the escape hatch open.
+const publishedUnlisted = {
+  ...base,
+  classification: "finished_product",
+  compatibilityMode: "native",
+  sourceType: "native",
+  readinessState: "ready",
+  lifecycle: "ready",
+  productActive: false,
+  hasRecipe: true,
+  hasPublishedRecipe: true,
+  stockPolicy: "product_scalar",
+};
+assert.equal(
+  domain.resolvePanindaSection(publishedUnlisted),
+  "needs_setup",
+  "a published but unlisted Recipe waits in Needs Setup",
+);
+const unlistedActions = domain.resolvePanindaActionPolicy(publishedUnlisted);
+assert.equal(
+  unlistedActions.listForSale,
+  true,
+  "a published unlisted item must offer the listing transition",
+);
+assert.equal(unlistedActions.unlistFromSale, false);
+assert.equal(unlistedActions.changeSellingPrice, false);
+
+const listedActions = domain.resolvePanindaActionPolicy({
+  ...publishedUnlisted,
+  lifecycle: "active",
+  productActive: true,
+});
+assert.equal(
+  listedActions.listForSale,
+  false,
+  "an already listed item must not offer listing again",
+);
+assert.equal(
+  listedActions.unlistFromSale,
+  true,
+  "listing must be reversible",
+);
+assert.equal(
+  listedActions.changeSellingPrice,
+  true,
+  "a listed Recipe-backed item must remain repriceable without the legacy edit form",
+);
+
+// An unpublished draft output is not listable: listing requires a definition.
+assert.equal(
+  domain.resolvePanindaActionPolicy({
+    ...publishedUnlisted,
+    hasPublishedRecipe: false,
+    hasDraft: true,
+  }).listForSale,
+  false,
+  "a draft-only item must not be listable",
+);
+
+// Archiving must not be a one-way trap.
+const archivedRecipeActions = domain.resolvePanindaActionPolicy({
+  ...publishedUnlisted,
+  lifecycle: "archived",
+});
+assert.equal(
+  archivedRecipeActions.restoreFromArchive,
+  true,
+  "an archived item must offer a restore path",
+);
+assert.equal(archivedRecipeActions.listForSale, false);
+
+const listingRepositorySource = fs.readFileSync(
+  path.join(workspace, "src/db/repositories/panindaListing.ts"),
+  "utf8",
+);
+assert.match(
+  listingRepositorySource,
+  /lifecycle_status = 'active', readiness_state = 'ready',\s*\n\s*sellable = 1, kiosk_enabled = 1, selling_price_state = 'known'/,
+  "listing must set every Kiosk-eligibility column together in one statement",
+);
+assert.match(
+  listingRepositorySource,
+  /if \(itemResult\.changes !== 1\)/,
+  "listing must guard against concurrent modification",
 );
 
 const { runPanindaLifecycleTransactions } = require(

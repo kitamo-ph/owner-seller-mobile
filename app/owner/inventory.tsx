@@ -34,8 +34,12 @@ import {
 } from "@/services/catalogItems";
 import {
   archiveInventoryCatalogItem,
+  listInventoryCatalogItemForSale,
   permanentlyDeleteInventoryCatalogItem,
+  restoreArchivedInventoryCatalogItem,
+  unlistInventoryCatalogItemFromSale,
 } from "@/services/itemLifecycle";
+import { describeListingBlocker } from "@/domain/panindaListing";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
 import { addDirectResalePurchase } from "@/services/productPurchases";
 import { recordCookedBatch, recordSpoilage } from "@/services/stockOps";
@@ -136,6 +140,10 @@ export default function OwnerInventoryScreen() {
   const [openProductActionsId, setOpenProductActionsId] = useState<string | null>(null);
   const [stockAction, setStockAction] = useState<"cook" | "spoilage" | "purchase" | null>(null);
   const [lifecycleSaving, setLifecycleSaving] = useState(false);
+  // Set when listing needs a selling price before it can proceed.
+  const [listingPriceEntry, setListingPriceEntry] =
+    useState<PanindaCatalogEntry | null>(null);
+  const [listingPriceInput, setListingPriceInput] = useState("");
   const cookLock = useRef(false);
   const spoilageLock = useRef(false);
   const purchaseLock = useRef(false);
@@ -482,6 +490,127 @@ export default function OwnerInventoryScreen() {
       return;
     }
     router.push("/owner/recipes");
+  }
+
+  /**
+   * Puts a ready item on sale. This is the transition that completes Recipe
+   * publication: before it existed, a published Recipe could never reach
+   * Paninda `Active`, be produced, or appear in Kiosk.
+   */
+  async function performListForSale(
+    entry: PanindaCatalogEntry,
+    sellingPrice: number | null,
+  ) {
+    if (lifecycleLock.current) return;
+    lifecycleLock.current = true;
+    setLifecycleSaving(true);
+    setOpenProductActionsId(null);
+    try {
+      const result = await listInventoryCatalogItemForSale({
+        catalogItemId: entry.catalogItemId,
+        ownerAuthorized: true,
+        sellingPrice,
+      });
+      if (result.outcome === "listed") {
+        await refresh();
+        setSectionFilter("active");
+        setNotice(
+          `${entry.product.name} nasa Tindahan na sa ${formatPeso(result.sellingPrice)}. Pwede na itong ibenta sa Kiosk.`,
+        );
+        return;
+      }
+      if (result.requiresSellingPrice) {
+        setListingPriceEntry(entry);
+        setListingPriceInput(
+          entry.product.price > 0 ? String(entry.product.price) : "",
+        );
+        return;
+      }
+      setError(
+        result.blockers.map(describeListingBlocker).join(" ") ||
+          "Hindi pa pwedeng ilagay sa Tindahan.",
+      );
+    } catch (error) {
+      logDevError("OwnerInventory.listForSale", error);
+      setError(
+        getUserSafeErrorMessage(error, "Hindi mailagay sa Tindahan ang item."),
+      );
+    } finally {
+      lifecycleLock.current = false;
+      setLifecycleSaving(false);
+    }
+  }
+
+  function beginListForSale(entry: PanindaCatalogEntry) {
+    // A price is mandatory before anything can be sold. If one already exists
+    // the transition runs straight through; otherwise ask for it first.
+    if (entry.product.price > 0) {
+      void performListForSale(entry, entry.product.price);
+      return;
+    }
+    setOpenProductActionsId(null);
+    setListingPriceEntry(entry);
+    setListingPriceInput("");
+  }
+
+  async function performUnlistFromSale(entry: PanindaCatalogEntry) {
+    if (lifecycleLock.current) return;
+    lifecycleLock.current = true;
+    setLifecycleSaving(true);
+    setOpenProductActionsId(null);
+    try {
+      const result = await unlistInventoryCatalogItemFromSale(
+        entry.catalogItemId,
+        true,
+      );
+      if (result.outcome === "blocked") {
+        setError(
+          result.blockers.map(describeListingBlocker).join(" ") ||
+            "Hindi maalis sa Tindahan.",
+        );
+        return;
+      }
+      await refresh();
+      setNotice(
+        `${entry.product.name} inalis sa Tindahan. Nananatili ang stock, Recipe, at history.`,
+      );
+    } catch (error) {
+      logDevError("OwnerInventory.unlistFromSale", error);
+      setError(
+        getUserSafeErrorMessage(error, "Hindi maalis sa Tindahan ang item."),
+      );
+    } finally {
+      lifecycleLock.current = false;
+      setLifecycleSaving(false);
+    }
+  }
+
+  async function performRestoreFromArchive(entry: PanindaCatalogEntry) {
+    if (lifecycleLock.current) return;
+    lifecycleLock.current = true;
+    setLifecycleSaving(true);
+    setOpenProductActionsId(null);
+    try {
+      const result = await restoreArchivedInventoryCatalogItem(
+        entry.catalogItemId,
+        true,
+      );
+      if (result.outcome === "blocked") {
+        setError("Kailangan ng owner confirmation para ibalik ang item.");
+        return;
+      }
+      await refresh();
+      setSectionFilter("needs_setup");
+      setNotice(
+        `${entry.product.name} naibalik. Ilagay ito sa Tindahan kapag handa nang ibenta.`,
+      );
+    } catch (error) {
+      logDevError("OwnerInventory.restoreFromArchive", error);
+      setError(getUserSafeErrorMessage(error, "Hindi maibalik ang item."));
+    } finally {
+      lifecycleLock.current = false;
+      setLifecycleSaving(false);
+    }
   }
 
   async function performArchive(entry: PanindaCatalogEntry) {
@@ -1064,6 +1193,18 @@ export default function OwnerInventoryScreen() {
               actionEntry.stockPolicy !== "product_lots",
             )
           }
+          onListForSale={() => beginListForSale(actionEntry)}
+          onChangeSellingPrice={() => {
+            setOpenProductActionsId(null);
+            setListingPriceEntry(actionEntry);
+            setListingPriceInput(
+              actionEntry.product.price > 0
+                ? String(actionEntry.product.price)
+                : "",
+            );
+          }}
+          onUnlistFromSale={() => void performUnlistFromSale(actionEntry)}
+          onRestoreFromArchive={() => void performRestoreFromArchive(actionEntry)}
           onOpenRecipe={() => openRecipe(actionEntry)}
           onProduce={() => {
             setOpenProductActionsId(null);
@@ -1084,8 +1225,142 @@ export default function OwnerInventoryScreen() {
         />
       ) : null}
 
+      {listingPriceEntry ? (
+        <ListingPriceSheet
+          busy={lifecycleSaving}
+          entry={listingPriceEntry}
+          onCancel={() => {
+            setListingPriceEntry(null);
+            setListingPriceInput("");
+          }}
+          onChangePrice={setListingPriceInput}
+          onConfirm={() => {
+            const parsed = Number(listingPriceInput.trim());
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+              setError("Maglagay ng presyong mas mataas sa ₱0.");
+              return;
+            }
+            const entry = listingPriceEntry;
+            setListingPriceEntry(null);
+            setListingPriceInput("");
+            void performListForSale(entry, parsed);
+          }}
+          price={listingPriceInput}
+        />
+      ) : null}
+
       {!messageIsError && message ? <GabiSnackbar message={message} onDismiss={() => setMessage(null)} /> : null}
     </ScreenScroll>
+  );
+}
+
+/**
+ * Asks for a selling price when listing an item that has none.
+ *
+ * Follows the same bounded/safe-area contract as ProductActionSheet: fixed
+ * header outside the scroll area, bounded max height, Android Back and scrim
+ * both close, and the confirm action stays reachable at large font sizes.
+ */
+function ListingPriceSheet({
+  entry,
+  price,
+  busy,
+  onChangePrice,
+  onConfirm,
+  onCancel,
+}: {
+  entry: PanindaCatalogEntry;
+  price: string;
+  busy: boolean;
+  onChangePrice: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const { palette, extended } = useGabiTheme();
+  const layout = buildPanindaActionSheetLayout({
+    windowHeight: height,
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+    spacingLg: spacing.lg,
+    spacingMd: spacing.md,
+  });
+
+  return (
+    <Modal
+      animationType="slide"
+      onRequestClose={onCancel}
+      statusBarTranslucent
+      transparent
+      visible
+    >
+      <View accessibilityViewIsModal style={styles.modalRoot}>
+        <Pressable
+          accessibilityLabel="Isara ang presyo"
+          onPress={onCancel}
+          style={[styles.modalScrim, { backgroundColor: extended.scrim }]}
+        />
+        <View
+          style={[
+            styles.actionSheet,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              maxHeight: layout.maxHeight,
+              paddingBottom: layout.paddingBottom,
+            },
+          ]}
+        >
+          <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetTitle}>
+              <GabiText numberOfLines={2} variant="h2">
+                {entry.product.active ? "Palitan ang presyo" : "Magkano ang benta?"}
+              </GabiText>
+              <GabiText tone="muted" variant="caption">{entry.product.name}</GabiText>
+            </View>
+            <GabiSoftButton compact icon="close" label="Isara" onPress={onCancel} />
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.sheetScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+            style={styles.sheetScroll}
+          >
+            <GabiNotice
+              message={
+                entry.product.active
+                  ? "Ang bagong presyo ay para sa susunod na benta. Hindi nababago ang mga naunang resibo."
+                  : "Kailangan ng presyo bago ito maibenta sa Kiosk. Pwede itong palitan mamaya."
+              }
+              tone="owner"
+            />
+            <FormField
+              editable={!busy}
+              keyboardType="decimal-pad"
+              label="Presyo kada piraso"
+              onChangeText={onChangePrice}
+              placeholder="0"
+              value={price}
+            />
+            <GabiPrimaryButton
+              disabled={busy}
+              icon="storefront-outline"
+              label={
+                busy
+                  ? "Sine-save..."
+                  : entry.product.active
+                    ? "I-save ang presyo"
+                    : "Ilagay sa Tindahan"
+              }
+              loading={busy}
+              onPress={onConfirm}
+            />
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1374,7 +1649,11 @@ function ProductActionSheet({
   onSpoilage,
   onTransfer,
   onEdit,
+  onListForSale,
+  onUnlistFromSale,
+  onChangeSellingPrice,
   onArchive,
+  onRestoreFromArchive,
   onDelete,
 }: {
   entry: PanindaCatalogEntry;
@@ -1387,7 +1666,11 @@ function ProductActionSheet({
   onSpoilage: () => void;
   onTransfer: () => void;
   onEdit: () => void;
+  onListForSale: () => void;
+  onUnlistFromSale: () => void;
+  onChangeSellingPrice: () => void;
   onArchive: () => void;
+  onRestoreFromArchive: () => void;
   onDelete: () => void;
 }) {
   const product = entry.product;
@@ -1402,6 +1685,9 @@ function ProductActionSheet({
     spacingMd: spacing.md,
   });
   const actionHandlers = {
+    listForSale: onListForSale,
+    unlistFromSale: onUnlistFromSale,
+    changeSellingPrice: onChangeSellingPrice,
     openRecipe: onOpenRecipe,
     produceFromRecipe: onProduce,
     addPurchasedStock: onAddPurchasedStock,
@@ -1410,9 +1696,13 @@ function ProductActionSheet({
     recordSpoilage: onSpoilage,
     transferStock: onTransfer,
     archive: onArchive,
+    restoreFromArchive: onRestoreFromArchive,
     requestPermanentDelete: onDelete,
   } as const;
   const actionIcons = {
+    listForSale: "storefront-outline",
+    unlistFromSale: "eye-off-outline",
+    changeSellingPrice: "pricetag-outline",
     openRecipe: "book-outline",
     produceFromRecipe: "restaurant-outline",
     addPurchasedStock: "basket-outline",
@@ -1421,6 +1711,7 @@ function ProductActionSheet({
     recordSpoilage: "remove-circle-outline",
     transferStock: "swap-horizontal-outline",
     archive: "archive-outline",
+    restoreFromArchive: "refresh-outline",
     requestPermanentDelete: "trash-outline",
   } as const;
   const actions = buildPanindaActionDescriptors({
@@ -1474,6 +1765,16 @@ function ProductActionSheet({
                 <GabiChip label="Archived" tone="neutral" />
               ) : null}
             </View>
+            {entry.section === "needs_setup" ? (
+              <GabiNotice
+                message={
+                  entry.actions.listForSale
+                    ? "Handa na ito. Piliin ang Ilagay sa Tindahan para maibenta sa Kiosk."
+                    : "May kulang pang detalye bago ito maibenta. Buksan ang Recipe para tapusin ito."
+                }
+                tone="warning"
+              />
+            ) : null}
             {entry.stockPolicy === "product_lots" ? (
               <GabiNotice
                 message="This item uses native lot evidence. Stock changes stay in a lot-aware purchase, Recipe, or Production flow so no partial scalar-only mutation is created."

@@ -40,6 +40,7 @@ const categories = [
     checks: [
       "check:migrations",
       "check:paninda-lifecycle-transactions",
+      "check:paninda-listing-transactions",
       "check:apple-cider-recipe-chain",
       "check:recipe-first-transactions",
       "check:recipe-first-orchestration",
