@@ -888,25 +888,50 @@ export default function OwnerInventoryScreen() {
               <GabiEmptyState
                 actionLabel="Magdagdag ng paninda"
                 icon="cube-outline"
-                message="Ilagay ang unang produktong ibebenta sa napiling business o stall."
+                message="Ilagay ang unang direct-resale item, o gumawa ng Recipe kung niluluto ito."
                 onAction={openProductForm}
                 title="Wala pang paninda"
               />
             ) : visibleEntries.length === 0 ? (
               <GabiEmptyState
-                actionLabel="I-reset ang filter"
+                actionLabel={
+                  sectionFilter === "needs_setup"
+                    ? "Tingnan ang Active"
+                    : "I-reset ang filter"
+                }
                 icon="search-outline"
-                message="Walang tumutugma sa search at stock filter."
+                message={
+                  sectionFilter === "needs_setup"
+                    ? "Walang item sa Needs Setup. Kung kakapublish mo lang ng Recipe, siguraduhing naka-filter ka rito."
+                    : "Walang tumutugma sa search at filter."
+                }
                 onAction={() => {
-                  setProductSearch("");
-                  setStockFilter("all");
-                  setSectionFilter("active");
+                  if (sectionFilter === "needs_setup") {
+                    setSectionFilter("active");
+                  } else {
+                    setProductSearch("");
+                    setStockFilter("all");
+                    setSectionFilter("active");
+                  }
                   setProductRenderLimit(productRenderBatch);
                 }}
                 title="Walang nahanap"
               />
             ) : (
               <View style={styles.productList}>
+                <View style={styles.sectionBanner}>
+                  <GabiText variant="buttonSm">
+                    {sectionFilter === "active"
+                      ? "Active — nasa Tindahan"
+                      : sectionFilter === "needs_setup"
+                        ? "Needs Setup — hindi pa nabebenta"
+                        : "Archived"}
+                  </GabiText>
+                  <GabiText tone="muted" variant="caption">
+                    {visibleEntries.length} item
+                    {visibleEntries.length === 1 ? "" : "s"}
+                  </GabiText>
+                </View>
                 {renderedEntries.map((entry) => (
                   <InventoryProductRow
                     actionsOpen={openProductActionsId === entry.catalogItemId}
@@ -1706,7 +1731,15 @@ function InventoryProductRow({
         : "cube-outline";
 
   return (
-    <View style={[styles.productRow, { borderColor: palette.border }]}>
+    <View
+      style={[
+        styles.productRow,
+        {
+          backgroundColor: palette.surface,
+          borderColor: extended.hairline,
+        },
+      ]}
+    >
       <View style={styles.productMain}>
         <View style={[styles.productIcon, { backgroundColor: outOfStock ? palette.softDanger : lowStock ? palette.softWarning : palette.softPrimary }]}>
           <Ionicons color={outOfStock ? palette.danger : lowStock ? palette.warning : palette.primary} name={icon} size={21} />
@@ -1718,22 +1751,40 @@ function InventoryProductRow({
           </GabiText>
           <View style={styles.productChips}>
             <GabiChip label={stateLabel} tone={stateTone} />
+            {entry.section === "active" ? (
+              <GabiChip label="Active" tone="success" />
+            ) : null}
             {entry.section === "needs_setup" ? (
-              <GabiChip label="Needs setup" tone="warning" />
+              <GabiChip label="Needs Setup" tone="warning" />
             ) : null}
             {entry.section === "archived" ? (
               <GabiChip label="Archived" tone="neutral" />
             ) : null}
             {bundleLabel ? <GabiChip icon="pricetag-outline" label={bundleLabel} tone="primary" /> : null}
-            {!product.active ? <GabiChip label="Naka-off" tone="neutral" /> : null}
+            {!product.active && entry.section !== "needs_setup" ? (
+              <GabiChip label="Naka-off" tone="neutral" />
+            ) : null}
           </View>
-          <GabiText tone="muted" variant="caption">
-            Stock {product.stockQty} {product.unitType} · Paubos sa {product.lowStockThreshold}
-          </GabiText>
+          {entry.section === "needs_setup" ? (
+            <GabiText tone="warning" variant="caption">
+              {entry.actions.listForSale
+                ? "Handa na ito. Piliin ang Ilagay sa Tindahan para maibenta sa Kiosk."
+                : "May kulang pang detalye bago ito maibenta. Buksan ang Recipe para tapusin ito."}
+            </GabiText>
+          ) : (
+            <GabiText tone="muted" variant="caption">
+              Stock {product.stockQty} {product.unitType} · Paubos sa{" "}
+              {product.lowStockThreshold}
+            </GabiText>
+          )}
         </View>
         <View style={styles.productTrailing}>
-          <GabiText money tone="primary" variant="metricValue">{formatPeso(product.price)}</GabiText>
-          <GabiText tone="faint" variant="caption">Cost {formatPeso(product.cost)}</GabiText>
+          <GabiText money tone="primary" variant="metricValue">
+            {formatPeso(product.price)}
+          </GabiText>
+          <GabiText tone="faint" variant="caption">
+            Cost {formatPeso(product.cost)}
+          </GabiText>
           <Pressable
             accessibilityLabel={`Mga action para sa ${product.name}`}
             accessibilityRole="button"
@@ -1992,15 +2043,24 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: spacing.md,
   },
   productList: {
-    gap: 0,
+    gap: spacing.sm,
+  },
+  sectionBanner: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: spacing.xs,
   },
   productRow: {
-    borderTopWidth: 1,
+    borderRadius: 20,
+    borderWidth: 1,
     gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
   productMain: {
@@ -2028,14 +2088,14 @@ const styles = StyleSheet.create({
   productTrailing: {
     alignItems: "flex-end",
     gap: 4,
-    maxWidth: 108,
+    maxWidth: 120,
   },
   moreButton: {
     alignItems: "center",
     borderRadius: 12,
-    height: 40,
+    height: 44,
     justifyContent: "center",
-    width: 40,
+    width: 44,
   },
   modalRoot: {
     flex: 1,
