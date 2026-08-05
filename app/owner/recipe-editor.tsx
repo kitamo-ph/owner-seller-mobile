@@ -48,7 +48,9 @@ import {
   RecipeFirstStepHeader,
   type RecipeFirstCostSummaryValue,
 } from "@/components/owner/RecipeFirstEditorUI";
+import { RecipeUnitSelector } from "@/components/owner/RecipeUnitSelector";
 import { formatPeso, formatQuantity } from "@/components/ui/KitaMoUI";
+import { countableMeasuredConversionGuidance } from "@/domain/recipeUnitPicker";
 import {
   makeRecipeDraftLineId,
   makeUnitConversionId,
@@ -495,9 +497,14 @@ function resolveMeasuredConversion(input: {
     input.evidenceUnit,
   );
   if (!standard.ok) {
+    const countableGuidance = countableMeasuredConversionGuidance(
+      input.usageUnit,
+      input.evidenceUnit,
+    );
     return {
       ok: false as const,
       message:
+        countableGuidance ??
         "These units do not have a standard conversion. Choose Package breakdown, Prepared batch recipe, or Custom conversion.",
     };
   }
@@ -2744,7 +2751,7 @@ export default function OwnerRecipeEditorScreen() {
                   placeholder="Example: 3"
                   value={yieldQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Yield unit"
                   onChange={setYieldUnit}
                   options={RECIPE_FIRST_UNITS}
@@ -3507,7 +3514,7 @@ function IngredientModal(props: IngredientModalProps) {
                       placeholder="Example: 27"
                       value={props.usageQuantity}
                     />
-                    <RecipeFirstChoiceRow
+                    <RecipeUnitSelector
                       label="Usage unit"
                       onChange={props.onChangeUsageUnit}
                       options={RECIPE_FIRST_UNITS}
@@ -3684,7 +3691,7 @@ function IngredientModal(props: IngredientModalProps) {
                       placeholder="Example: 27"
                       value={props.preparedUsageQuantity}
                     />
-                    <RecipeFirstChoiceRow
+                    <RecipeUnitSelector
                       label="Usage unit"
                       onChange={props.onChangePreparedUsageUnit}
                       options={RECIPE_FIRST_UNITS}
@@ -3753,7 +3760,7 @@ function IngredientModal(props: IngredientModalProps) {
                   placeholder="Example: 1"
                   value={props.estimateReferenceQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Reference unit"
                   onChange={props.onChangeEstimateReferenceUnit}
                   options={RECIPE_FIRST_UNITS}
@@ -3767,7 +3774,7 @@ function IngredientModal(props: IngredientModalProps) {
                   placeholder="Example: 27"
                   value={props.estimateUsageQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Usage unit"
                   onChange={props.onChangeEstimateUsageUnit}
                   options={RECIPE_FIRST_UNITS}
@@ -3811,7 +3818,7 @@ function IngredientModal(props: IngredientModalProps) {
                   placeholder="Example: 500"
                   value={props.newPurchaseQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Purchase unit"
                   onChange={props.onChangeNewPurchaseUnit}
                   options={PURCHASE_UNITS}
@@ -3832,7 +3839,7 @@ function IngredientModal(props: IngredientModalProps) {
                   placeholder="Example: 5"
                   value={props.newUsageQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Usage unit"
                   onChange={props.onChangeNewUsageUnit}
                   options={RECIPE_FIRST_UNITS}
@@ -3870,7 +3877,7 @@ function IngredientModal(props: IngredientModalProps) {
                   placeholder="Example: 2.5"
                   value={props.nestedUsageQuantity}
                 />
-                <RecipeFirstChoiceRow
+                <RecipeUnitSelector
                   label="Usage unit"
                   onChange={props.onChangeNestedUsageUnit}
                   options={RECIPE_FIRST_UNITS}
@@ -3950,10 +3957,51 @@ function CostMeasurementFields(
         selected={props.costMeasurement}
       />
       {props.costMeasurement === "Price per amount" ? (
-        <GabiNotice
-          message="Use the recorded price and amount above. Only compatible standard unit conversions are applied automatically."
-          tone="owner"
-        />
+        (() => {
+          const evidenceUnit =
+            props.sheet === "grocery"
+              ? props.selectedLot?.unit ?? ""
+              : props.sheet === "estimate"
+                ? props.estimateReferenceUnit
+                : props.newPurchaseUnit;
+          const usageUnit =
+            props.sheet === "grocery"
+              ? props.usageUnit
+              : props.sheet === "estimate"
+                ? props.estimateUsageUnit
+                : props.newUsageUnit;
+          const countableGuidance = countableMeasuredConversionGuidance(
+            usageUnit,
+            evidenceUnit,
+          );
+          if (countableGuidance) {
+            return (
+              <>
+                <GabiNotice message={countableGuidance} tone="warning" />
+                <GabiSoftButton
+                  icon="cube-outline"
+                  label="Gamitin ang Package breakdown"
+                  onPress={() =>
+                    props.onChangeCostMeasurement("Package breakdown")
+                  }
+                />
+                <GabiSoftButton
+                  icon="swap-horizontal-outline"
+                  label="Gamitin ang Custom conversion"
+                  onPress={() =>
+                    props.onChangeCostMeasurement("Custom conversion")
+                  }
+                />
+              </>
+            );
+          }
+          return (
+            <GabiNotice
+              message="Use the recorded price and amount above. Only compatible standard unit conversions are applied automatically."
+              tone="owner"
+            />
+          );
+        })()
       ) : null}
       {props.costMeasurement === "Package breakdown" ? (
         <>
@@ -4017,7 +4065,7 @@ function CostMeasurementFields(
             placeholder="Example: 1"
             value={props.customFromQuantity}
           />
-          <RecipeFirstChoiceRow
+          <RecipeUnitSelector
             label="From unit"
             onChange={props.onChangeCustomFromUnit}
             options={RECIPE_FIRST_UNITS}
@@ -4030,7 +4078,7 @@ function CostMeasurementFields(
             placeholder="Example: 240"
             value={props.customToQuantity}
           />
-          <RecipeFirstChoiceRow
+          <RecipeUnitSelector
             label="To unit"
             onChange={props.onChangeCustomToUnit}
             options={RECIPE_FIRST_UNITS}

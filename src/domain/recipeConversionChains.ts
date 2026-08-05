@@ -119,6 +119,31 @@ export function recipeUnitStandard(unit: PracticalRecipeUnit): RecipeUnitStandar
   return UNIT_DEFINITIONS[unit].standard;
 }
 
+export type RecipeUnitDimension = UnitDefinition["dimension"];
+
+export function recipeUnitDimension(
+  unitInput: string,
+): RecipeUnitDimension | null {
+  const unit = normalizePracticalRecipeUnit(unitInput);
+  return unit ? UNIT_DEFINITIONS[unit].dimension : null;
+}
+
+export function isMeasuredRecipeUnitDimension(
+  dimension: RecipeUnitDimension,
+): boolean {
+  return dimension === "mass" || dimension === "volume";
+}
+
+export function isCountableRecipeUnitDimension(
+  dimension: RecipeUnitDimension,
+): boolean {
+  return (
+    dimension === "count" ||
+    dimension === "package" ||
+    dimension === "portion"
+  );
+}
+
 export function standardRecipeUnitFactor(
   fromUnitInput: string,
   toUnitInput: string,

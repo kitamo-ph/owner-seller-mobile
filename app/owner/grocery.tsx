@@ -9,6 +9,7 @@ import { GabiField } from "@/components/gabi/GabiControls";
 import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/GabiFeedback";
 import { GabiCard, GabiChip, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
 import { GabiText } from "@/components/gabi/GabiText";
+import { RecipeUnitSelector } from "@/components/owner/RecipeUnitSelector";
 import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
 import type { IngredientLotWithName } from "@/db/repositories";
@@ -1067,9 +1068,13 @@ function GroceryPurchaseSheet({
                 />
               </View>
               <View style={styles.unitField}>
-                <UnitPicker
+                <RecipeUnitSelector
                   disabled={saving}
-                  onSelect={(unit) => onFormChange((current) => ({ ...current, unit }))}
+                  label="Unit"
+                  onChange={(unit) =>
+                    onFormChange((current) => ({ ...current, unit }))
+                  }
+                  options={groceryPurchaseUnits}
                   selected={form.unit}
                 />
               </View>
@@ -1420,49 +1425,6 @@ function GroceryLotActionsSheet({
         </View>
       </KeyboardAvoidingView>
     </Modal>
-  );
-}
-
-function UnitPicker({
-  selected,
-  onSelect,
-  disabled = false,
-}: {
-  selected: GroceryPurchaseUnit;
-  onSelect: (unit: GroceryPurchaseUnit) => void;
-  disabled?: boolean;
-}) {
-  const { palette, extended } = useGabiTheme();
-
-  return (
-    <View style={styles.unitPicker}>
-      <GabiText variant="buttonSm">Unit</GabiText>
-      <ScrollView contentContainerStyle={styles.unitWrap} horizontal showsHorizontalScrollIndicator={false}>
-        {groceryPurchaseUnits.map((unit) => {
-          const isSelected = unit === selected;
-          return (
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ checked: isSelected, disabled }}
-              disabled={disabled}
-              key={unit}
-              onPress={() => onSelect(unit)}
-              style={[
-                styles.unitOption,
-                {
-                  backgroundColor: disabled ? extended.disabledBg : isSelected ? palette.kioskHeader : palette.surface,
-                  borderColor: disabled ? extended.disabledBg : isSelected ? palette.kioskHeader : palette.border,
-                },
-              ]}
-            >
-              <GabiText style={{ color: disabled ? extended.disabledText : isSelected ? palette.kioskHeaderText : palette.text }} variant="caption">
-                {groceryUnitLabel(unit)}
-              </GabiText>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </View>
   );
 }
 
