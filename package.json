@@ -26,6 +26,7 @@
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js",
     "check:protected-artifacts": "node scripts/check-protected-artifacts.js",
     "check:paninda-stabilization": "tsc src/domain/catalogItems.ts --outDir node_modules/.cache/kitamo-paninda-check --module commonjs --target es2020 --strict --skipLibCheck && node scripts/check-paninda-stabilization.js",
+    "check:tindahan-usability": "node scripts/check-tindahan-usability.js",
     "check:paninda-lifecycle-transactions": "node scripts/check-paninda-lifecycle-transactions.js",
     "check:paninda-listing-transactions": "node scripts/check-paninda-listing-transactions.js",
     "check:paninda-action-sheet-behavior": "node scripts/check-paninda-action-sheet-behavior.js",

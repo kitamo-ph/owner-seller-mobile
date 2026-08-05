@@ -61,6 +61,7 @@ const categories = [
       "check:recipe-line-presentation-behavior",
       "check:recipe-stabilization-behavior",
       "check:paninda-stabilization",
+      "check:tindahan-usability",
     ],
   },
   {
