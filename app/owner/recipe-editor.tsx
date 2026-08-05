@@ -50,6 +50,7 @@ import {
 } from "@/components/owner/RecipeFirstEditorUI";
 import { RecipeUnitSelector } from "@/components/owner/RecipeUnitSelector";
 import { formatPeso, formatQuantity } from "@/components/ui/KitaMoUI";
+import { buildMeasuredCostDerivationLine } from "@/domain/recipeConversionDisplay";
 import { countableMeasuredConversionGuidance } from "@/domain/recipeUnitPicker";
 import {
   makeRecipeDraftLineId,
@@ -3995,11 +3996,43 @@ function CostMeasurementFields(
               </>
             );
           }
+          const derivation =
+            referenceQuantity && usageQuantity
+              ? (() => {
+                  const preview =
+                    referenceCost === null
+                      ? null
+                      : calculateSimpleIngredientCost({
+                          purchaseCost: referenceCost,
+                          purchasedQuantity: referenceQuantity,
+                          purchaseUnit: evidenceUnit,
+                          usageQuantity,
+                          usageUnit,
+                          costSource:
+                            props.sheet === "grocery"
+                              ? "purchase_lot"
+                              : "owner_estimate",
+                        });
+                  return buildMeasuredCostDerivationLine({
+                    referenceQuantity,
+                    referenceUnit: evidenceUnit,
+                    usageQuantity,
+                    usageUnit,
+                    costPerUsageUnit: preview?.costPerUsageUnit ?? null,
+                    totalAmount: preview?.amount ?? null,
+                  });
+                })()
+              : null;
           return (
-            <GabiNotice
-              message="Use the recorded price and amount above. Only compatible standard unit conversions are applied automatically."
-              tone="owner"
-            />
+            <>
+              <GabiNotice
+                message="Use the recorded price and amount above. Only compatible standard unit conversions are applied automatically."
+                tone="owner"
+              />
+              {derivation ? (
+                <GabiNotice message={derivation} tone="success" />
+              ) : null}
+            </>
           );
         })()
       ) : null}

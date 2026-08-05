@@ -47,6 +47,7 @@ import {
   standardRecipeUnitFactor,
   validateRecipeConversionSnapshotEvidence,
 } from "@/domain/recipeConversionChains";
+import { presentStoredConversionSummary } from "@/domain/recipeConversionDisplay";
 import { resolvePublishedReadinessState } from "@/domain/panindaListing";
 import {
   mapLibraryEntryToPickerEntry,
@@ -419,25 +420,17 @@ async function resolveRecipeFirstLines(
         : line.costSource === "purchase_lot" || line.costSource === "recipe_version"
           ? "Actual cost"
           : "Estimated cost";
-    const conversionSummary = line.conversionChainJson
-      ? (() => {
-          try {
-            const parsed = JSON.parse(line.conversionChainJson) as {
-              steps?: { fromQuantity: number; fromUnit: string; toQuantity: number; toUnit: string }[];
-            };
-            return (parsed.steps ?? [])
-              .map(
-                (step) =>
-                  `${step.fromQuantity} ${step.fromUnit} = ${step.toQuantity} ${step.toUnit}`,
-              )
-              .join(" · ") || null;
-          } catch {
-            return "Saved conversion unavailable";
-          }
-        })()
-      : line.normalizedUnit && line.conversionFactorSnapshot
-        ? `1 ${line.unit ?? "unit"} = ${line.conversionFactorSnapshot} ${line.normalizedUnit}`
-        : null;
+    const conversionSummary = (() => {
+      const presented = presentStoredConversionSummary({
+        conversionChainJson: line.conversionChainJson,
+        usageUnit: line.unit,
+        normalizedUnit: line.normalizedUnit,
+        conversionFactorSnapshot: line.conversionFactorSnapshot,
+      });
+      if (presented) return presented;
+      if (line.conversionChainJson) return "Saved conversion unavailable";
+      return null;
+    })();
 
     if (line.sourceKind === "catalog_item" && line.catalogItemId) {
       const item = await db.getFirstAsync<{
