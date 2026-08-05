@@ -14,6 +14,10 @@ export const PRACTICAL_RECIPE_UNITS = [
   "tsp",
   "us_gallon",
   "imperial_gallon",
+  "oz",
+  "lb",
+  "floz_us",
+  "floz_imp",
 ] as const;
 
 export type PracticalRecipeUnit = (typeof PRACTICAL_RECIPE_UNITS)[number];
@@ -58,6 +62,30 @@ const UNIT_DEFINITIONS: Readonly<Record<PracticalRecipeUnit, UnitDefinition>> = 
   tsp: { label: "teaspoon (5 mL)", dimension: "volume", baseFactor: 5, standard: "metric" },
   us_gallon: { label: "US gallon", dimension: "volume", baseFactor: 3_785.411784, standard: "us_customary" },
   imperial_gallon: { label: "Imperial gallon", dimension: "volume", baseFactor: 4_546.09, standard: "imperial" },
+  oz: {
+    label: "ounce (timbang)",
+    dimension: "mass",
+    baseFactor: 28.349523125,
+    standard: "us_customary",
+  },
+  lb: {
+    label: "pound (timbang)",
+    dimension: "mass",
+    baseFactor: 453.59237,
+    standard: "us_customary",
+  },
+  floz_us: {
+    label: "US fluid ounce",
+    dimension: "volume",
+    baseFactor: 29.5735295625,
+    standard: "us_customary",
+  },
+  floz_imp: {
+    label: "Imperial fluid ounce",
+    dimension: "volume",
+    baseFactor: 28.4130625,
+    standard: "imperial",
+  },
 };
 
 const UNIT_ALIASES: Readonly<Record<string, PracticalRecipeUnit>> = {
@@ -103,6 +131,23 @@ const UNIT_ALIASES: Readonly<Record<string, PracticalRecipeUnit>> = {
   usgallon: "us_gallon",
   imperial_gallon: "imperial_gallon",
   imperialgallon: "imperial_gallon",
+  oz: "oz",
+  ounce: "oz",
+  ounces: "oz",
+  lb: "lb",
+  pound: "lb",
+  pounds: "lb",
+  floz_us: "floz_us",
+  floz: "floz_us",
+  fl_oz: "floz_us",
+  fluid_ounce: "floz_us",
+  fluid_ounces: "floz_us",
+  us_fluid_ounce: "floz_us",
+  us_floz: "floz_us",
+  floz_imp: "floz_imp",
+  imperial_fluid_ounce: "floz_imp",
+  imperial_floz: "floz_imp",
+  imp_floz: "floz_imp",
 };
 
 export function normalizePracticalRecipeUnit(

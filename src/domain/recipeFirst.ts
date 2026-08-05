@@ -68,6 +68,10 @@ export const RECIPE_FIRST_UNITS = [
   "tsp",
   "us_gallon",
   "imperial_gallon",
+  "oz",
+  "lb",
+  "floz_us",
+  "floz_imp",
 ] as const;
 
 export type RecipeFirstUnit = (typeof RECIPE_FIRST_UNITS)[number];
@@ -115,6 +119,23 @@ const UNIT_ALIASES: Readonly<Record<string, RecipeFirstUnit>> = {
   usgallon: "us_gallon",
   imperial_gallon: "imperial_gallon",
   imperialgallon: "imperial_gallon",
+  oz: "oz",
+  ounce: "oz",
+  ounces: "oz",
+  lb: "lb",
+  pound: "lb",
+  pounds: "lb",
+  floz_us: "floz_us",
+  floz: "floz_us",
+  fl_oz: "floz_us",
+  fluid_ounce: "floz_us",
+  fluid_ounces: "floz_us",
+  us_fluid_ounce: "floz_us",
+  us_floz: "floz_us",
+  floz_imp: "floz_imp",
+  imperial_fluid_ounce: "floz_imp",
+  imperial_floz: "floz_imp",
+  imp_floz: "floz_imp",
 };
 
 type UnitDefinition = {
@@ -138,6 +159,10 @@ const UNIT_DEFINITIONS: Readonly<Record<RecipeFirstUnit, UnitDefinition>> = {
   tsp: { dimension: "volume", factor: 5 },
   us_gallon: { dimension: "volume", factor: 3_785.411784 },
   imperial_gallon: { dimension: "volume", factor: 4_546.09 },
+  oz: { dimension: "mass", factor: 28.349523125 },
+  lb: { dimension: "mass", factor: 453.59237 },
+  floz_us: { dimension: "volume", factor: 29.5735295625 },
+  floz_imp: { dimension: "volume", factor: 28.4130625 },
 };
 
 export function normalizeRecipeUnit(unit: string): RecipeFirstUnit | null {

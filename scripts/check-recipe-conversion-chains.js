@@ -63,6 +63,16 @@ assert.equal(standardRecipeUnitFactor("metric cup", "ml"), 250);
 assert.equal(standardRecipeUnitFactor("US cup", "ml"), 236.5882365);
 assert.equal(standardRecipeUnitFactor("custom cup", "ml"), null);
 assert.equal(standardRecipeUnitFactor("kg", "ml"), null);
+assert.equal(standardRecipeUnitFactor("oz", "g"), 28.349523125);
+assert.equal(standardRecipeUnitFactor("lb", "g"), 453.59237);
+assert.equal(standardRecipeUnitFactor("floz_us", "ml"), 29.5735295625);
+assert.equal(standardRecipeUnitFactor("floz_us", "g"), null);
+assert.equal(standardRecipeUnitFactor("oz", "ml"), null);
+assert.notEqual(
+  standardRecipeUnitFactor("floz_us", "ml"),
+  standardRecipeUnitFactor("floz_imp", "ml"),
+);
+assert.equal(standardRecipeUnitFactor("floz_imp", "ml"), 28.4130625);
 
 const customCup = requireSnapshot(
   buildRecipeConversionChain([

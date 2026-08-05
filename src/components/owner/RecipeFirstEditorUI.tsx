@@ -33,6 +33,10 @@ const RECIPE_CHOICE_LABELS: Readonly<Record<string, string>> = {
   tsp: "Teaspoon — 5 mL",
   us_gallon: "US gallon — approximately 3,785.412 mL",
   imperial_gallon: "Imperial gallon — 4,546.09 mL",
+  oz: "Ounce (timbang)",
+  lb: "Pound (timbang)",
+  floz_us: "US fluid ounce",
+  floz_imp: "Imperial fluid ounce",
 };
 
 export function RecipeFirstStepHeader({
