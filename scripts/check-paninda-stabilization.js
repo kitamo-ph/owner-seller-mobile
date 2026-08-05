@@ -188,7 +188,7 @@ for (const required of [
   /sheetScroll:\s*\{[\s\S]*?flexShrink:\s*1/,
   /onRequestClose=\{onClose\}/,
   /Needs Setup/,
-  /Cooking or preparing this item\? Create it in Recipe Book/,
+  /Niluluto o hinahanda\? Buksan ang Recipe Book/,
   /catalogMode:\s*"direct_resale"/,
   /if \(entry\.stockPolicy !== "product_lots"\)[\s\S]*?editProduct\(entry\.product\)/,
   /await addDirectResalePurchase\(/,

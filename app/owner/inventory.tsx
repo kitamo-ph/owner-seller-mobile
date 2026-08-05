@@ -144,6 +144,8 @@ export default function OwnerInventoryScreen() {
   const [listingPriceEntry, setListingPriceEntry] =
     useState<PanindaCatalogEntry | null>(null);
   const [listingPriceInput, setListingPriceInput] = useState("");
+  const [showAdvancedProductFields, setShowAdvancedProductFields] =
+    useState(false);
   const cookLock = useRef(false);
   const spoilageLock = useRef(false);
   const purchaseLock = useRef(false);
@@ -381,6 +383,13 @@ export default function OwnerInventoryScreen() {
   function editProduct(product: Product, stockEditable = true) {
     setOpenProductActionsId(null);
     setShowProductForm(true);
+    setShowAdvancedProductFields(
+      product.lowStockThreshold > 0 ||
+        product.bundleQuantity !== null ||
+        product.bundlePrice !== null ||
+        Boolean(product.bundleLabel?.trim()) ||
+        product.cost > 0,
+    );
     setProductForm({
       id: product.id,
       stockEditable,
@@ -753,10 +762,12 @@ export default function OwnerInventoryScreen() {
 
   const openProductForm = () => {
     setProductForm(emptyProductForm);
+    setShowAdvancedProductFields(false);
     setShowProductForm(true);
   };
   const closeProductForm = () => {
     setProductForm(emptyProductForm);
+    setShowAdvancedProductFields(false);
     setShowProductForm(false);
   };
 
@@ -1041,6 +1052,43 @@ export default function OwnerInventoryScreen() {
               <GabiSoftButton icon="flame-outline" label="May recipe? Buksan ang Niluto" onPress={() => router.push("/owner/production")} />
             </GabiCard>
           ) : null}
+              <View style={styles.twoColumn}>
+                <FormField
+                  editable={!cookSaving}
+                  keyboardType="decimal-pad"
+                  label="Ilang nadagdag?"
+                  onChangeText={(quantity) => setCookForm((form) => ({ ...form, quantity }))}
+                  placeholder="0"
+                  value={cookForm.quantity}
+                />
+                <FormField
+                  editable={!cookSaving}
+                  label="Note"
+                  onChangeText={(note) => setCookForm((form) => ({ ...form, note }))}
+                  placeholder="Optional"
+                  value={cookForm.note}
+                />
+              </View>
+              {cookMessage ? <GabiNotice message={cookMessage} tone={cookIsError ? "danger" : "success"} /> : null}
+              <View style={styles.formActions}>
+                <View style={styles.primaryAction}>
+                  <GabiPrimaryButton
+                    disabled={cookSaving || compatibilityCookProducts.length === 0}
+                    icon="checkmark-circle-outline"
+                    label={cookSaving ? "Sine-save..." : "I-save ang dagdag stock"}
+                    loading={cookSaving}
+                    onPress={saveCookedBatch}
+                  />
+                </View>
+                <GabiSoftButton icon="close" label="Isara" onPress={() => setStockAction(null)} />
+              </View>
+              <GabiPrimaryButton
+                icon="flame-outline"
+                label="Produce from Recipe"
+                onPress={() => router.push("/owner/production")}
+              />
+            </GabiCard>
+          ) : null}
 
           {stockAction === "spoilage" ? (
             <GabiCard raised>
@@ -1089,17 +1137,17 @@ export default function OwnerInventoryScreen() {
             <GabiCard raised>
               <GabiSectionHeader
                 action={panindaEntries.length > 0 ? <GabiSoftButton compact disabled={saving} icon="close" label="Isara" onPress={closeProductForm} /> : undefined}
-                title={productForm.id ? "I-edit ang paninda" : "Bagong direct-resale item"}
+                title={productForm.id ? "I-edit ang paninda" : "Bagong Paninda"}
               />
               {!productForm.id ? (
                 <>
                   <GabiNotice
-                    message="Bagong Paninda is for items bought and resold as-is, such as bottled water, biscuits, or canned goods."
+                    message="Para sa binili at ibinebentang as-is — bottled water, biscuits, canned goods. Hindi ito para sa niluluto."
                     tone="owner"
                   />
                   <GabiSoftButton
                     icon="restaurant-outline"
-                    label="Cooking or preparing this item? Create it in Recipe Book"
+                    label="Niluluto o hinahanda? Buksan ang Recipe Book"
                     onPress={() => {
                       closeProductForm();
                       router.push("/owner/recipes");
@@ -1121,15 +1169,6 @@ export default function OwnerInventoryScreen() {
                 placeholder="Drinks, meals, snacks"
                 value={productForm.category}
               />
-              {productForm.id ? (
-                <OptionGroup
-                  disabled={!canEditProducts}
-                  label="Legacy product type"
-                  onSelect={(productType) => setProductForm((form) => ({ ...form, productType }))}
-                  options={productTypes}
-                  selected={productForm.productType}
-                />
-              ) : null}
               <OptionGroup
                 disabled={!canEditProducts || !productForm.stockEditable}
                 label="Unit"
@@ -1138,8 +1177,22 @@ export default function OwnerInventoryScreen() {
                 selected={productForm.unitType}
               />
               <View style={styles.twoColumn}>
-                <FormField editable={canEditProducts && productForm.stockEditable} keyboardType="decimal-pad" label="Stock qty" onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))} placeholder="0" value={productForm.stockQty} />
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Paubos kapag" onChangeText={(lowStockThreshold) => setProductForm((form) => ({ ...form, lowStockThreshold }))} placeholder="0" value={productForm.lowStockThreshold} />
+                <FormField
+                  editable={canEditProducts && productForm.stockEditable}
+                  keyboardType="decimal-pad"
+                  label="Starting stock"
+                  onChangeText={(stockQty) => setProductForm((form) => ({ ...form, stockQty }))}
+                  placeholder="0"
+                  value={productForm.stockQty}
+                />
+                <FormField
+                  editable={canEditProducts}
+                  keyboardType="decimal-pad"
+                  label="Presyo"
+                  onChangeText={(price) => setProductForm((form) => ({ ...form, price }))}
+                  placeholder="0"
+                  value={productForm.price}
+                />
               </View>
               {productForm.id && !productForm.stockEditable ? (
                 <GabiNotice
@@ -1147,22 +1200,84 @@ export default function OwnerInventoryScreen() {
                   tone="owner"
                 />
               ) : null}
-              <View style={styles.twoColumn}>
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Presyo" onChangeText={(price) => setProductForm((form) => ({ ...form, price }))} placeholder="0" value={productForm.price} />
-                <FormField editable={canEditProducts && productForm.stockEditable} keyboardType="decimal-pad" label="Unit cost" onChangeText={(cost) => setProductForm((form) => ({ ...form, cost }))} placeholder="0" value={productForm.cost} />
-              </View>
-              <GabiNotice message="Optional ang bundle. Parehong quantity at presyo ang kailangan para ma-apply ito sa BENTA." />
-              <View style={styles.twoColumn}>
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Bundle quantity" onChangeText={(bundleQuantity) => setProductForm((form) => ({ ...form, bundleQuantity }))} placeholder="Optional" value={productForm.bundleQuantity} />
-                <FormField editable={canEditProducts} keyboardType="decimal-pad" label="Bundle price" onChangeText={(bundlePrice) => setProductForm((form) => ({ ...form, bundlePrice }))} placeholder="Optional" value={productForm.bundlePrice} />
-              </View>
-              <GabiField
-                disabled={!canEditProducts}
-                label="Bundle label"
-                onChangeText={(bundleLabel) => setProductForm((form) => ({ ...form, bundleLabel }))}
-                placeholder="Hal. 8 for PHP 150"
-                value={productForm.bundleLabel}
+              <GabiSoftButton
+                icon={showAdvancedProductFields ? "chevron-up" : "chevron-down"}
+                label={
+                  showAdvancedProductFields
+                    ? "Itago ang Advanced"
+                    : "Advanced (bundle, paubos, cost)"
+                }
+                onPress={() =>
+                  setShowAdvancedProductFields((current) => !current)
+                }
               />
+              {showAdvancedProductFields ? (
+                <>
+                  {productForm.id ? (
+                    <OptionGroup
+                      disabled={!canEditProducts}
+                      label="Legacy product type"
+                      onSelect={(productType) =>
+                        setProductForm((form) => ({ ...form, productType }))
+                      }
+                      options={productTypes}
+                      selected={productForm.productType}
+                    />
+                  ) : null}
+                  <FormField
+                    editable={canEditProducts}
+                    keyboardType="decimal-pad"
+                    label="Paubos kapag"
+                    onChangeText={(lowStockThreshold) =>
+                      setProductForm((form) => ({ ...form, lowStockThreshold }))
+                    }
+                    placeholder="0"
+                    value={productForm.lowStockThreshold}
+                  />
+                  <FormField
+                    editable={canEditProducts && productForm.stockEditable}
+                    keyboardType="decimal-pad"
+                    label="Unit cost"
+                    onChangeText={(cost) =>
+                      setProductForm((form) => ({ ...form, cost }))
+                    }
+                    placeholder="0"
+                    value={productForm.cost}
+                  />
+                  <GabiNotice message="Optional ang bundle. Parehong quantity at presyo ang kailangan para ma-apply ito sa BENTA." />
+                  <View style={styles.twoColumn}>
+                    <FormField
+                      editable={canEditProducts}
+                      keyboardType="decimal-pad"
+                      label="Bundle quantity"
+                      onChangeText={(bundleQuantity) =>
+                        setProductForm((form) => ({ ...form, bundleQuantity }))
+                      }
+                      placeholder="Optional"
+                      value={productForm.bundleQuantity}
+                    />
+                    <FormField
+                      editable={canEditProducts}
+                      keyboardType="decimal-pad"
+                      label="Bundle price"
+                      onChangeText={(bundlePrice) =>
+                        setProductForm((form) => ({ ...form, bundlePrice }))
+                      }
+                      placeholder="Optional"
+                      value={productForm.bundlePrice}
+                    />
+                  </View>
+                  <GabiField
+                    disabled={!canEditProducts}
+                    label="Bundle label"
+                    onChangeText={(bundleLabel) =>
+                      setProductForm((form) => ({ ...form, bundleLabel }))
+                    }
+                    placeholder="Hal. 8 for PHP 150"
+                    value={productForm.bundleLabel}
+                  />
+                </>
+              ) : null}
               <View style={styles.formActions}>
                 <View style={styles.primaryAction}>
                   <GabiPrimaryButton
