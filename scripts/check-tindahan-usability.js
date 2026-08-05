@@ -39,7 +39,10 @@ const {
 const {
   COUNTABLE_MEASURED_CONVERSION_GUIDANCE,
   countableMeasuredConversionGuidance,
+  classifyRecipeUnitCompatibility,
+  ghostedUnitGuidance,
   partitionRecipeUnitOptions,
+  shortRecipeUnitLabel,
   COMMON_RECIPE_UNIT_KEYS,
 } = require(path.join(outDir, "recipeUnitPicker.js"));
 const {
@@ -80,10 +83,9 @@ assert.deepEqual(
   partition.common.map((unit) => unit.toLocaleLowerCase()),
   [...COMMON_RECIPE_UNIT_KEYS],
 );
-assert.equal(
+assert.ok(
   partition.more.some((group) => group.key === "mass"),
-  false,
-  "common mass units should not also appear under Iba pa",
+  "imperial mass units belong under Iba pa",
 );
 assert.ok(partition.more.some((group) => group.key === "volume"));
 assert.ok(partition.more.some((group) => group.key === "countable"));
@@ -99,8 +101,16 @@ assert.ok(
 );
 assert.ok(partition.moreFlat.includes("portion"));
 assert.ok(partition.moreFlat.includes("serving"));
+assert.ok(partition.moreFlat.includes("oz"));
+assert.ok(partition.moreFlat.includes("lb"));
+assert.ok(partition.moreFlat.includes("floz_us"));
+assert.ok(partition.moreFlat.includes("floz_imp"));
 assert.ok(!partition.common.includes("portion"));
+assert.ok(!partition.common.includes("oz"));
 assert.ok(!partition.moreFlat.includes("g"));
+assert.equal(shortRecipeUnitLabel("oz"), "oz (timbang)");
+assert.equal(shortRecipeUnitLabel("floz_us"), "US fl oz");
+assert.notEqual(shortRecipeUnitLabel("oz"), "oz");
 
 const groceryPartition = partitionRecipeUnitOptions([
   "g",
@@ -130,6 +140,53 @@ assert.equal(countableMeasuredConversionGuidance("ml", "l"), null);
 assert.equal(standardRecipeUnitFactor("custom_cup", "ml"), null);
 assert.equal(standardRecipeUnitFactor("kg", "ml"), null);
 assert.equal(standardRecipeUnitFactor("pack", "g"), null);
+assert.equal(standardRecipeUnitFactor("oz", "g"), 28.349523125);
+assert.equal(standardRecipeUnitFactor("floz_us", "g"), null);
+
+// Ghosted compatibility — derived from factors, not a hard-coded matrix
+assert.equal(classifyRecipeUnitCompatibility("g", "kg"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("ml", "kg"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("l", "kg"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("metric_cup", "kg"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("tbsp", "kg"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("tsp", "kg"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("oz", "kg"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("g", "ml"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("kg", "ml"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("l", "ml"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("metric_cup", "ml"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("us_cup", "ml"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("tbsp", "ml"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("tsp", "ml"), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("g", "pack"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("ml", "pack"), "ghosted");
+assert.equal(classifyRecipeUnitCompatibility("kg", null), "enabled");
+assert.equal(classifyRecipeUnitCompatibility("ml", ""), "enabled");
+
+const massVolumeGhost = ghostedUnitGuidance("kg", "metric_cup");
+assert.equal(massVolumeGhost.route, "custom_conversion");
+assert.match(massVolumeGhost.message, /Custom conversion|itakda ang sukat/i);
+
+const countableGhost = ghostedUnitGuidance("pack", "g");
+assert.equal(countableGhost.route, "package_breakdown");
+assert.match(countableGhost.message, /binibilang/);
+
+const customCupGhost = ghostedUnitGuidance("ml", "custom_cup");
+assert.equal(customCupGhost.route, "custom_cup");
+assert.match(customCupGhost.message, /cup sa mL/);
+
+// Selector source keeps ghosted chips actionable (not Pressable disabled)
+const selectorSource = fs.readFileSync(
+  path.join(workspace, "src/components/owner/RecipeUnitSelector.tsx"),
+  "utf8",
+);
+assert.match(selectorSource, /accessibilityState=\{\{\s*[\s\S]*?disabled:\s*false/);
+assert.match(selectorSource, /onGhostedSelect/);
+assert.match(selectorSource, /disabledBg/);
+assert.doesNotMatch(
+  selectorSource,
+  /disabled=\{ghosted\}/,
+);
 
 // Conversion math still correct; display is reference → usage
 const converted = convertRecipeQuantity(1, "kg", "g");

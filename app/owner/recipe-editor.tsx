@@ -48,7 +48,10 @@ import {
   RecipeFirstStepHeader,
   type RecipeFirstCostSummaryValue,
 } from "@/components/owner/RecipeFirstEditorUI";
-import { RecipeUnitSelector } from "@/components/owner/RecipeUnitSelector";
+import {
+  RecipeUnitSelector,
+  type RecipeUnitGhostSelection,
+} from "@/components/owner/RecipeUnitSelector";
 import { formatPeso, formatQuantity } from "@/components/ui/KitaMoUI";
 import { buildMeasuredCostDerivationLine } from "@/domain/recipeConversionDisplay";
 import { countableMeasuredConversionGuidance } from "@/domain/recipeUnitPicker";
@@ -3518,9 +3521,23 @@ function IngredientModal(props: IngredientModalProps) {
                     <RecipeUnitSelector
                       label="Usage unit"
                       onChange={props.onChangeUsageUnit}
+                      onGhostedSelect={(selection) =>
+                        applyGhostedUnitRoute(props, selection, "usage")
+                      }
+                      oppositeUnit={selectedLot?.unit ?? null}
                       options={RECIPE_FIRST_UNITS}
                       selected={props.usageUnit}
                     />
+                    {props.usageUnit === "custom_cup" ? (
+                      <RecipeFirstField
+                        help="Define this kitchen cup explicitly. The exact volume is saved with this Recipe line."
+                        keyboardType="decimal-pad"
+                        label="Custom business cup volume (mL)"
+                        onChangeText={props.onChangeCustomCupMilliliters}
+                        placeholder="Example: 240"
+                        value={props.customCupMilliliters}
+                      />
+                    ) : null}
                     <CostMeasurementFields
                       {...props}
                       selectedLot={selectedLot}
@@ -3764,6 +3781,10 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Reference unit"
                   onChange={props.onChangeEstimateReferenceUnit}
+                  onGhostedSelect={(selection) =>
+                    applyGhostedUnitRoute(props, selection, "reference")
+                  }
+                  oppositeUnit={props.estimateUsageUnit}
                   options={RECIPE_FIRST_UNITS}
                   selected={props.estimateReferenceUnit}
                 />
@@ -3778,9 +3799,24 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Usage unit"
                   onChange={props.onChangeEstimateUsageUnit}
+                  onGhostedSelect={(selection) =>
+                    applyGhostedUnitRoute(props, selection, "usage")
+                  }
+                  oppositeUnit={props.estimateReferenceUnit}
                   options={RECIPE_FIRST_UNITS}
                   selected={props.estimateUsageUnit}
                 />
+                {props.estimateReferenceUnit === "custom_cup" ||
+                props.estimateUsageUnit === "custom_cup" ? (
+                  <RecipeFirstField
+                    help="Define this kitchen cup explicitly. The exact volume is saved with this Recipe line."
+                    keyboardType="decimal-pad"
+                    label="Custom business cup volume (mL)"
+                    onChangeText={props.onChangeCustomCupMilliliters}
+                    placeholder="Example: 240"
+                    value={props.customCupMilliliters}
+                  />
+                ) : null}
                 <CostMeasurementFields {...props} selectedLot={null} />
                 <RecipeFirstField
                   help="Optional owner notes and evidence context are preserved when this estimate is edited."
@@ -3822,6 +3858,14 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Purchase unit"
                   onChange={props.onChangeNewPurchaseUnit}
+                  onGhostedSelect={(selection) =>
+                    applyGhostedUnitRoute(
+                      props,
+                      selection as RecipeUnitGhostSelection<RecipeFirstUnit>,
+                      "reference",
+                    )
+                  }
+                  oppositeUnit={props.newUsageUnit}
                   options={PURCHASE_UNITS}
                   selected={props.newPurchaseUnit}
                 />
@@ -3843,6 +3887,10 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Usage unit"
                   onChange={props.onChangeNewUsageUnit}
+                  onGhostedSelect={(selection) =>
+                    applyGhostedUnitRoute(props, selection, "usage")
+                  }
+                  oppositeUnit={props.newPurchaseUnit}
                   options={RECIPE_FIRST_UNITS}
                   selected={props.newUsageUnit}
                 />
@@ -3911,6 +3959,36 @@ function IngredientModal(props: IngredientModalProps) {
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function toRecipeFirstUnit(value: string): RecipeFirstUnit {
+  return (normalizePracticalRecipeUnit(value) ?? "g") as RecipeFirstUnit;
+}
+
+function applyGhostedUnitRoute(
+  props: IngredientModalProps,
+  selection: RecipeUnitGhostSelection<RecipeFirstUnit>,
+  selectedSide: "usage" | "reference",
+) {
+  if (selection.guidance.route === "package_breakdown") {
+    props.onChangeCostMeasurement("Package breakdown");
+    return;
+  }
+  if (selection.guidance.route === "custom_cup") {
+    return;
+  }
+  props.onChangeCostMeasurement("Custom conversion");
+  const opposite = toRecipeFirstUnit(selection.oppositeUnit);
+  if (selectedSide === "usage") {
+    props.onChangeCustomFromUnit(selection.unit);
+    props.onChangeCustomToUnit(opposite);
+  } else {
+    props.onChangeCustomFromUnit(opposite);
+    props.onChangeCustomToUnit(selection.unit);
+  }
+  if (!props.customFromQuantity.trim()) {
+    props.onChangeCustomFromQuantity("1");
+  }
 }
 
 function CostMeasurementFields(
