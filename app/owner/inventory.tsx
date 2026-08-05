@@ -1031,11 +1031,13 @@ export default function OwnerInventoryScreen() {
           {stockAction === "cook" ? (
             <GabiCard raised>
               <GabiSectionHeader
-                action={<GabiChip label="Manual stock in" tone="success" />}
+                action={
+                  <GabiChip label="Legacy compatibility" tone="warning" />
+                }
                 title="Dagdag luto (walang recipe)"
               />
               <GabiNotice
-                message="Diretsong dagdag ito sa finished stock. Para sa exact ingredient deduction at recipe cost, gamitin ang Niluto."
+                message="Legacy path lang ito — walang ingredient deduction. Recipe-backed items hindi kasama rito. Para sa bagong Recipe, gamitin ang Produce from Recipe / Niluto."
                 tone="warning"
               />
               <ProductChips
@@ -1044,39 +1046,15 @@ export default function OwnerInventoryScreen() {
                 products={compatibilityCookProducts}
                 selectedId={cookForm.productId}
               />
-              <View style={styles.twoColumn}>
-                <FormField
-                  editable={!cookSaving}
-                  keyboardType="decimal-pad"
-                  label="Ilang nadagdag?"
-                  onChangeText={(quantity) => setCookForm((form) => ({ ...form, quantity }))}
-                  placeholder="0"
-                  value={cookForm.quantity}
+              {compatibilityCookProducts.length === 0 ? (
+                <GabiEmptyState
+                  actionLabel="Buksan ang Niluto / Production"
+                  icon="flame-outline"
+                  message="Walang legacy item dito. Kung kakapublish mo ng Recipe, piliin ang Produce from Recipe."
+                  onAction={() => router.push("/owner/production")}
+                  title="Walang manual cook item"
                 />
-                <FormField
-                  editable={!cookSaving}
-                  label="Note"
-                  onChangeText={(note) => setCookForm((form) => ({ ...form, note }))}
-                  placeholder="Optional"
-                  value={cookForm.note}
-                />
-              </View>
-              {cookMessage ? <GabiNotice message={cookMessage} tone={cookIsError ? "danger" : "success"} /> : null}
-              <View style={styles.formActions}>
-                <View style={styles.primaryAction}>
-                  <GabiPrimaryButton
-                    disabled={cookSaving}
-                    icon="checkmark-circle-outline"
-                    label={cookSaving ? "Sine-save..." : "I-save ang dagdag stock"}
-                    loading={cookSaving}
-                    onPress={saveCookedBatch}
-                  />
-                </View>
-                <GabiSoftButton icon="close" label="Isara" onPress={() => setStockAction(null)} />
-              </View>
-              <GabiSoftButton icon="flame-outline" label="May recipe? Buksan ang Niluto" onPress={() => router.push("/owner/production")} />
-            </GabiCard>
-          ) : null}
+              ) : null}
               <View style={styles.twoColumn}>
                 <FormField
                   editable={!cookSaving}

@@ -139,7 +139,7 @@ export function buildPanindaActionDescriptors(input: {
   if (showManualCompatibilityStockIn) {
     descriptors.push({
       key: "manualCompatibilityStockIn",
-      label: "Manual stock in (legacy compatibility)",
+      label: "Dagdag luto (legacy, walang recipe)",
       danger: false,
     });
   }

@@ -650,8 +650,12 @@ export default function OwnerRecipesScreen() {
                   }
                   onOpen={() => void openEntry(entry)}
                   onProduce={
-                    view.productionReady
-                      ? () => router.push("/owner/production")
+                    view.productionReady && entry.activeRecipeId
+                      ? () =>
+                          router.push({
+                            pathname: "/owner/production",
+                            params: { recipeId: entry.activeRecipeId },
+                          })
                       : undefined
                   }
                 />
@@ -717,12 +721,17 @@ export default function OwnerRecipesScreen() {
                 />
                 <GabiSoftButton
                   icon="restaurant-outline"
-                  label="Cook or produce from an existing recipe"
+                  label="Produce from Recipe"
                   onPress={() => {
                     setActions(null);
                     router.push("/owner/production");
                   }}
                 />
+                <GabiText tone="muted" variant="caption">
+                  Recipe-backed items are produced in Niluto. Manual “dagdag
+                  luto” without ingredient deduction is only for legacy
+                  compatibility items in Paninda.
+                </GabiText>
               </View>
             ) : null}
 
