@@ -94,17 +94,199 @@ function asAllocation(row: Record<string, unknown>): AllocationRow {
   return row as unknown as AllocationRow;
 }
 
-function parseLineIdFromProvenance(provenanceJson: string): string | null {
+type ProvenanceEntry = {
+  versionId: string;
+  lineId: string;
+};
+
+function parseStrictRecipeLineProvenance(provenanceJson: string): ProvenanceEntry[] {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(provenanceJson) as unknown;
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const first = parsed[0] as { lineId?: unknown };
-    return typeof first.lineId === "string" && first.lineId.trim()
-      ? first.lineId
-      : null;
+    parsed = JSON.parse(provenanceJson) as unknown;
   } catch {
-    return null;
+    throw new Error(
+      "Ingredient requirement provenance is malformed and cannot be executed.",
+    );
   }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(
+      "Ingredient requirement provenance must be a non-empty array.",
+    );
+  }
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object") {
+      throw new Error(
+        `Ingredient requirement provenance entry ${index} is invalid.`,
+      );
+    }
+    const entry = value as Record<string, unknown>;
+    const versionId =
+      typeof entry.versionId === "string" ? entry.versionId.trim() : "";
+    const lineId = typeof entry.lineId === "string" ? entry.lineId.trim() : "";
+    if (!versionId || !lineId) {
+      throw new Error(
+        "Ingredient requirement provenance must include versionId and lineId.",
+      );
+    }
+    return { versionId, lineId };
+  });
+}
+
+/**
+ * First simple executor requires exactly one attributable Recipe version line
+ * per ingredient requirement. Multi-line aggregation fails closed.
+ */
+async function resolveSingleRecipeVersionLineId(input: {
+  requirement: RequirementRow;
+  businessId: string;
+  pinnedRecipeVersionId: string;
+  txn: RepositoryDatabase;
+}): Promise<string> {
+  const { requirement, businessId, pinnedRecipeVersionId, txn } = input;
+  if (!requirement.catalog_item_id) {
+    throw new Error("Ingredient requirement is missing catalog identity.");
+  }
+  const provenance = parseStrictRecipeLineProvenance(requirement.provenance_json);
+  for (const entry of provenance) {
+    if (entry.versionId !== pinnedRecipeVersionId) {
+      throw new Error(
+        "Ingredient requirement provenance is detached from the pinned Recipe version.",
+      );
+    }
+  }
+
+  const distinctLineIds = [...new Set(provenance.map((entry) => entry.lineId))];
+  if (distinctLineIds.length !== 1) {
+    throw new Error(
+      "This executor does not support requirements aggregated from multiple Recipe version lines.",
+    );
+  }
+  const lineId = distinctLineIds[0];
+
+  for (const entry of provenance) {
+    const line = await txn.getFirstAsync<{
+      id: string;
+      business_id: string;
+      recipe_version_id: string;
+      source_kind: string;
+      catalog_item_id: string | null;
+    }>(
+      `
+        SELECT id, business_id, recipe_version_id, source_kind, catalog_item_id
+        FROM recipe_version_lines
+        WHERE id = ? AND deleted_at IS NULL
+      `,
+      [entry.lineId],
+    );
+    if (
+      !line ||
+      line.business_id !== businessId ||
+      line.recipe_version_id !== pinnedRecipeVersionId ||
+      line.source_kind !== "catalog_item" ||
+      line.catalog_item_id !== requirement.catalog_item_id
+    ) {
+      throw new Error(
+        "Ingredient requirement provenance is detached from persisted Recipe content.",
+      );
+    }
+  }
+
+  return lineId;
+}
+
+async function resolveLotBackedOutputProduct(input: {
+  businessId: string;
+  branchId: string | null;
+  outputCatalogItemId: string;
+  expectedOutputUnit: string;
+  txn: RepositoryDatabase;
+}): Promise<{
+  product: {
+    id: string;
+    business_id: string;
+    branch_id: string | null;
+    unit_type: string;
+  };
+  catalogItemId: string;
+}> {
+  const catalogItem = await input.txn.getFirstAsync<{
+    id: string;
+    business_id: string;
+    classification: string;
+    source_type: string;
+    lifecycle_status: string;
+    stock_policy: string;
+  }>(
+    `
+      SELECT id, business_id, classification, source_type, lifecycle_status,
+        stock_policy
+      FROM catalog_items
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [input.outputCatalogItemId],
+  );
+  if (
+    !catalogItem ||
+    catalogItem.business_id !== input.businessId ||
+    catalogItem.classification !== "finished_product" ||
+    catalogItem.source_type !== "native" ||
+    catalogItem.lifecycle_status === "archived" ||
+    catalogItem.stock_policy !== "product_lots"
+  ) {
+    throw new Error(
+      "Output catalog item must be a native lot-backed finished product.",
+    );
+  }
+
+  const binding = await input.txn.getFirstAsync<{
+    legacy_entity_id: string;
+  }>(
+    `
+      SELECT binding.legacy_entity_id
+      FROM legacy_item_bindings binding
+      INNER JOIN products product
+        ON product.id = binding.legacy_entity_id
+        AND product.business_id = binding.business_id
+        AND product.deleted_at IS NULL
+      WHERE binding.catalog_item_id = ?
+        AND binding.business_id = ?
+        AND binding.entity_kind = 'product'
+        AND binding.binding_status = 'active'
+        AND binding.deleted_at IS NULL
+      LIMIT 1
+    `,
+    [catalogItem.id, input.businessId],
+  );
+  if (!binding) {
+    throw new Error(
+      "Finished product is missing its lot-backed Product projection.",
+    );
+  }
+
+  const product = await input.txn.getFirstAsync<{
+    id: string;
+    business_id: string;
+    branch_id: string | null;
+    unit_type: string;
+  }>(
+    `
+      SELECT id, business_id, branch_id, unit_type
+      FROM products
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [binding.legacy_entity_id],
+  );
+  if (!product || product.business_id !== input.businessId) {
+    throw new Error("Product projection is unavailable for this Recipe.");
+  }
+  if ((input.branchId ?? null) !== (product.branch_id ?? null)) {
+    throw new Error("Plan branch does not match the Product projection branch.");
+  }
+  if (product.unit_type !== input.expectedOutputUnit) {
+    throw new Error("Product stock unit does not match the Recipe output unit.");
+  }
+
+  return { product, catalogItemId: catalogItem.id };
 }
 
 async function loadExistingBatchForStage(
@@ -368,35 +550,6 @@ async function executeInsideTransaction(
     );
   }
 
-  const catalogItem = await txn.getFirstAsync<{
-    id: string;
-    business_id: string;
-    classification: string;
-    source_type: string;
-    lifecycle_status: string;
-    stock_policy: string;
-  }>(
-    `
-      SELECT id, business_id, classification, source_type, lifecycle_status,
-        stock_policy
-      FROM catalog_items
-      WHERE id = ? AND deleted_at IS NULL
-    `,
-    [version.output_catalog_item_id],
-  );
-  if (
-    !catalogItem ||
-    catalogItem.business_id !== plan.businessId ||
-    catalogItem.classification !== "finished_product" ||
-    catalogItem.source_type !== "native" ||
-    catalogItem.lifecycle_status === "archived" ||
-    catalogItem.stock_policy !== "product_lots"
-  ) {
-    throw new Error(
-      "Output catalog item must be a native lot-backed finished product.",
-    );
-  }
-
   const childLines = await txn.getFirstAsync<{ count: number }>(
     `
       SELECT COUNT(*) AS count
@@ -413,53 +566,23 @@ async function executeInsideTransaction(
     );
   }
 
-  const binding = await txn.getFirstAsync<{
-    legacy_entity_id: string;
-  }>(
-    `
-      SELECT binding.legacy_entity_id
-      FROM legacy_item_bindings binding
-      INNER JOIN products product
-        ON product.id = binding.legacy_entity_id
-        AND product.business_id = binding.business_id
-        AND product.deleted_at IS NULL
-      WHERE binding.catalog_item_id = ?
-        AND binding.business_id = ?
-        AND binding.entity_kind = 'product'
-        AND binding.binding_status = 'active'
-        AND binding.deleted_at IS NULL
-      LIMIT 1
-    `,
-    [catalogItem.id, plan.businessId],
-  );
-  if (!binding) {
-    throw new Error("Finished product is missing its lot-backed Product projection.");
-  }
+  const { product, catalogItemId } = await resolveLotBackedOutputProduct({
+    businessId: plan.businessId,
+    branchId: plan.branchId,
+    outputCatalogItemId: version.output_catalog_item_id,
+    expectedOutputUnit: stage.expected_output_unit,
+    txn,
+  });
 
-  const product = await txn.getFirstAsync<{
-    id: string;
-    business_id: string;
-    branch_id: string | null;
-    unit_type: string;
-    stock_qty: number;
-  }>(
-    `
-      SELECT id, business_id, branch_id, unit_type, stock_qty
-      FROM products
-      WHERE id = ? AND deleted_at IS NULL
-    `,
-    [binding.legacy_entity_id],
-  );
-  if (!product || product.business_id !== plan.businessId) {
-    throw new Error("Product projection is unavailable for this Recipe.");
-  }
-  if (
-    (plan.branchId ?? null) !== (product.branch_id ?? null)
-  ) {
-    throw new Error("Plan branch does not match the Product projection branch.");
-  }
-  if (product.unit_type !== stage.expected_output_unit) {
-    throw new Error("Product stock unit does not match the Recipe output unit.");
+  const recipeLineIdByRequirement = new Map<string, string>();
+  for (const requirement of requirements) {
+    const lineId = await resolveSingleRecipeVersionLineId({
+      requirement,
+      businessId: plan.businessId,
+      pinnedRecipeVersionId: version.id,
+      txn,
+    });
+    recipeLineIdByRequirement.set(requirement.id, lineId);
   }
 
   const timestamp = new Date().toISOString();
@@ -636,6 +759,12 @@ async function executeInsideTransaction(
     const requirement = requirements.find(
       (row) => row.id === allocation.production_plan_requirement_id,
     )!;
+    const recipeVersionLineId = recipeLineIdByRequirement.get(requirement.id);
+    if (!recipeVersionLineId) {
+      throw new Error(
+        "Ingredient allocation is missing attributable Recipe-line provenance.",
+      );
+    }
     await txn.runAsync(
       `
         INSERT INTO ingredient_movements (
@@ -681,7 +810,7 @@ async function executeInsideTransaction(
         makeProductionInputAllocationId(),
         plan.businessId,
         batchId,
-        parseLineIdFromProvenance(requirement.provenance_json),
+        recipeVersionLineId,
         requirement.id,
         requirement.catalog_item_id,
         lotId,
@@ -708,7 +837,7 @@ async function executeInsideTransaction(
       businessId: plan.businessId,
       branchId: plan.branchId,
       productId: product.id,
-      catalogItemId: catalogItem.id,
+      catalogItemId,
       originKind: "production",
       productionBatchId: batchId,
       originDate: timestamp.slice(0, 10),
@@ -789,7 +918,7 @@ async function executeInsideTransaction(
     stageId: stage.id,
     productionBatchId: batchId,
     outputProductId: product.id,
-    outputCatalogItemId: catalogItem.id,
+    outputCatalogItemId: catalogItemId,
     outputQuantity,
     outputUnit: stage.expected_output_unit,
     totalCost,
@@ -842,12 +971,53 @@ async function resolveIdempotentResult(
     );
   }
 
+  const version = await txn.getFirstAsync<{
+    id: string;
+    business_id: string;
+    recipe_id: string;
+    output_catalog_item_id: string;
+    expected_output_unit: string;
+  }>(
+    `
+      SELECT id, business_id, recipe_id, output_catalog_item_id,
+        expected_output_unit
+      FROM recipe_versions
+      WHERE id = ? AND deleted_at IS NULL
+    `,
+    [plan.rootRecipeVersionId],
+  );
+  if (
+    !version ||
+    version.business_id !== plan.businessId ||
+    version.recipe_id !== plan.rootRecipeId
+  ) {
+    throw new Error(
+      "Pinned Recipe version is unavailable for idempotent production identity.",
+    );
+  }
+
+  const { product, catalogItemId } = await resolveLotBackedOutputProduct({
+    businessId: plan.businessId,
+    branchId: plan.branchId,
+    outputCatalogItemId: version.output_catalog_item_id,
+    expectedOutputUnit: version.expected_output_unit,
+    txn,
+  });
+  if (existingBatch.output_product_id !== product.id) {
+    throw new Error(
+      "Existing production batch output Product does not match the pinned Recipe Product.",
+    );
+  }
+
   const outputLot = await txn.getFirstAsync<{
     id: string;
     catalog_item_id: string;
+    product_id: string;
+    origin_kind: string;
+    production_batch_id: string | null;
   }>(
     `
-      SELECT id, catalog_item_id
+      SELECT id, catalog_item_id, product_id, origin_kind, production_batch_id
       FROM product_stock_lots
       WHERE production_batch_id = ?
         AND deleted_at IS NULL
@@ -856,18 +1026,29 @@ async function resolveIdempotentResult(
     `,
     [existingBatch.id],
   );
+  if (
+    !outputLot ||
+    outputLot.origin_kind !== "production" ||
+    outputLot.production_batch_id !== existingBatch.id ||
+    outputLot.product_id !== product.id ||
+    outputLot.catalog_item_id !== catalogItemId
+  ) {
+    throw new Error(
+      "Existing production-origin Product lot does not match the pinned Recipe Product.",
+    );
+  }
 
   return {
     outcome: "already_completed",
     planId: plan.id,
     stageId: stage.id,
     productionBatchId: existingBatch.id,
-    outputProductId: existingBatch.output_product_id ?? "",
-    outputCatalogItemId: outputLot?.catalog_item_id ?? "",
+    outputProductId: product.id,
+    outputCatalogItemId: catalogItemId,
     outputQuantity: existingBatch.output_quantity,
     outputUnit: existingBatch.output_unit,
     totalCost:
       existingBatch.actual_total_cost ?? existingBatch.total_batch_cost,
-    productStockLotId: outputLot?.id ?? null,
+    productStockLotId: outputLot.id,
   };
 }

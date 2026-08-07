@@ -288,6 +288,25 @@ async function seedSimpleFinishedPlan(db, options = {}) {
     lotRemaining = 1000,
     multiStage = false,
     preparedRequirement = false,
+    flourProvenanceJson = JSON.stringify([
+      {
+        versionId: "version-bread-1",
+        versionLabel: "Bread Loaf",
+        lineId: "line-flour",
+        lineLabel: "Flour",
+        quantity: 100,
+      },
+    ]),
+    sugarProvenanceJson = JSON.stringify([
+      {
+        versionId: "version-bread-1",
+        versionLabel: "Bread Loaf",
+        lineId: "line-sugar",
+        lineLabel: "Sugar",
+        quantity: 50,
+      },
+    ]),
+    extraFlourLine = false,
   } = options;
 
   await db.runAsync(
@@ -521,6 +540,21 @@ async function seedSimpleFinishedPlan(db, options = {}) {
     `,
     [BUSINESS, fixedTimestamp, fixedTimestamp],
   );
+  if (extraFlourLine) {
+    await db.runAsync(
+      `
+        INSERT INTO recipe_version_lines (
+          id, business_id, recipe_version_id, sort_order, source_kind,
+          catalog_item_id, quantity, unit, role, is_optional, cost_state,
+          allocation_mode, created_at, updated_at, sync_status, deleted_at
+        ) VALUES (
+          'line-flour-b', ?, 'version-bread-1', 2, 'catalog_item', 'catalog-flour',
+          100, 'g', 'supporting', 0, 'known', 'recommended_fefo', ?, ?, 'local', NULL
+        )
+      `,
+      [BUSINESS, fixedTimestamp, fixedTimestamp],
+    );
+  }
   if (secondRequirement) {
     await db.runAsync(
       `
@@ -614,7 +648,7 @@ async function seedSimpleFinishedPlan(db, options = {}) {
       stageId,
       requirementCatalog,
       requirementKind,
-      JSON.stringify([{ lineId: "line-flour" }]),
+      flourProvenanceJson,
       allocationCostState === "known" ? allocationCostContribution : null,
       allocationCostState === "known" ? "known" : allocationCostState,
       fixedTimestamp,
@@ -661,7 +695,7 @@ async function seedSimpleFinishedPlan(db, options = {}) {
       [
         BUSINESS,
         stageId,
-        JSON.stringify([{ lineId: "line-sugar" }]),
+        sugarProvenanceJson,
         fixedTimestamp,
         fixedTimestamp,
       ],
@@ -758,6 +792,15 @@ async function run() {
       ),
       1,
     );
+    const inputAllocation = await db.getFirstAsync(
+      `SELECT recipe_version_line_id, production_plan_requirement_id, catalog_item_id
+       FROM production_input_allocations
+       WHERE production_batch_id = ? AND deleted_at IS NULL`,
+      [first.productionBatchId],
+    );
+    assert.equal(inputAllocation.recipe_version_line_id, "line-flour");
+    assert.equal(inputAllocation.production_plan_requirement_id, "req-flour");
+    assert.equal(inputAllocation.catalog_item_id, "catalog-flour");
     const productLot = await db.getFirstAsync(
       `SELECT origin_kind, production_batch_id, remaining_quantity, unit,
          recorded_total_cost, recorded_cost_per_unit, cost_state, provenance_state
@@ -1065,7 +1108,249 @@ async function run() {
     console.log("unsupported prepared requirement: passed");
   }
 
-  // 7. UNIQUE EXECUTION IDENTITY
+  // 8. IDEMPOTENT WRONG OUTPUT PRODUCT
+  {
+    const { db } = await createDatabase(migrations);
+    const { planId, stageId } = await seedSimpleFinishedPlan(db, {
+      planId: "plan-wrong-product",
+      stageId: "stage-wrong-product",
+    });
+    const first = await executeSimpleNativeProductionPlan(planId, db);
+    assert.equal(first.outcome, "executed");
+    await db.runAsync(
+      `
+        INSERT INTO products (
+          id, business_id, branch_id, name, category, price, cost, stock_qty,
+          unit_type, low_stock_threshold, active, product_type,
+          created_at, updated_at, sync_status, deleted_at
+        ) VALUES (
+          'product-other', ?, ?, 'Other Loaf', 'Food', 40, 0, 0, 'pcs', 1, 1,
+          'cooked food', ?, ?, 'local', NULL
+        )
+      `,
+      [BUSINESS, BRANCH, fixedTimestamp, fixedTimestamp],
+    );
+    await db.runAsync(
+      `UPDATE production_batches
+       SET output_product_id = 'product-other'
+       WHERE id = ?`,
+      [first.productionBatchId],
+    );
+
+    const beforeFlour = (
+      await db.getFirstAsync(
+        `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-flour'`,
+      )
+    ).remaining_quantity;
+    const beforeStock = (
+      await db.getFirstAsync(
+        `SELECT stock_qty FROM products WHERE id = 'product-bread'`,
+      )
+    ).stock_qty;
+    const beforeMovements = await count(
+      db,
+      `SELECT COUNT(*) AS count FROM ingredient_movements WHERE deleted_at IS NULL`,
+    );
+    const beforeLots = await count(
+      db,
+      `SELECT COUNT(*) AS count FROM product_stock_lots WHERE deleted_at IS NULL`,
+    );
+
+    await expectRejects(
+      executeSimpleNativeProductionPlan(planId, db),
+      /output Product does not match/i,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM production_batches WHERE deleted_at IS NULL"),
+      1,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-flour'`,
+        )
+      ).remaining_quantity,
+      beforeFlour,
+    );
+    assert.equal(
+      await count(
+        db,
+        `SELECT COUNT(*) AS count FROM ingredient_movements WHERE deleted_at IS NULL`,
+      ),
+      beforeMovements,
+    );
+    assert.equal(
+      await count(
+        db,
+        `SELECT COUNT(*) AS count FROM product_stock_lots WHERE deleted_at IS NULL`,
+      ),
+      beforeLots,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT stock_qty FROM products WHERE id = 'product-bread'`,
+        )
+      ).stock_qty,
+      beforeStock,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT status FROM production_plan_stages WHERE id = ?`,
+          [stageId],
+        )
+      ).status,
+      "completed",
+    );
+    console.log("idempotent wrong output product: passed");
+  }
+
+  // 9. MALFORMED / MISSING PROVENANCE
+  {
+    const { db } = await createDatabase(migrations);
+    const { planId } = await seedSimpleFinishedPlan(db, {
+      planId: "plan-bad-provenance",
+      stageId: "stage-bad-provenance",
+      flourProvenanceJson: JSON.stringify([{ versionId: "version-bread-1" }]),
+    });
+    await expectRejects(
+      executeSimpleNativeProductionPlan(planId, db),
+      /versionId and lineId|provenance/i,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM production_batches"),
+      0,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-flour'`,
+        )
+      ).remaining_quantity,
+      1000,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM ingredient_movements"),
+      0,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM product_stock_lots"),
+      0,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT status FROM production_plans WHERE id = ?`,
+          [planId],
+        )
+      ).status,
+      "ready",
+    );
+    console.log("malformed missing provenance: passed");
+  }
+
+  // 10. MULTI-LINE AGGREGATED PROVENANCE
+  {
+    const { db } = await createDatabase(migrations);
+    const { planId } = await seedSimpleFinishedPlan(db, {
+      planId: "plan-multi-line",
+      stageId: "stage-multi-line",
+      extraFlourLine: true,
+      flourProvenanceJson: JSON.stringify([
+        {
+          versionId: "version-bread-1",
+          versionLabel: "Bread Loaf",
+          lineId: "line-flour",
+          lineLabel: "Flour A",
+          quantity: 50,
+        },
+        {
+          versionId: "version-bread-1",
+          versionLabel: "Bread Loaf",
+          lineId: "line-flour-b",
+          lineLabel: "Flour B",
+          quantity: 50,
+        },
+      ]),
+    });
+    await expectRejects(
+      executeSimpleNativeProductionPlan(planId, db),
+      /multiple Recipe version lines/i,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM production_batches"),
+      0,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-flour'`,
+        )
+      ).remaining_quantity,
+      1000,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM production_input_allocations"),
+      0,
+    );
+    console.log("multi-line aggregated provenance: passed");
+  }
+
+  // 11. DETACHED LINE ID
+  {
+    const { db } = await createDatabase(migrations);
+    const { planId } = await seedSimpleFinishedPlan(db, {
+      planId: "plan-detached-line",
+      stageId: "stage-detached-line",
+      secondRequirement: true,
+      planExpectedCost: 17,
+      flourProvenanceJson: JSON.stringify([
+        {
+          versionId: "version-bread-1",
+          versionLabel: "Bread Loaf",
+          lineId: "line-sugar",
+          lineLabel: "Sugar",
+          quantity: 100,
+        },
+      ]),
+    });
+    await expectRejects(
+      executeSimpleNativeProductionPlan(planId, db),
+      /detached from persisted Recipe content/i,
+    );
+    assert.equal(
+      await count(db, "SELECT COUNT(*) AS count FROM production_batches"),
+      0,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-flour'`,
+        )
+      ).remaining_quantity,
+      1000,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT remaining_quantity FROM ingredient_lots WHERE id = 'lot-sugar'`,
+        )
+      ).remaining_quantity,
+      500,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          `SELECT stock_qty FROM products WHERE id = 'product-bread'`,
+        )
+      ).stock_qty,
+      0,
+    );
+    console.log("detached line id: passed");
+  }
+
+  // 12. UNIQUE EXECUTION IDENTITY
   {
     const { db } = await createDatabase(migrations);
     const { stageId } = await seedSimpleFinishedPlan(db, {
