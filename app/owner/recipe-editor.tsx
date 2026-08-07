@@ -3781,10 +3781,6 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Reference unit"
                   onChange={props.onChangeEstimateReferenceUnit}
-                  onGhostedSelect={(selection) =>
-                    applyGhostedUnitRoute(props, selection, "reference")
-                  }
-                  oppositeUnit={props.estimateUsageUnit}
                   options={RECIPE_FIRST_UNITS}
                   selected={props.estimateReferenceUnit}
                 />
@@ -3858,14 +3854,6 @@ function IngredientModal(props: IngredientModalProps) {
                 <RecipeUnitSelector
                   label="Purchase unit"
                   onChange={props.onChangeNewPurchaseUnit}
-                  onGhostedSelect={(selection) =>
-                    applyGhostedUnitRoute(
-                      props,
-                      selection as RecipeUnitGhostSelection<RecipeFirstUnit>,
-                      "reference",
-                    )
-                  }
-                  oppositeUnit={props.newUsageUnit}
                   options={PURCHASE_UNITS}
                   selected={props.newPurchaseUnit}
                 />
@@ -3968,7 +3956,7 @@ function toRecipeFirstUnit(value: string): RecipeFirstUnit {
 function applyGhostedUnitRoute(
   props: IngredientModalProps,
   selection: RecipeUnitGhostSelection<RecipeFirstUnit>,
-  selectedSide: "usage" | "reference",
+  selectedSide: "usage",
 ) {
   if (selection.guidance.route === "package_breakdown") {
     props.onChangeCostMeasurement("Package breakdown");
@@ -3978,13 +3966,11 @@ function applyGhostedUnitRoute(
     return;
   }
   props.onChangeCostMeasurement("Custom conversion");
-  const opposite = toRecipeFirstUnit(selection.oppositeUnit);
+  // Usage is the child of Reference/Purchase; custom conversion always
+  // starts from the attempted usage unit toward the reference unit.
   if (selectedSide === "usage") {
     props.onChangeCustomFromUnit(selection.unit);
-    props.onChangeCustomToUnit(opposite);
-  } else {
-    props.onChangeCustomFromUnit(opposite);
-    props.onChangeCustomToUnit(selection.unit);
+    props.onChangeCustomToUnit(toRecipeFirstUnit(selection.oppositeUnit));
   }
   if (!props.customFromQuantity.trim()) {
     props.onChangeCustomFromQuantity("1");

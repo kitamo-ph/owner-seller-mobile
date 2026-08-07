@@ -163,6 +163,34 @@ assert.equal(classifyRecipeUnitCompatibility("ml", "pack"), "ghosted");
 assert.equal(classifyRecipeUnitCompatibility("kg", null), "enabled");
 assert.equal(classifyRecipeUnitCompatibility("ml", ""), "enabled");
 
+// Reference/Purchase is free: changing reference away from g is never ghosted
+// by the current usage unit. Usage remains constrained by reference.
+assert.equal(
+  classifyRecipeUnitCompatibility("pcs", null),
+  "enabled",
+  "Reference with no opposite stays freely selectable (g → pcs)",
+);
+assert.equal(
+  classifyRecipeUnitCompatibility("ml", null),
+  "enabled",
+  "Reference with no opposite stays freely selectable (g → mL)",
+);
+assert.equal(
+  classifyRecipeUnitCompatibility("pcs", "g"),
+  "ghosted",
+  "Usage pcs remains ghosted when Reference is g",
+);
+assert.equal(
+  classifyRecipeUnitCompatibility("ml", "g"),
+  "ghosted",
+  "Usage mL remains ghosted when Reference is g",
+);
+assert.equal(
+  classifyRecipeUnitCompatibility("g", "g"),
+  "enabled",
+  "Usage g stays enabled when Reference is g",
+);
+
 const massVolumeGhost = ghostedUnitGuidance("kg", "metric_cup");
 assert.equal(massVolumeGhost.route, "custom_conversion");
 assert.match(massVolumeGhost.message, /Custom conversion|itakda ang sukat/i);
@@ -186,6 +214,53 @@ assert.match(selectorSource, /disabledBg/);
 assert.doesNotMatch(
   selectorSource,
   /disabled=\{ghosted\}/,
+);
+
+// Editor wiring: Reference/Purchase must not pass oppositeUnit; Usage must.
+const editorSource = fs.readFileSync(
+  path.join(workspace, "app/owner/recipe-editor.tsx"),
+  "utf8",
+);
+const estimateReferenceBlock = editorSource.match(
+  /label="Reference unit"[\s\S]*?selected=\{props\.estimateReferenceUnit\}/,
+);
+assert.ok(estimateReferenceBlock, "estimate Reference selector present");
+assert.doesNotMatch(
+  estimateReferenceBlock[0],
+  /oppositeUnit/,
+  "Estimate Reference must not be constrained by Usage",
+);
+const estimateUsageBlock = editorSource.match(
+  /label="Usage unit"[\s\S]*?selected=\{props\.estimateUsageUnit\}/,
+);
+assert.ok(estimateUsageBlock, "estimate Usage selector present");
+assert.match(
+  estimateUsageBlock[0],
+  /oppositeUnit=\{props\.estimateReferenceUnit\}/,
+  "Estimate Usage must stay constrained by Reference",
+);
+const purchaseBlock = editorSource.match(
+  /label="Purchase unit"[\s\S]*?selected=\{props\.newPurchaseUnit\}/,
+);
+assert.ok(purchaseBlock, "new-raw Purchase selector present");
+assert.doesNotMatch(
+  purchaseBlock[0],
+  /oppositeUnit/,
+  "Purchase/Reference must not be constrained by Usage",
+);
+const newUsageBlock = editorSource.match(
+  /label="Usage unit"[\s\S]*?selected=\{props\.newUsageUnit\}/,
+);
+assert.ok(newUsageBlock, "new-raw Usage selector present");
+assert.match(
+  newUsageBlock[0],
+  /oppositeUnit=\{props\.newPurchaseUnit\}/,
+  "new-raw Usage must stay constrained by Purchase unit",
+);
+assert.match(
+  editorSource,
+  /oppositeUnit=\{selectedLot\?\.unit \?\? null\}/,
+  "Grocery-lot Usage remains constrained by the lot unit",
 );
 
 // Conversion math still correct; display is reference → usage
