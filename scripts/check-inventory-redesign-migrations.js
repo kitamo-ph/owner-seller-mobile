@@ -27,6 +27,7 @@ const migrationSources = [
   ["014_supply_order_costs.ts", "supplyOrderCostsMigration"],
   ["015_recipe_first_costs.ts", "recipeFirstCostsMigration"],
   ["016_recipe_usability.ts", "recipeUsabilityMigration"],
+  ["017_native_production_execution.ts", "nativeProductionExecutionMigration"],
 ];
 const expectedNewTableColumns = {
   catalog_items: [
@@ -277,6 +278,7 @@ const expectedNewIndexes = [
   "idx_stock_adjustment_allocations_inventory_movement",
   "idx_production_batches_recipe_version",
   "idx_production_batches_plan_stage",
+  "idx_production_batches_plan_stage_unique",
   "idx_supply_rules_cart_lookup",
   "idx_supply_rules_recipe_lookup",
   "idx_supply_rules_supply",
@@ -486,8 +488,8 @@ function assertRunnerRegistration(migrations) {
   }
 
   const schemaSource = fs.readFileSync(path.join(workspace, "src/db/schema.ts"), "utf8");
-  assert.match(schemaSource, /export const schemaVersion = 16;/);
-  assert.equal(migrations.length, 16);
+  assert.match(schemaSource, /export const schemaVersion = 17;/);
+  assert.equal(migrations.length, 17);
 }
 
 function seedPopulatedV10(dbPath) {
@@ -878,7 +880,7 @@ function assertResetCoverage(dbPath) {
   for (const tableName of tableOrder) {
     assert.equal(Number(sql(dbPath, `SELECT COUNT(*) FROM ${tableName};`)), 0);
   }
-  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 16);
+  assert.equal(Number(sql(dbPath, "SELECT COUNT(*) FROM schema_migrations;")), 17);
   assertHealthy(dbPath);
 }
 
@@ -905,13 +907,14 @@ try {
       "014_supply_order_costs",
       "015_recipe_first_costs",
       "016_recipe_usability",
+      "017_native_production_execution",
     ],
   );
 
   const freshDb = path.join(temporaryRoot, "fresh.sqlite");
-  assert.equal(applyMigrations(freshDb, migrations), 16, "fresh database must apply 16 migrations");
+  assert.equal(applyMigrations(freshDb, migrations), 17, "fresh database must apply 17 migrations");
   assert.equal(applyMigrations(freshDb, migrations), 0, "fresh replay must apply zero migrations");
-  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 16);
+  assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM schema_migrations;")), 17);
   assert.equal(Number(sql(freshDb, "SELECT COUNT(*) FROM catalog_items;")), 0);
   assertSchemaInventory(freshDb);
   assertHealthy(freshDb);
@@ -920,7 +923,7 @@ try {
   assert.equal(applyMigrations(populatedDb, migrations, 10), 10);
   seedPopulatedV10(populatedDb);
   const beforeFingerprint = legacyFingerprint(populatedDb);
-  assert.equal(applyMigrations(populatedDb, migrations), 6);
+  assert.equal(applyMigrations(populatedDb, migrations), 7);
   assert.equal(applyMigrations(populatedDb, migrations), 0);
   assert.deepEqual(legacyFingerprint(populatedDb), beforeFingerprint, "legacy facts must remain unchanged");
   assert.deepEqual(
@@ -1307,6 +1310,8 @@ try {
     ["supply_usage_rules", null],
     ["catalog_cost_profiles", ["recipe_draft_lines", "cost_source"]],
     [null, ["recipe_draft_lines", "conversion_chain_json"]],
+    // 017 only adds idx_production_batches_plan_stage_unique; no table/column sentinel.
+    [null, null],
   ];
   for (let index = 10; index < migrations.length; index += 1) {
     const migration = migrations[index];
@@ -1345,6 +1350,20 @@ try {
         `${alteredColumn.join(".")} must roll back`,
       );
     }
+    if (migration.id === "017_native_production_execution") {
+      assert.equal(
+        Number(
+          sql(
+            retryDb,
+            `SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'index'
+               AND name = 'idx_production_batches_plan_stage_unique';`,
+          ),
+        ),
+        0,
+        "idx_production_batches_plan_stage_unique must roll back",
+      );
+    }
     assert.equal(applyMigrations(retryDb, migrations, index + 1), 1);
     assert.deepEqual(
       ledgerIds(retryDb),
@@ -1355,13 +1374,13 @@ try {
   }
   assert.equal(applyMigrations(retryDb, migrations), 0);
 
-  console.log("fresh 001-016 migration and replay: passed");
+  console.log("fresh 001-017 migration and replay: passed");
   console.log("populated v10 preservation and deterministic import: passed");
   console.log("legacy zero, selected-lot, and historical-version handling: passed");
   console.log("binding and one-primary-recipe constraints: passed");
   console.log("native unknown/known-zero persistence constraints: passed");
   console.log("representative child-first pilot reset with migration ledger retained: passed");
-  console.log("forced rollback and restart for 011-016: passed");
+  console.log("forced rollback and restart for 011-017: passed");
   console.log("integrity_check and foreign_key_check: passed");
   console.log("ALL INVENTORY REDESIGN MIGRATION CHECKS PASSED");
 } finally {
