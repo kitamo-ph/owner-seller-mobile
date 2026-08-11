@@ -395,3 +395,82 @@ Git checkpoint status:
 - `main` remains untouched and must not be merged before the final review gates are accepted
 
 final result: redesign implementation and automated QA passed; external device measurements and Play Console execution remain release gates
+
+## Stage 11: Turn 6 Guided Onboarding and Business Setup
+
+Reference sources:
+
+- `KitaMo Redesign.dc.html`, Turn 6 / `#s17`, screens 6a–6k from the approved Product Redesign (6) package
+- `kitamo-shared.css`
+- `handoff/kitamo-tokens.json`
+
+Reference captures:
+
+- `/tmp/kitamo-turn6.vXzMzU/reference-6b.png` — Name and Role
+- `/tmp/kitamo-turn6.vXzMzU/reference-6c.png` — Owner Business and type sheet
+- `/tmp/kitamo-turn6.vXzMzU/reference-6e.png` — first Stall
+- `/tmp/kitamo-turn6.vXzMzU/reference-6g.png` — Seller connect and limited state
+- `/tmp/kitamo-turn6.vXzMzU/reference-6h.png` — Add Business and receipt
+- `/tmp/kitamo-turn6.vXzMzU/reference-6i.png` — Add Stall and location inheritance
+
+Implementation captures:
+
+- `/tmp/kitamo-turn6-first-use-clean.png` — Name, keyboard open
+- `/tmp/kitamo-turn6-role-step.png` — large Role cards and disabled explanation
+- `/tmp/kitamo-owner-business.png` — Owner Business with required fields and typed-address fallback
+- `/tmp/kitamo-turn6-first-stall.png` — `Main Stall` and inherited typed location
+- `/tmp/kitamo-turn6-seller.png` — Seller code, paste, Skip, and honest local-only boundary
+- `/tmp/kitamo-turn6-seller-limited.png` — intentional unconnected Seller state
+- `/tmp/kitamo-turn6-add-business.png` — Add Business before the saved-address hierarchy correction
+- `/tmp/kitamo-turn6-add-stall.png` — Add Stall with preselected Business
+- `/tmp/kitamo-turn6-add-stall-switched.png` — second Business interaction baseline
+
+Test targets:
+
+- Android API 35 16 KB emulator, 1080 x 2400 pixels
+- Android API 28 low-end emulator in isolated read-only mode, 1080 x 1920 physical framebuffer with a 1080 x 2400 logical test override
+- Araw theme, keyboard-open and footer-reachable states
+
+Interactions verified:
+
+- clean installation opens Name rather than the old equal-hierarchy Fresh/Demo chooser
+- required Name validation appears on blur and clears after a valid nickname
+- Continue opens the large-card Role step and the selected role determines the next screen
+- Seller shows only the Owner/Stall code, paste, and Skip controls; no Business or Stall-creation fields appear
+- Seller Skip enters the explicit unconnected state, and that state reopens after an app force-stop/relaunch
+- Owner Business shows all required markers before validation
+- `Rovs Sushi` produces a deterministic `Food / Restaurant` suggestion that remains owner-changeable
+- a typed-only `SM Baliuag, Ground Floor` location is accepted without GPS, map, internet, or coordinates
+- first Stall opens as `Main Stall` and inherits the exact Business location by default
+- the inheritance switch exposes the override path without asking for a duplicate address first
+- Add Stall preselects route-context Business, keeps other businesses selectable, and updates the inherited address when the selection changes
+- Add Business and Add Stall keep their primary actions reachable above the Android navigation area
+- Android Back closes the keyboard/sheets first and returns through the guided hierarchy
+
+Comparison and correction history:
+
+- Initial Add Business rendering placed all saved addresses in a large card before the form, pushing the first required field below the initial viewport.
+- Corrected saved-address reuse to compact optional chips attached to the location step, restoring the Turn 6 form hierarchy.
+- The live map surface is intentionally replaced by a clearly labeled typed-address state because no approved map/location provider, permission, API key, or network capability exists.
+- Stall/internal codes are omitted because the local schema has no safe code or membership contract.
+- Seller code submission remains visibly honest and read-only because the product has no supported cross-device join mechanism.
+
+Runtime review:
+
+- focused Android logs showed no React Native JavaScript exception, Expo fatal error, SQLite failure, or Android app crash during the tested flow
+- the software-rendered API 35 emulator displayed one temporary System UI responsiveness dialog under host memory pressure; the KitaMo activity remained healthy
+- accessibility trees confirmed required labels, radio/switch state, disabled state, touch bounds, inherited-address changes, and persisted Seller routing
+
+Automated gates:
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run check:guided-onboarding`
+- `npm run check:owner-context`
+- `npm run check:migrations`
+- `npm run check:inventory-redesign-migrations`
+- whitespace, final-newline, and `git diff --check`
+
+Remaining visual issues: none at P0, P1, or P2.
+
+final result: passed

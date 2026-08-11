@@ -53,6 +53,8 @@ export default function OwnerLayout() {
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="context" options={{ title: "Business & Stall Context" }} />
         <Stack.Screen name="business-settings" options={{ title: "Business & Stalls" }} />
+        <Stack.Screen name="add-business" options={{ title: "Add Business" }} />
+        <Stack.Screen name="add-stall" options={{ title: "Add Stall" }} />
         <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
         <Stack.Screen name="about" options={{ title: "About KitaMo" }} />
         <Stack.Screen name="report-problem" options={{ title: "Report Problem" }} />

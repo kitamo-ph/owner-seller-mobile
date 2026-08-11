@@ -22,6 +22,7 @@ const migrationModules = [
   ["015_recipe_first_costs.js", "recipeFirstCostsMigration"],
   ["016_recipe_usability.js", "recipeUsabilityMigration"],
   ["017_native_production_execution.js", "nativeProductionExecutionMigration"],
+  ["018_guided_onboarding.js", "guidedOnboardingMigration"],
 ];
 const migrations = migrationModules.map(([file, exportName]) => require(path.join(compiledDir, file))[exportName]);
 const dbPath = path.join(os.tmpdir(), `kitamo-migrations-${process.pid}-${Date.now()}.sqlite`);
@@ -53,6 +54,14 @@ try {
   const hasCheckoutToken = salesColumns.some((column) => column.name === "checkout_token");
   const problemReportColumns = JSON.parse(sql("PRAGMA table_info(problem_reports);", true));
   const hasProblemReports = problemReportColumns.some((column) => column.name === "diagnostics_json");
+  const businessColumns = JSON.parse(sql("PRAGMA table_info(businesses);", true));
+  const branchColumns = JSON.parse(sql("PRAGMA table_info(branches);", true));
+  const hasBusinessLocationRef = businessColumns.some((column) => column.name === "location_ref_json");
+  const hasBusinessTypeCustom = businessColumns.some((column) => column.name === "business_type_custom");
+  const hasBranchLocationRef = branchColumns.some((column) => column.name === "location_ref_json");
+  const hasBranchLocationInheritance = branchColumns.some(
+    (column) => column.name === "inherits_business_location" && String(column.dflt_value) === "0",
+  );
 
   const saleColumns = "id, business_id, transaction_no, happened_at, amount, discount, payment_method, payment_status, created_at, updated_at, sync_status, deleted_at, checkout_token";
   const saleValues = "'sale_1', 'business_1', 'KTM-1', datetime('now'), 100, 0, 'cash', 'paid', datetime('now'), datetime('now'), 'local', NULL, 'checkout_1'";
@@ -72,6 +81,10 @@ try {
     appliedCount === migrations.length &&
     hasCheckoutToken &&
     hasProblemReports &&
+    hasBusinessLocationRef &&
+    hasBusinessTypeCustom &&
+    hasBranchLocationRef &&
+    hasBranchLocationInheritance &&
     duplicateRejected &&
     saleCount === 1;
 
@@ -79,6 +92,10 @@ try {
   console.log(`second migration run: ${secondRun} applied`);
   console.log(`checkout_token column: ${hasCheckoutToken ? "present" : "missing"}`);
   console.log(`problem_reports table: ${hasProblemReports ? "present" : "missing"}`);
+  console.log(`business structured location: ${hasBusinessLocationRef ? "present" : "missing"}`);
+  console.log(`business custom type: ${hasBusinessTypeCustom ? "present" : "missing"}`);
+  console.log(`stall structured location: ${hasBranchLocationRef ? "present" : "missing"}`);
+  console.log(`stall location inheritance: ${hasBranchLocationInheritance ? "present with default 0" : "missing"}`);
   console.log(`duplicate checkout token: ${duplicateRejected ? "rejected" : "accepted"}`);
   console.log(`sales with checkout_1: ${saleCount}`);
 

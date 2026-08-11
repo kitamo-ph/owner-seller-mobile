@@ -1,8 +1,10 @@
+import type { LocationRef, Turn6BusinessType } from "./onboarding";
+
 export type PaymentMethod = "cash" | "GCash" | "Maya" | "bank transfer" | "other";
 
 export type SyncStatus = "local" | "pending" | "synced" | "failed";
 
-export type BusinessType =
+export type LegacyBusinessType =
   | "sari-sari store"
   | "karinderia"
   | "street food"
@@ -10,6 +12,8 @@ export type BusinessType =
   | "school canteen"
   | "small booth"
   | "other";
+
+export type BusinessType = LegacyBusinessType | Turn6BusinessType;
 
 export type LanguagePreference = "Taglish" | "Filipino" | "English";
 export type ProductType = "retail item" | "cooked food" | "ingredient-based item" | "service/other";
@@ -27,8 +31,10 @@ export type LocalEntity = {
 export type Business = LocalEntity & {
   businessName: string;
   businessType: BusinessType;
+  businessTypeCustom: string | null;
   ownerName: string;
   barangay: string;
+  locationRef: LocationRef;
   contactNumber: string | null;
   notes: string | null;
   preferredLanguage: LanguagePreference;
@@ -39,6 +45,8 @@ export type Branch = LocalEntity & {
   businessId: string;
   branchName: string;
   location: string | null;
+  locationRef: LocationRef | null;
+  inheritsBusinessLocation: boolean;
   branchType: "stall" | "branch" | "kiosk" | "booth" | "home kitchen" | "pop-up";
   active: boolean;
   notes: string | null;
@@ -292,6 +300,9 @@ export type AppSettingKey =
   | `activeBranchId:${string}`
   | "hasCompletedFirstRun"
   | "hasSeededDemoData"
+  | "setupPersonName"
+  | "setupRole"
+  | "sellerConnectionState"
   | "favoriteProductIds"
   | "recentProductIds";
 

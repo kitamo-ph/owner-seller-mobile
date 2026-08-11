@@ -474,6 +474,13 @@ function assertRunnerRegistration(migrations) {
     assert.ok(importOffset > priorOffset, `${moduleName} import must be ordered`);
     priorOffset = importOffset;
   }
+  const guidedOnboardingImportOffset = indexSource.indexOf(
+    'import { guidedOnboardingMigration } from "./018_guided_onboarding";',
+  );
+  assert.ok(
+    guidedOnboardingImportOffset > priorOffset,
+    "append-only migration 018 must follow the protected 001-017 inventory sequence",
+  );
 
   const registrationBlock = indexSource.slice(
     indexSource.indexOf("const migrations: Migration[] = ["),
@@ -486,10 +493,15 @@ function assertRunnerRegistration(migrations) {
     assert.ok(registrationOffset > priorOffset, `${exportName} registration must be ordered`);
     priorOffset = registrationOffset;
   }
+  const guidedOnboardingRegistrationOffset = registrationBlock.indexOf("guidedOnboardingMigration");
+  assert.ok(
+    guidedOnboardingRegistrationOffset > priorOffset,
+    "append-only migration 018 must be registered after native production migration 017",
+  );
 
   const schemaSource = fs.readFileSync(path.join(workspace, "src/db/schema.ts"), "utf8");
-  assert.match(schemaSource, /export const schemaVersion = 17;/);
-  assert.equal(migrations.length, 17);
+  assert.match(schemaSource, /export const schemaVersion = 18;/);
+  assert.equal(migrations.length, 17, "this harness must retain its exact 001-017 inventory scope");
 }
 
 function seedPopulatedV10(dbPath) {
@@ -1381,6 +1393,7 @@ try {
   console.log("native unknown/known-zero persistence constraints: passed");
   console.log("representative child-first pilot reset with migration ledger retained: passed");
   console.log("forced rollback and restart for 011-017: passed");
+  console.log("append-only migration 018 runner successor: acknowledged separately");
   console.log("integrity_check and foreign_key_check: passed");
   console.log("ALL INVENTORY REDESIGN MIGRATION CHECKS PASSED");
 } finally {

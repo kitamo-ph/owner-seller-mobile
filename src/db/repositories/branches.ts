@@ -1,19 +1,31 @@
 import { z } from "zod";
 
 import { makeBranchId } from "@/domain/ids";
+import {
+  createTypedLocationRef,
+  locationRefSchema,
+  normalizeLocationRef,
+  parseLocationRefJson,
+  serializeLocationRef,
+} from "@/domain/onboarding";
 import type { Branch, SyncStatus } from "@/domain/types";
 
 import { getRepositoryDatabase, nowIso, toBoolean, toInteger, type RepositoryDatabase } from "./shared";
 
-const createBranchSchema = z.object({
+const branchFieldsSchema = z.object({
   id: z.string().optional(),
   businessId: z.string().min(1),
-  branchName: z.string().min(1),
+  branchName: z.string().trim().min(1),
   location: z.string().nullable().optional(),
+  locationRef: locationRefSchema.nullable().optional(),
+  inheritsBusinessLocation: z.boolean().default(false),
   branchType: z.enum(["stall", "branch", "kiosk", "booth", "home kitchen", "pop-up"]).default("stall"),
   active: z.boolean().default(true),
   notes: z.string().nullable().optional(),
 });
+
+const createBranchSchema = branchFieldsSchema;
+const updateBranchSchema = branchFieldsSchema.partial().omit({ id: true, businessId: true });
 
 export type CreateBranchInput = z.input<typeof createBranchSchema>;
 export type UpdateBranchInput = Partial<Omit<CreateBranchInput, "id" | "businessId">>;
@@ -23,6 +35,8 @@ type BranchRow = {
   business_id: string;
   branch_name: string;
   location: string | null;
+  location_ref_json: string | null;
+  inherits_business_location: number;
   branch_type: Branch["branchType"];
   active: number;
   notes: string | null;
@@ -38,6 +52,8 @@ function mapBranch(row: BranchRow): Branch {
     businessId: row.business_id,
     branchName: row.branch_name,
     location: row.location,
+    locationRef: parseLocationRefJson(row.location_ref_json, row.location),
+    inheritsBusinessLocation: toBoolean(row.inherits_business_location),
     branchType: row.branch_type,
     active: toBoolean(row.active),
     notes: row.notes ?? null,
@@ -52,11 +68,21 @@ export async function createBranch(input: CreateBranchInput, db?: RepositoryData
   const parsed = createBranchSchema.parse(input);
   const database = getRepositoryDatabase(db);
   const createdAt = nowIso();
+  const locationRef =
+    parsed.locationRef !== undefined
+      ? parsed.locationRef
+        ? normalizeLocationRef(parsed.locationRef)
+        : null
+      : parsed.location?.trim()
+        ? createTypedLocationRef(parsed.location)
+        : null;
   const branch: Branch = {
     id: parsed.id ?? makeBranchId(),
     businessId: parsed.businessId,
     branchName: parsed.branchName,
-    location: parsed.location ?? null,
+    location: locationRef?.formattedAddress ?? null,
+    locationRef,
+    inheritsBusinessLocation: parsed.inheritsBusinessLocation,
     branchType: parsed.branchType,
     active: parsed.active,
     notes: parsed.notes ?? null,
@@ -69,15 +95,18 @@ export async function createBranch(input: CreateBranchInput, db?: RepositoryData
   await database.runAsync(
     `
       INSERT INTO branches (
-        id, business_id, branch_name, location, branch_type, active,
-        notes, created_at, updated_at, sync_status, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, business_id, branch_name, location, location_ref_json,
+        inherits_business_location, branch_type, active, notes,
+        created_at, updated_at, sync_status, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       branch.id,
       branch.businessId,
       branch.branchName,
       branch.location,
+      branch.locationRef ? serializeLocationRef(branch.locationRef) : null,
+      toInteger(branch.inheritsBusinessLocation),
       branch.branchType,
       toInteger(branch.active),
       branch.notes,
@@ -102,13 +131,28 @@ export async function updateBranch(id: string, input: UpdateBranchInput, db?: Re
     throw new Error("Stall or branch not found.");
   }
 
-  const parsed = createBranchSchema.partial().parse(input);
+  const parsed = updateBranchSchema.parse(input);
   const database = getRepositoryDatabase(db);
   const updatedAt = nowIso();
+  const locationChanged = parsed.locationRef !== undefined || parsed.location !== undefined;
+  const locationRef =
+    parsed.locationRef !== undefined
+      ? parsed.locationRef
+        ? normalizeLocationRef(parsed.locationRef)
+        : null
+      : parsed.location !== undefined
+        ? parsed.location?.trim()
+          ? createTypedLocationRef(parsed.location)
+          : null
+        : existing.locationRef;
+  const inheritsBusinessLocation =
+    parsed.inheritsBusinessLocation ?? (locationChanged ? false : existing.inheritsBusinessLocation);
   const branch: Branch = {
     ...existing,
     branchName: parsed.branchName ?? existing.branchName,
-    location: parsed.location === undefined ? existing.location : parsed.location,
+    location: locationChanged ? locationRef?.formattedAddress ?? null : existing.location,
+    locationRef,
+    inheritsBusinessLocation,
     branchType: parsed.branchType ?? existing.branchType,
     active: parsed.active ?? existing.active,
     notes: parsed.notes === undefined ? existing.notes : parsed.notes,
@@ -119,13 +163,18 @@ export async function updateBranch(id: string, input: UpdateBranchInput, db?: Re
   await database.runAsync(
     `
       UPDATE branches
-      SET branch_name = ?, location = ?, branch_type = ?, active = ?, notes = ?,
+      SET branch_name = ?, location = ?,
+        location_ref_json = CASE WHEN ? = 1 THEN ? ELSE location_ref_json END,
+        inherits_business_location = ?, branch_type = ?, active = ?, notes = ?,
         updated_at = ?, sync_status = ?
       WHERE id = ? AND deleted_at IS NULL
     `,
     [
       branch.branchName,
       branch.location,
+      locationChanged ? 1 : 0,
+      locationChanged && branch.locationRef ? serializeLocationRef(branch.locationRef) : null,
+      toInteger(branch.inheritsBusinessLocation),
       branch.branchType,
       toInteger(branch.active),
       branch.notes,

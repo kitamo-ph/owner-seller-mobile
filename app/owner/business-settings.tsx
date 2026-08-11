@@ -1,15 +1,14 @@
-import { useFocusEffect, useRouter } from "expo-router";
+import { type Href, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { PilotStatusCard } from "@/components/owner/PilotStatusCard";
 import { AppTopBar, Card, IconBadge, Pill, ScreenScroll, SecondaryButton } from "@/components/ui/KitaMoUI";
 import {
-  createBranch,
-  createBusiness,
   updateBranch,
   updateBusiness,
 } from "@/db/repositories";
+import { TURN6_BUSINESS_TYPES } from "@/domain/onboarding";
 import type { Branch, Business, BusinessType } from "@/domain/types";
 import {
   createSingleFlightProtectedAction,
@@ -43,6 +42,7 @@ import { typography } from "@/theme/typography";
 import { getFriendlyErrorMessage, logDevError } from "@/utils/errors";
 
 const businessTypes: BusinessType[] = [
+  ...TURN6_BUSINESS_TYPES,
   "sari-sari store",
   "karinderia",
   "street food",
@@ -59,9 +59,11 @@ type BranchTypeOption = (typeof branchTypes)[number];
 type BusinessForm = {
   businessName: string;
   businessType: BusinessType;
+  businessTypeCustom: string;
   ownerName: string;
   contactNumber: string;
   barangay: string;
+  originalBarangay: string;
   notes: string;
 };
 
@@ -69,6 +71,7 @@ type BranchForm = {
   id: string | null;
   branchName: string;
   location: string;
+  originalLocation: string;
   branchType: BranchTypeOption;
   active: boolean;
   notes: string;
@@ -77,9 +80,11 @@ type BranchForm = {
 const emptyBusinessForm: BusinessForm = {
   businessName: "",
   businessType: "sari-sari store",
+  businessTypeCustom: "",
   ownerName: "",
   contactNumber: "",
   barangay: "",
+  originalBarangay: "",
   notes: "",
 };
 
@@ -87,6 +92,7 @@ const emptyBranchForm: BranchForm = {
   id: null,
   branchName: "",
   location: "",
+  originalLocation: "",
   branchType: "stall",
   active: true,
   notes: "",
@@ -96,9 +102,11 @@ function toBusinessForm(business: Business): BusinessForm {
   return {
     businessName: business.businessName,
     businessType: business.businessType,
+    businessTypeCustom: business.businessTypeCustom ?? "",
     ownerName: business.ownerName,
     contactNumber: business.contactNumber ?? "",
     barangay: business.barangay,
+    originalBarangay: business.barangay,
     notes: business.notes ?? "",
   };
 }
@@ -175,9 +183,11 @@ export default function OwnerSettingsScreen() {
         setBusinessForm({
           businessName: nextStatus.activeBusiness.businessName,
           businessType: nextStatus.activeBusiness.businessType,
+          businessTypeCustom: nextStatus.activeBusiness.businessTypeCustom ?? "",
           ownerName: nextStatus.activeBusiness.ownerName,
           contactNumber: nextStatus.activeBusiness.contactNumber ?? "",
           barangay: nextStatus.activeBusiness.barangay,
+          originalBarangay: nextStatus.activeBusiness.barangay,
           notes: nextStatus.activeBusiness.notes ?? "",
         });
       } else if (!nextStatus.activeBusiness && !options?.keepBusinessForm) {
@@ -208,12 +218,22 @@ export default function OwnerSettingsScreen() {
   );
 
   async function saveBusinessProfile() {
+    if (!editingBusinessId) {
+      router.push("/owner/add-business" as Href);
+      return;
+    }
+
     const businessName = businessForm.businessName.trim();
     const ownerName = businessForm.ownerName.trim();
     const barangay = businessForm.barangay.trim();
+    const businessTypeCustom = businessForm.businessTypeCustom.trim();
 
     if (!businessName || !ownerName || !barangay) {
       setError("Business name, owner/contact name, and address/location are required.");
+      return;
+    }
+    if (businessForm.businessType === "Other" && !businessTypeCustom) {
+      setError("Describe the business type when Other is selected.");
       return;
     }
 
@@ -223,32 +243,30 @@ export default function OwnerSettingsScreen() {
       const payload = {
         businessName,
         businessType: businessForm.businessType,
+        businessTypeCustom: businessForm.businessType === "Other" ? businessTypeCustom : null,
         ownerName,
-        barangay,
         contactNumber: businessForm.contactNumber.trim() || null,
         notes: businessForm.notes.trim() || null,
         preferredLanguage: "Taglish" as const,
+        ...(barangay === businessForm.originalBarangay.trim() ? {} : { barangay }),
       };
 
-      const savedBusiness = editingBusinessId
-        ? await updateBusiness(editingBusinessId, payload)
-        : await createBusiness(payload);
-
-      const nextStatus = editingBusinessId
-        ? await loadOwnerSetupStatus()
-        : await switchActiveBusinessContext(savedBusiness.id);
+      const savedBusiness = await updateBusiness(editingBusinessId, payload);
+      const nextStatus = await loadOwnerSetupStatus();
       setStatus(nextStatus);
       setOwnerContext(nextStatus.activeBusiness, nextStatus.activeBranch);
       setEditingBusinessId(savedBusiness.id);
       setBusinessForm({
         businessName: savedBusiness.businessName,
         businessType: savedBusiness.businessType,
+        businessTypeCustom: savedBusiness.businessTypeCustom ?? "",
         ownerName: savedBusiness.ownerName,
         contactNumber: savedBusiness.contactNumber ?? "",
         barangay: savedBusiness.barangay,
+        originalBarangay: savedBusiness.barangay,
         notes: savedBusiness.notes ?? "",
       });
-      setNotice(editingBusinessId ? "Business profile updated." : "Business created and selected. Choose a stall when ready.");
+      setNotice("Business profile updated.");
     } catch (error) {
       logDevError("OwnerSettings.saveBusinessProfile", error);
       setError(getFriendlyErrorMessage("Could not save business profile."));
@@ -295,20 +313,21 @@ export default function OwnerSettingsScreen() {
     try {
       const payload = {
         branchName,
-        location: branchForm.location.trim() || null,
         branchType: branchForm.branchType,
         active: branchForm.active,
         notes: branchForm.notes.trim() || null,
+        ...(branchForm.location.trim() === branchForm.originalLocation.trim()
+          ? {}
+          : { location: branchForm.location.trim() || null, inheritsBusinessLocation: false }),
       };
-      const savedBranch = branchForm.id
-        ? await updateBranch(branchForm.id, payload)
-        : await createBranch({
-            ...payload,
-            businessId: status.activeBusiness.id,
-          });
+      if (!branchForm.id) {
+        router.push(`/owner/add-stall?businessId=${encodeURIComponent(status.activeBusiness.id)}` as Href);
+        return;
+      }
+      const savedBranch = await updateBranch(branchForm.id, payload);
 
       let nextStatus = await loadOwnerSetupStatus();
-      let noticeText = branchForm.id ? "Store or stall updated." : "Store or stall added. Select it explicitly to use it as Owner context.";
+      let noticeText = "Store or stall updated.";
 
       if (!savedBranch.active && status.activeBranch?.id === savedBranch.id) {
         nextStatus = await clearActiveBranchContext(status.activeBusiness.id);
@@ -367,10 +386,7 @@ export default function OwnerSettingsScreen() {
   }
 
   function startNewBusiness() {
-    setEditingBusinessId(null);
-    setBusinessForm(emptyBusinessForm);
-    setBranchForm(emptyBranchForm);
-    setMessage(null);
+    router.push("/owner/add-business" as Href);
   }
 
   function editBusiness(business: Business) {
@@ -384,6 +400,7 @@ export default function OwnerSettingsScreen() {
       id: branch.id,
       branchName: branch.branchName,
       location: branch.location ?? "",
+      originalLocation: branch.location ?? "",
       branchType: branch.branchType === "kiosk" ? "stall" : branch.branchType,
       active: branch.active,
       notes: branch.notes ?? "",
@@ -611,61 +628,78 @@ export default function OwnerSettingsScreen() {
 
       <View style={[styles.section, { backgroundColor: palette.surface, borderColor: palette.border }]}>
         <Text style={[styles.sectionTitle, { color: palette.text }]}>{editingBusinessId ? "Edit Business Profile" : "Add Business"}</Text>
-        {!status?.activeBusiness && status?.businesses.length === 0 ? (
+        {!editingBusinessId ? (
+          <>
           <Text style={[styles.empty, { color: palette.mutedText }]}>
-            Create your business profile to start tracking sales and inventory.
+              Gamitin ang guided form para kumpleto ang uri at lokasyon ng bagong negosyo.
           </Text>
-        ) : null}
-
-        <FormField
-          label="Business name"
-          onChangeText={(businessName) => setBusinessForm((form) => ({ ...form, businessName }))}
-          placeholder="Example: Aling Nena's Store"
-          value={businessForm.businessName}
-        />
-        <OptionGroup
-          label="Business type"
-          onSelect={(businessType) => setBusinessForm((form) => ({ ...form, businessType }))}
-          options={businessTypes}
-          selected={businessForm.businessType}
-        />
-        <FormField
-          label="Owner/contact name"
-          onChangeText={(ownerName) => setBusinessForm((form) => ({ ...form, ownerName }))}
-          placeholder="Owner or staff contact"
-          value={businessForm.ownerName}
-        />
-        <FormField
-          keyboardType="phone-pad"
-          label="Phone/contact number"
-          onChangeText={(contactNumber) => setBusinessForm((form) => ({ ...form, contactNumber }))}
-          placeholder="Optional"
-          value={businessForm.contactNumber}
-        />
-        <FormField
-          label="Address/location"
-          onChangeText={(barangay) => setBusinessForm((form) => ({ ...form, barangay }))}
-          placeholder="Barangay, market, mall, or route"
-          value={businessForm.barangay}
-        />
-        <FormField
-          label="Notes/description"
-          multiline
-          onChangeText={(notes) => setBusinessForm((form) => ({ ...form, notes }))}
-          placeholder="Optional local notes"
-          value={businessForm.notes}
-        />
-
-        <View style={styles.inlineActions}>
-          <ActionButton disabled={saving} label={editingBusinessId ? "Save Business Profile" : "Create Business"} onPress={saveBusinessProfile} />
-          {!editingBusinessId && status?.activeBusiness ? (
-            <SmallButton disabled={saving} label="Cancel" onPress={() => editBusiness(status.activeBusiness as Business)} />
-          ) : null}
-        </View>
+            <ActionButton disabled={saving} label="Magdagdag ng negosyo" onPress={startNewBusiness} />
+          </>
+        ) : (
+          <>
+            <FormField
+              label="Business name"
+              onChangeText={(businessName) => setBusinessForm((form) => ({ ...form, businessName }))}
+              placeholder="Example: Aling Nena's Store"
+              value={businessForm.businessName}
+            />
+            <OptionGroup
+              label="Business type"
+              onSelect={(businessType) => setBusinessForm((form) => ({ ...form, businessType }))}
+              options={businessTypes}
+              selected={businessForm.businessType}
+            />
+            {businessForm.businessType === "Other" ? (
+              <FormField
+                label="Describe business type"
+                onChangeText={(businessTypeCustom) => setBusinessForm((form) => ({ ...form, businessTypeCustom }))}
+                placeholder="Hal. Pet supplies"
+                value={businessForm.businessTypeCustom}
+              />
+            ) : null}
+            <FormField
+              label="Owner/contact name"
+              onChangeText={(ownerName) => setBusinessForm((form) => ({ ...form, ownerName }))}
+              placeholder="Owner or staff contact"
+              value={businessForm.ownerName}
+            />
+            <FormField
+              keyboardType="phone-pad"
+              label="Phone/contact number"
+              onChangeText={(contactNumber) => setBusinessForm((form) => ({ ...form, contactNumber }))}
+              placeholder="Optional"
+              value={businessForm.contactNumber}
+            />
+            <FormField
+              label="Address/location"
+              onChangeText={(barangay) => setBusinessForm((form) => ({ ...form, barangay }))}
+              placeholder="Barangay, market, mall, or route"
+              value={businessForm.barangay}
+            />
+            <FormField
+              label="Notes/description"
+              multiline
+              onChangeText={(notes) => setBusinessForm((form) => ({ ...form, notes }))}
+              placeholder="Optional local notes"
+              value={businessForm.notes}
+            />
+            <ActionButton disabled={saving} label="Save Business Profile" onPress={saveBusinessProfile} />
+          </>
+        )}
       </View>
 
       <View style={[styles.section, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Stores / Stalls</Text>
+        <View style={styles.cloudHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Stores / Stalls</Text>
+          <SmallButton
+            disabled={saving || !status?.activeBusiness}
+            label="Add stall"
+            onPress={() => {
+              if (!status?.activeBusiness) return;
+              router.push(`/owner/add-stall?businessId=${encodeURIComponent(status.activeBusiness.id)}` as Href);
+            }}
+          />
+        </View>
         {!status?.activeBusiness ? (
           <Text style={[styles.empty, { color: palette.mutedText }]}>
             {status?.businesses.length ? "Choose a saved business before adding or editing stalls." : "Create a business profile before adding stores or stalls."}
@@ -705,7 +739,9 @@ export default function OwnerSettingsScreen() {
           );
         })}
 
-        <Text style={[styles.subheading, { color: palette.text }]}>{branchForm.id ? "Edit stall/store" : "Add stall/store"}</Text>
+        {branchForm.id ? (
+          <>
+        <Text style={[styles.subheading, { color: palette.text }]}>Edit stall/store</Text>
         <FormField
           editable={Boolean(status?.activeBusiness)}
           label="Stall/branch name"
@@ -743,9 +779,13 @@ export default function OwnerSettingsScreen() {
           value={branchForm.notes}
         />
         <View style={styles.inlineActions}>
-          <ActionButton disabled={saving || !status?.activeBusiness} label={branchForm.id ? "Save Store/Stall" : "Add Store/Stall"} onPress={saveBranch} />
-          {branchForm.id ? <SmallButton disabled={saving} label="Cancel edit" onPress={() => setBranchForm(emptyBranchForm)} /> : null}
+          <ActionButton disabled={saving || !status?.activeBusiness} label="Save Store/Stall" onPress={saveBranch} />
+          <SmallButton disabled={saving} label="Cancel edit" onPress={() => setBranchForm(emptyBranchForm)} />
         </View>
+          </>
+        ) : status?.activeBusiness ? (
+          <Text style={[styles.empty, { color: palette.mutedText }]}>Gamitin ang Add stall para sa guided location at inheritance setup.</Text>
+        ) : null}
       </View>
 
       {status ? <PilotStatusCard status={status} /> : null}

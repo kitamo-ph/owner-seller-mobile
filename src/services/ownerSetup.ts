@@ -56,7 +56,17 @@ export async function completeFreshFirstRun(db: RepositoryDatabase = openKitamoD
 export async function completeDemoFirstRun(db: RepositoryDatabase = openKitamoDatabase()) {
   await runMigrations(db);
   await seedDemoData(db);
-  await setBooleanAppSetting("hasCompletedFirstRun", true, db);
+  const activeBusinessSetting = await getAppSetting("activeBusinessId", db);
+  const businesses = await listBusinesses(db);
+  const demoBusiness =
+    resolveStoredBusiness(businesses, activeBusinessSetting?.value) ?? businesses[0] ?? null;
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await setAppSetting("setupPersonName", demoBusiness?.ownerName.trim() || "Demo Seller", "string", txn);
+    await setAppSetting("setupRole", "owner", "string", txn);
+    await setAppSetting("sellerConnectionState", "not_applicable", "string", txn);
+    await setBooleanAppSetting("hasCompletedFirstRun", true, txn);
+  });
 }
 
 function activeBranchSettingKey(businessId: string) {
