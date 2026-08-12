@@ -235,7 +235,12 @@ assertIncludes(
 console.log("cross-owner Missing Prices projection remains read-only: passed");
 
 for (const affordance of [
-  "Missing Prices (",
+  "Walang presyo (",
+  "Unahin ito",
+  "Bigas at grains",
+  "Karne at protein",
+  "Gulay at prutas",
+  "Pampalasa",
   "Leave blank to save this lot as No Price",
   "Complete missing price",
   "entry.lotId && candidate.id === entry.lotId",

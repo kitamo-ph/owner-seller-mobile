@@ -47,8 +47,19 @@ type GroceryForm = {
 type GroceryLotGroup = {
   ingredientId: string;
   ingredientName: string;
+  category: GroceryCategory;
   lots: IngredientLotWithName[];
 };
+
+type GroceryCategory = "grains" | "protein" | "produce" | "seasoning" | "other";
+const groceryCategories: { value: "all" | GroceryCategory; label: string }[] = [
+  { value: "all", label: "Lahat" },
+  { value: "grains", label: "Bigas at grains" },
+  { value: "protein", label: "Karne at protein" },
+  { value: "produce", label: "Gulay at prutas" },
+  { value: "seasoning", label: "Pampalasa" },
+  { value: "other", label: "Iba pa" },
+];
 
 const emptyGroceryForm: GroceryForm = {
   ingredientName: "",
@@ -94,6 +105,19 @@ function formatDate(value: string) {
   return parsed.toLocaleDateString("fil-PH", { dateStyle: "medium" });
 }
 
+function groceryCategory(name: string): GroceryCategory {
+  const value = name.toLocaleLowerCase();
+  if (/(bigas|rice|harina|flour|oats|mais|corn|pasta|noodle)/.test(value)) return "grains";
+  if (/(baboy|pork|manok|chicken|baka|beef|isda|fish|itlog|egg|tofu)/.test(value)) return "protein";
+  if (/(mangga|mango|kamatis|tomato|sibuyas|onion|bawang|garlic|gulay|prutas|fruit|vegetable)/.test(value)) return "produce";
+  if (/(toyo|suka|asin|salt|asukal|sugar|paminta|pepper|sauce|seasoning|mantika|oil)/.test(value)) return "seasoning";
+  return "other";
+}
+
+function groceryCategoryLabel(category: GroceryCategory) {
+  return groceryCategories.find((option) => option.value === category)?.label ?? "Iba pa";
+}
+
 function groupLots(lots: IngredientLotWithName[]): GroceryLotGroup[] {
   const groups = new Map<string, GroceryLotGroup>();
 
@@ -105,6 +129,7 @@ function groupLots(lots: IngredientLotWithName[]): GroceryLotGroup[] {
       groups.set(lot.ingredientId, {
         ingredientId: lot.ingredientId,
         ingredientName: lot.ingredientName,
+        category: groceryCategory(lot.ingredientName),
         lots: [lot],
       });
     }
@@ -114,8 +139,8 @@ function groupLots(lots: IngredientLotWithName[]): GroceryLotGroup[] {
 }
 
 export default function OwnerGroceryScreen() {
-  const { ingredientId: requestedIngredientId, lotId: requestedLotId } =
-    useLocalSearchParams<{ ingredientId?: string; lotId?: string }>();
+  const { ingredientId: requestedIngredientId, lotId: requestedLotId, query } =
+    useLocalSearchParams<{ ingredientId?: string; lotId?: string; query?: string }>();
   const [snapshot, setSnapshot] = useState<GroceryPoolSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<GroceryForm>(emptyGroceryForm);
@@ -123,6 +148,7 @@ export default function OwnerGroceryScreen() {
   const [formIsError, setFormIsError] = useState(false);
   const [filter, setFilter] = useState("");
   const [viewMode, setViewMode] = useState<"all" | "missing">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | GroceryCategory>("all");
   const [groupRenderLimit, setGroupRenderLimit] = useState(groceryGroupRenderBatch);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showOptionalFields, setShowOptionalFields] = useState(false);
@@ -184,6 +210,8 @@ export default function OwnerGroceryScreen() {
                 Math.max(groceryGroupRenderBatch, requestedGroupIndex + 1),
               );
               openLotActions(requestedLot);
+            } else if (query) {
+              setFilter(query);
             }
           }
         })
@@ -202,6 +230,7 @@ export default function OwnerGroceryScreen() {
       refresh,
       requestedIngredientId,
       requestedLotId,
+      query,
     ]),
   );
 
@@ -215,16 +244,13 @@ export default function OwnerGroceryScreen() {
       (lot) => viewMode === "all" || lot.costState !== "known",
     );
     const query = filter.trim().toLocaleLowerCase();
-    if (!query) {
-      return groupLots(lots);
-    }
-
-    return groupLots(
+    const groups = groupLots(
       lots.filter((lot) =>
-        [lot.ingredientName, lot.brandName ?? "", lot.sourceName ?? ""].some((value) => value.toLocaleLowerCase().includes(query)),
+        !query || [lot.ingredientName, lot.brandName ?? "", lot.sourceName ?? ""].some((value) => value.toLocaleLowerCase().includes(query)),
       ),
     );
-  }, [filter, snapshot?.lots, viewMode]);
+    return categoryFilter === "all" ? groups : groups.filter((group) => group.category === categoryFilter);
+  }, [categoryFilter, filter, snapshot?.lots, viewMode]);
 
   const otherMissingPrices = useMemo(
     () =>
@@ -598,13 +624,16 @@ export default function OwnerGroceryScreen() {
 
   const hasLots = (snapshot?.lots.length ?? 0) > 0;
   const hasVisibleLotGroups = filteredGroups.length > 0;
+  const firstLowStockLot = snapshot?.lowStockIngredients[0]
+    ? snapshot.lots.find((lot) => lot.ingredientId === snapshot.lowStockIngredients[0].ingredient.id) ?? null
+    : null;
 
   return (
     <ScreenScroll bottomNav>
       <AppTopBar
         eyebrow="Tindahan"
         right={<GabiIconButton accessibilityLabel="Magdagdag ng grocery purchase" icon="add" onPress={openPurchaseSheet} />}
-        subtitle="Bawat bili ay hiwalay na lot at presyo"
+        subtitle="Aling sangkap ang paubos o kulang ang presyo?"
         title="Grocery"
       />
 
@@ -628,24 +657,51 @@ export default function OwnerGroceryScreen() {
         <>
           <GrocerySummary snapshot={snapshot} />
 
+          {snapshot.lowStockIngredients.length > 0 || snapshot.missingPrices.length > 0 ? (
+            <GabiCard>
+              <GabiSectionHeader title="Unahin ito" />
+              <View style={styles.attentionList}>
+                {firstLowStockLot ? (
+                  <AttentionRow
+                    detail={`${formatQuantity(snapshot.lowStockIngredients[0].remainingInDefaultUnit)} ${snapshot.lowStockIngredients[0].ingredient.defaultUnit} na lang`}
+                    icon="warning-outline"
+                    label={snapshot.lowStockIngredients[0].ingredient.name}
+                    onPress={() => openLotActions(firstLowStockLot)}
+                    trailing="Tingnan"
+                  />
+                ) : null}
+                {snapshot.missingPrices.slice(0, 3).map((entry) => (
+                  <AttentionRow
+                    detail={entry.detail}
+                    icon="pricetag-outline"
+                    key={entry.id}
+                    label={entry.name}
+                    onPress={() => openMissingPriceOwner(entry)}
+                    trailing="Kumpletuhin"
+                  />
+                ))}
+              </View>
+            </GabiCard>
+          ) : null}
+
           <View style={styles.viewModeRow}>
             {viewMode === "all" ? (
-              <GabiPrimaryButton compact icon="list-outline" label="All" onPress={() => setViewMode("all")} />
+              <GabiPrimaryButton compact icon="list-outline" label="Lahat" onPress={() => setViewMode("all")} />
             ) : (
-              <GabiSoftButton compact icon="list-outline" label="All" onPress={() => setViewMode("all")} />
+              <GabiSoftButton compact icon="list-outline" label="Lahat" onPress={() => setViewMode("all")} />
             )}
             {viewMode === "missing" ? (
               <GabiPrimaryButton
                 compact
                 icon="pricetag-outline"
-                label={`Missing Prices (${snapshot.missingPrices.length})`}
+                label={`Walang presyo (${snapshot.missingPrices.length})`}
                 onPress={() => setViewMode("missing")}
               />
             ) : (
               <GabiSoftButton
                 compact
                 icon="pricetag-outline"
-                label={`Missing Prices (${snapshot.missingPrices.length})`}
+                label={`Walang presyo (${snapshot.missingPrices.length})`}
                 onPress={() => setViewMode("missing")}
               />
             )}
@@ -657,15 +713,30 @@ export default function OwnerGroceryScreen() {
           />
 
           {hasLots ? (
-            <GabiField
-              label="Hanapin"
-              onChangeText={(value) => {
-                setFilter(value);
-                setGroupRenderLimit(groceryGroupRenderBatch);
-              }}
-              placeholder="Sangkap, brand, o pinagbilhan"
-              value={filter}
-            />
+            <>
+              <GabiField
+                label="Hanapin"
+                onChangeText={(value) => {
+                  setFilter(value);
+                  setGroupRenderLimit(groceryGroupRenderBatch);
+                }}
+                placeholder="Sangkap, brand, o pinagbilhan"
+                value={filter}
+              />
+              <ScrollView contentContainerStyle={styles.categoryRow} horizontal showsHorizontalScrollIndicator={false}>
+                {groceryCategories.map((option) => (
+                  <CategoryChip
+                    active={categoryFilter === option.value}
+                    key={option.value}
+                    label={option.label}
+                    onPress={() => {
+                      setCategoryFilter(option.value);
+                      setGroupRenderLimit(groceryGroupRenderBatch);
+                    }}
+                  />
+                ))}
+              </ScrollView>
+            </>
           ) : null}
 
           {!hasLots ? (
@@ -706,7 +777,7 @@ export default function OwnerGroceryScreen() {
                       <GabiChip label={`${group.lots.length} ${group.lots.length === 1 ? "lot" : "lots"}`} tone="primary" />
                     </View>
                     <GabiText tone="muted" variant="caption">
-                      Hindi pinagsasama ang presyo
+                      {groceryCategoryLabel(group.category)} · hindi pinagsasama ang presyo
                     </GabiText>
                   </View>
                   {group.lots.map((lot) => (
@@ -831,12 +902,12 @@ function GrocerySummary({ snapshot }: { snapshot: GroceryPoolSnapshot }) {
           <Ionicons color={palette.success} name="wallet-outline" size={22} />
         </View>
         <View style={styles.summaryCopy}>
-          <GabiText tone="muted" variant="eyebrow">Known remaining grocery value</GabiText>
+          <GabiText tone="muted" variant="eyebrow">Kilalang halaga ng natitirang grocery</GabiText>
           <GabiText money variant="heroPeso">{formatPeso(snapshot.totalRemainingValue)}</GabiText>
         </View>
       </View>
       <View style={styles.summaryChips}>
-        <GabiChip label={`${snapshot.lotCount} lots`} tone="primary" />
+        <GabiChip label={`${snapshot.lotCount} ${snapshot.lotCount === 1 ? "lot" : "lots"}`} tone="primary" />
         <GabiChip label={`${snapshot.ingredientCount} sangkap`} tone="success" />
         <GabiChip
           label={`${snapshot.lowStockIngredients.length} paubos`}
@@ -844,11 +915,63 @@ function GrocerySummary({ snapshot }: { snapshot: GroceryPoolSnapshot }) {
         />
         <GabiChip label={`${snapshot.recentLotCount} bili nitong 7 araw`} tone="accent" />
         <GabiChip
-          label={`${snapshot.missingPriceLotCount} No Price`}
+          label={`${snapshot.missingPriceLotCount} walang presyo`}
           tone={snapshot.missingPriceLotCount > 0 ? "warning" : "success"}
         />
       </View>
     </GabiCard>
+  );
+}
+
+function AttentionRow({
+  detail,
+  icon,
+  label,
+  onPress,
+  trailing,
+}: {
+  detail: string;
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  onPress: () => void;
+  trailing: string;
+}) {
+  const { palette } = useGabiTheme();
+  return (
+    <Pressable
+      accessibilityHint={detail}
+      accessibilityLabel={`${label}. ${trailing}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.attentionRow}
+    >
+      <View style={[styles.attentionIcon, { backgroundColor: palette.softWarning }]}>
+        <Ionicons color={palette.warning} name={icon} size={19} />
+      </View>
+      <View style={styles.attentionCopy}>
+        <GabiText numberOfLines={1} variant="buttonSm">{label}</GabiText>
+        <GabiText numberOfLines={2} tone="muted" variant="caption">{detail}</GabiText>
+      </View>
+      <GabiText tone="primary" variant="buttonSm">{trailing}</GabiText>
+      <Ionicons color={palette.primary} name="chevron-forward" size={16} />
+    </Pressable>
+  );
+}
+
+function CategoryChip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  const { palette } = useGabiTheme();
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={[
+        styles.categoryChip,
+        { backgroundColor: active ? palette.kioskHeader : palette.surface, borderColor: active ? palette.kioskHeader : palette.border },
+      ]}
+    >
+      <GabiText style={active ? { color: palette.kioskHeaderText } : undefined} variant="caption">{label}</GabiText>
+    </Pressable>
   );
 }
 
@@ -1429,6 +1552,39 @@ function GroceryLotActionsSheet({
 }
 
 const styles = StyleSheet.create({
+  attentionList: {
+    gap: spacing.xs,
+  },
+  attentionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 60,
+    paddingVertical: spacing.sm,
+  },
+  attentionIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  attentionCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  categoryRow: {
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  categoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+  },
   summaryTop: {
     alignItems: "center",
     flexDirection: "row",
