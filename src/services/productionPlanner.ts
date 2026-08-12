@@ -237,13 +237,16 @@ export async function loadNativeProductionReadiness(
     [businessId],
   );
 
-  return Promise.all(
-    rows.map(async (row): Promise<NativeProductionReadinessEntry> => {
+  const entries: NativeProductionReadinessEntry[] = [];
+  // Graph loading performs several SQLite reads per Recipe. Keep it
+  // deliberately sequential so large offline catalogs do not create hundreds
+  // of simultaneous native statements on low-memory Android devices.
+  for (const row of rows) {
       let snapshot: Awaited<ReturnType<typeof loadRecipeVersionGraph>>;
       try {
         snapshot = await loadRecipeVersionGraph(row.version_id, 500, db);
       } catch {
-        return {
+        entries.push({
           recipeId: row.recipe_id,
           versionId: row.version_id,
           catalogItemId: row.catalog_item_id,
@@ -259,7 +262,8 @@ export async function loadNativeProductionReadiness(
           missingRequirements: [
             "Recipe dependency information could not be loaded safely.",
           ],
-        };
+        });
+        continue;
       }
       const versions = mapPersistedGraph(snapshot.versions, snapshot.lines);
       const validation = validateRecipeGraph(versions, row.version_id);
@@ -336,7 +340,7 @@ export async function loadNativeProductionReadiness(
         missingProductProjection ||
         (!nested && unsupportedSimpleInput);
       const executionBlocked = graphBlocked || costIncomplete;
-      return {
+      entries.push({
         recipeId: row.recipe_id,
         versionId: row.version_id,
         catalogItemId: row.catalog_item_id,
@@ -360,9 +364,9 @@ export async function loadNativeProductionReadiness(
             : "ready_for_planning",
         costStatus: row.cost_status,
         missingRequirements,
-      };
-    }),
-  );
+      });
+  }
+  return entries;
 }
 
 /**

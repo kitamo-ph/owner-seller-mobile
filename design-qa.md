@@ -519,6 +519,7 @@ Verified:
 Environment observation:
 
 - the API 35 16 KB emulator's Pixel Launcher became unresponsive before app inspection, so visual QA moved to the stable API 28 low-end emulator; the first Expo load also required the expected ADB reverse for local Metro, after which the application rendered and navigated normally
+- after repeated seeded-demo route captures, Expo Go exhausted its 48 MB heap while Production was refreshing hundreds of Recipe graphs concurrently; the readiness loader was changed from unbounded concurrent native statements to sequential graph reads, and the focused planner/executor/type/lint gates were rerun after the correction
 
 Design adaptations:
 

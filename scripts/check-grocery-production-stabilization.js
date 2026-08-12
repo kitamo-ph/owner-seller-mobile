@@ -340,6 +340,16 @@ for (const mutation of [
   assertExcludes(nativeReader, mutation, "read-only native Production readiness reader");
 }
 assertIncludes(nativeReader, "loadRecipeVersionGraph", "persisted immutable graph reader");
+assertIncludes(
+  nativeReader,
+  "for (const row of rows)",
+  "low-memory sequential native Recipe graph loading",
+);
+assertExcludes(
+  nativeReader,
+  "Promise.all(",
+  "unbounded concurrent native Recipe graph loading",
+);
 assertIncludes(nativeReader, "const executionBlocked = graphBlocked || costIncomplete", "incomplete native Recipe fail-closed guard");
 assertIncludes(nativeReader, "status: executionBlocked", "blocked native Recipe visibility");
 assertIncludes(
