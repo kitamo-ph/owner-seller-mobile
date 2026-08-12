@@ -27,6 +27,7 @@ import {
   buildPanindaActionSheetLayout,
 } from "@/domain/panindaActionSheet";
 import { bundleLabelFor, hasBundlePricing } from "@/domain/pricing";
+import { presentPanindaEntry } from "@/domain/tindahanPresentation";
 import type { Product, ProductType, UnitType } from "@/domain/types";
 import {
   loadPanindaCatalog,
@@ -738,14 +739,16 @@ export default function OwnerInventoryScreen() {
   const lowStockCount = activeProducts.filter(
     (product) => product.stockQty <= product.lowStockThreshold,
   ).length;
-  const stockValue = activeProducts.reduce(
-    (total, product) => total + product.stockQty * product.cost,
+  const stockValue = activeEntries.reduce(
+    (total, entry) =>
+      total + (entry.purchaseCostState === "known" ? entry.product.stockQty * entry.product.cost : 0),
     0,
   );
+  const unknownCostCount = activeEntries.filter((entry) => entry.purchaseCostState !== "known").length;
   const productFormVisible =
     Boolean(status) && (showProductForm || Boolean(productForm.id));
   const visibleEntries = panindaEntries.filter((entry) => {
-    if (entry.section !== sectionFilter) return false;
+    if (!productSearch.trim() && entry.section !== sectionFilter) return false;
     const product = entry.product;
     const matchesSearch = `${product.name} ${product.category}`.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase());
     const matchesStock =
@@ -759,6 +762,15 @@ export default function OwnerInventoryScreen() {
     panindaEntries.find(
       (entry) => entry.catalogItemId === openProductActionsId,
     ) ?? null;
+  const attentionEntries = panindaEntries
+    .map((entry) => ({ entry, presentation: presentPanindaEntry(entry) }))
+    .filter(({ presentation }) => presentation.attentionKind !== null)
+    .slice(0, 4);
+  const sectionCounts = {
+    active: panindaEntries.filter((entry) => entry.section === "active").length,
+    needs_setup: panindaEntries.filter((entry) => entry.section === "needs_setup").length,
+    archived: panindaEntries.filter((entry) => entry.section === "archived").length,
+  };
 
   const openProductForm = () => {
     setProductForm(emptyProductForm);
@@ -771,12 +783,38 @@ export default function OwnerInventoryScreen() {
     setShowProductForm(false);
   };
 
+  function openProductDetail(entry: PanindaCatalogEntry) {
+    setOpenProductActionsId(null);
+    router.push({
+      pathname: "/owner/product-detail" as never,
+      params: { catalogItemId: entry.catalogItemId },
+    });
+  }
+
+  function runAttentionAction(entry: PanindaCatalogEntry) {
+    const action = presentPanindaEntry(entry).primaryAction;
+    if (action === "list" || action === "price") {
+      beginListForSale(entry);
+    } else if (action === "recipe") {
+      openRecipe(entry);
+    } else if (action === "produce") {
+      router.push({
+        pathname: "/owner/production",
+        params: entry.activeRecipeId ? { recipeId: entry.activeRecipeId } : {},
+      });
+    } else if (action === "restore") {
+      void performRestoreFromArchive(entry);
+    } else {
+      openProductDetail(entry);
+    }
+  }
+
   return (
     <ScreenScroll bottomNav>
       <AppTopBar
         eyebrow="Tindahan"
         right={<GabiIconButton accessibilityLabel="Magdagdag ng paninda" icon="add" onPress={openProductForm} />}
-        subtitle="Paninda, grocery, recipe, at stock actions"
+        subtitle="Ano ang kailangang asikasuhin ngayon?"
         title="Paninda"
       />
 
@@ -809,16 +847,53 @@ export default function OwnerInventoryScreen() {
 
           <GabiCard>
             <View style={styles.summaryGrid}>
-              <SummaryMetric icon="cube-outline" label="Active" value={String(activeEntries.length)} />
+              <SummaryMetric icon="cube-outline" label="Nabebenta" value={String(activeEntries.length)} />
               <SummaryMetric
                 icon="warning-outline"
                 label="Paubos / ubos"
                 tone={lowStockCount > 0 ? "warning" : "success"}
                 value={String(lowStockCount)}
               />
-              <SummaryMetric icon="wallet-outline" label="Stock value" tone="success" value={formatPeso(stockValue)} />
+              <SummaryMetric
+                icon="wallet-outline"
+                label={unknownCostCount > 0 ? `Kilalang halaga · ${unknownCostCount} kulang` : "Halaga ng stock"}
+                tone={unknownCostCount > 0 ? "warning" : "success"}
+                value={formatPeso(stockValue)}
+              />
             </View>
           </GabiCard>
+
+          {attentionEntries.length > 0 ? (
+            <GabiCard>
+              <GabiSectionHeader
+                action={<GabiChip label={`${attentionEntries.length} dapat tingnan`} tone="warning" />}
+                title="Unahin ito"
+              />
+              <View style={styles.attentionList}>
+                {attentionEntries.map(({ entry, presentation }) => (
+                  <Pressable
+                    accessibilityHint={presentation.reason ?? undefined}
+                    accessibilityLabel={`${entry.product.name}. ${presentation.primaryLabel}`}
+                    accessibilityRole="button"
+                    key={entry.catalogItemId}
+                    onPress={() => runAttentionAction(entry)}
+                    style={styles.attentionRow}
+                  >
+                    <View style={styles.attentionCopy}>
+                      <GabiText numberOfLines={1} variant="buttonSm">{entry.product.name}</GabiText>
+                      <GabiText numberOfLines={2} tone="warning" variant="caption">
+                        {presentation.reason}
+                      </GabiText>
+                    </View>
+                    <View style={styles.attentionAction}>
+                      <GabiText tone="primary" variant="buttonSm">{presentation.primaryLabel}</GabiText>
+                      <Ionicons color={undefined} name="chevron-forward" size={16} />
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            </GabiCard>
+          ) : null}
 
           <GabiCard>
             <GabiSectionHeader
@@ -850,10 +925,10 @@ export default function OwnerInventoryScreen() {
                         key={option}
                         label={
                           option === "active"
-                            ? "Active"
+                            ? `Nabebenta ${sectionCounts.active}`
                             : option === "needs_setup"
-                              ? "Needs Setup"
-                              : "Archived"
+                              ? `Kulang pa ${sectionCounts.needs_setup}`
+                              : `Naka-archive ${sectionCounts.archived}`
                         }
                         onPress={() => {
                           setSectionFilter(option);
@@ -885,13 +960,15 @@ export default function OwnerInventoryScreen() {
             ) : null}
 
             {panindaEntries.length === 0 ? (
-              <GabiEmptyState
-                actionLabel="Magdagdag ng paninda"
-                icon="cube-outline"
-                message="Ilagay ang unang direct-resale item, o gumawa ng Recipe kung niluluto ito."
-                onAction={openProductForm}
-                title="Wala pang paninda"
-              />
+              <View style={styles.firstUseChoices}>
+                <GabiEmptyState
+                  icon="storefront-outline"
+                  message="Piliin kung binibili mo ito para ibenta o ikaw ang nagluluto."
+                  title="Ano ang una mong paninda?"
+                />
+                <GabiPrimaryButton icon="basket-outline" label="Binibili ko para ibenta" onPress={openProductForm} />
+                <GabiSoftButton icon="restaurant-outline" label="Niluluto ko ito" onPress={() => router.push("/owner/recipe-editor")} />
+              </View>
             ) : visibleEntries.length === 0 ? (
               <GabiEmptyState
                 actionLabel={
@@ -922,10 +999,10 @@ export default function OwnerInventoryScreen() {
                 <View style={styles.sectionBanner}>
                   <GabiText variant="buttonSm">
                     {sectionFilter === "active"
-                      ? "Active — nasa Tindahan"
+                      ? "Nabebenta sa Tindahan"
                       : sectionFilter === "needs_setup"
-                        ? "Needs Setup — hindi pa nabebenta"
-                        : "Archived"}
+                        ? "May kulang bago maibenta"
+                        : "Naka-archive"}
                   </GabiText>
                   <GabiText tone="muted" variant="caption">
                     {visibleEntries.length} item
@@ -938,6 +1015,7 @@ export default function OwnerInventoryScreen() {
                     disabled={saving || lifecycleSaving}
                     entry={entry}
                     key={entry.catalogItemId}
+                    onOpenDetail={() => openProductDetail(entry)}
                     onToggleActions={() =>
                       setOpenProductActionsId((current) =>
                         current === entry.catalogItemId
@@ -959,7 +1037,9 @@ export default function OwnerInventoryScreen() {
           </GabiCard>
 
           <View style={styles.flowGrid}>
-            <FlowLink icon="flame-outline" label="Niluto / Production" onPress={() => router.push("/owner/production")} />
+            <FlowLink icon="basket-outline" label="Tingnan ang Grocery" onPress={() => router.push("/owner/grocery")} />
+            <FlowLink icon="book-outline" label="Buksan ang Recipe" onPress={() => router.push("/owner/recipes")} />
+            <FlowLink icon="flame-outline" label="Mag-production" onPress={() => router.push("/owner/production")} />
             <FlowLink icon="swap-horizontal-outline" label="Ilipat ang stock" onPress={() => router.push("/owner/transfers")} />
           </View>
 
@@ -1672,16 +1752,14 @@ function panindaClassificationLabel(entry: PanindaCatalogEntry) {
   if (entry.classification === "finished_product") return "Recipe-backed item";
   if (entry.classification === "direct_resale_product") return "Direct resale";
   if (entry.classification === "bundle_combo") return "Bundle";
-  if (entry.compatibilityMode === "legacy_unclassified") {
-    return "Legacy selling item";
-  }
-  return "Selling item";
+  return entry.compatibilityMode === "legacy_unclassified" ? "Legacy selling item" : "Selling item";
 }
 
 type InventoryProductRowProps = {
   entry: PanindaCatalogEntry;
   actionsOpen: boolean;
   disabled: boolean;
+  onOpenDetail: () => void;
   onToggleActions: () => void;
 };
 
@@ -1689,14 +1767,14 @@ function InventoryProductRow({
   entry,
   actionsOpen,
   disabled,
+  onOpenDetail,
   onToggleActions,
 }: InventoryProductRowProps) {
   const product = entry.product;
   const { palette, extended } = useGabiTheme();
+  const presentation = presentPanindaEntry(entry);
   const outOfStock = product.stockQty <= 0;
   const lowStock = !outOfStock && product.stockQty <= product.lowStockThreshold;
-  const stateTone = outOfStock ? "danger" : lowStock ? "warning" : "success";
-  const stateLabel = outOfStock ? "Ubos na" : lowStock ? `${product.stockQty} na lang` : "May stock";
   const bundleLabel = hasBundlePricing(product)
     ? bundleLabelFor(product.bundleQuantity, product.bundlePrice, product.bundleLabel)
     : null;
@@ -1722,47 +1800,49 @@ function InventoryProductRow({
         <View style={[styles.productIcon, { backgroundColor: outOfStock ? palette.softDanger : lowStock ? palette.softWarning : palette.softPrimary }]}>
           <Ionicons color={outOfStock ? palette.danger : lowStock ? palette.warning : palette.primary} name={icon} size={21} />
         </View>
-        <View style={styles.productCopy}>
+        <Pressable
+          accessibilityHint="Buksan ang detalye at history ng paninda"
+          accessibilityLabel={`${product.name}, ${presentation.stockLabel}`}
+          accessibilityRole="button"
+          onPress={onOpenDetail}
+          style={styles.productCopy}
+        >
           <GabiText adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={2} variant="cardTitle">{product.name}</GabiText>
           <GabiText tone="muted" variant="caption">
-            {product.category} · {panindaClassificationLabel(entry)}
+            {product.category} · {presentation.sourceLabel}
           </GabiText>
           <View style={styles.productChips}>
-            <GabiChip label={stateLabel} tone={stateTone} />
-            {entry.section === "active" ? (
-              <GabiChip label="Active" tone="success" />
-            ) : null}
+            <GabiChip label={presentation.stockLabel} tone={presentation.stockTone} />
             {entry.section === "needs_setup" ? (
-              <GabiChip label="Needs Setup" tone="warning" />
+              <GabiChip label="Kulang pa" tone="warning" />
             ) : null}
             {entry.section === "archived" ? (
-              <GabiChip label="Archived" tone="neutral" />
+              <GabiChip label="Naka-archive" tone="neutral" />
             ) : null}
             {bundleLabel ? <GabiChip icon="pricetag-outline" label={bundleLabel} tone="primary" /> : null}
             {!product.active && entry.section !== "needs_setup" ? (
               <GabiChip label="Naka-off" tone="neutral" />
             ) : null}
           </View>
-          {entry.section === "needs_setup" ? (
+          {presentation.reason ? (
             <GabiText tone="warning" variant="caption">
-              {entry.actions.listForSale
-                ? "Handa na ito. Piliin ang Ilagay sa Tindahan para maibenta sa Kiosk."
-                : "May kulang pang detalye bago ito maibenta. Buksan ang Recipe para tapusin ito."}
+              {presentation.reason}
             </GabiText>
           ) : (
             <GabiText tone="muted" variant="caption">
-              Stock {product.stockQty} {product.unitType} · Paubos sa{" "}
-              {product.lowStockThreshold}
+              Stock {product.stockQty} {product.unitType} · Paubos sa {product.lowStockThreshold}
             </GabiText>
           )}
-        </View>
+        </Pressable>
         <View style={styles.productTrailing}>
           <GabiText money tone="primary" variant="metricValue">
             {formatPeso(product.price)}
           </GabiText>
-          <GabiText tone="faint" variant="caption">
-            Cost {formatPeso(product.cost)}
-          </GabiText>
+          {entry.purchaseCostState === "known" ? (
+            <GabiText tone="faint" variant="caption">Puhunan {formatPeso(product.cost)}</GabiText>
+          ) : (
+            <GabiText tone="warning" variant="caption">Walang puhunan</GabiText>
+          )}
           <Pressable
             accessibilityLabel={`Mga action para sa ${product.name}`}
             accessibilityRole="button"
@@ -1887,7 +1967,9 @@ function ProductActionSheet({
           <View style={styles.sheetHeader}>
             <View style={styles.sheetTitle}>
               <GabiText numberOfLines={2} variant="h2">{product.name}</GabiText>
-              <GabiText tone="muted" variant="caption">{product.stockQty} {product.unitType} sa stock · {formatPeso(product.price)}</GabiText>
+              <GabiText tone="muted" variant="caption">
+                {product.stockQty} {product.unitType} sa stock · {entry.sellingPriceState === "known" && product.price > 0 ? formatPeso(product.price) : "walang presyo"}
+              </GabiText>
             </View>
             <GabiSoftButton compact icon="close" label="Isara" onPress={onClose} />
           </View>
@@ -1903,19 +1985,15 @@ function ProductActionSheet({
                 tone="primary"
               />
               {entry.section === "needs_setup" ? (
-                <GabiChip label="Needs setup" tone="warning" />
+                <GabiChip label="Kulang pa" tone="warning" />
               ) : null}
               {entry.section === "archived" ? (
-                <GabiChip label="Archived" tone="neutral" />
+                <GabiChip label="Naka-archive" tone="neutral" />
               ) : null}
             </View>
             {entry.section === "needs_setup" ? (
               <GabiNotice
-                message={
-                  entry.actions.listForSale
-                    ? "Handa na ito. Piliin ang Ilagay sa Tindahan para maibenta sa Kiosk."
-                    : "May kulang pang detalye bago ito maibenta. Buksan ang Recipe para tapusin ito."
-                }
+                message={presentPanindaEntry(entry).reason ?? "May kulang pang detalye bago ito maibenta."}
                 tone="warning"
               />
             ) : null}
@@ -1973,6 +2051,30 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.sm,
     justifyContent: "space-between",
+  },
+  attentionList: {
+    gap: spacing.xs,
+  },
+  attentionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 60,
+    paddingVertical: spacing.sm,
+  },
+  attentionCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  attentionAction: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 2,
+    maxWidth: 150,
+  },
+  firstUseChoices: {
+    gap: spacing.sm,
   },
   summaryGrid: {
     flexDirection: "row",

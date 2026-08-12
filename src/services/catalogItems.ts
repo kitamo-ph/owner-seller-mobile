@@ -45,6 +45,10 @@ export type PanindaCatalogEntry = {
   bindingStatus: "active" | "archived";
   projectionRole: LegacyProjectionRole;
   stockPolicy: CatalogStockPolicy;
+  purchaseCostState: CostState;
+  sellingPriceState: CostState;
+  sellable: boolean;
+  kioskEnabled: boolean;
   reviewRequired: boolean;
   draftId: string | null;
   activeRecipeId: string | null;
@@ -69,6 +73,10 @@ export async function loadPanindaCatalog(
       sourceType: record.item.sourceType,
       bindingStatus: record.bindingStatus,
       stockPolicy: record.item.stockPolicy,
+      purchaseCostState: record.item.purchaseCostState,
+      sellingPriceState: record.item.sellingPriceState,
+      sellable: record.item.sellable,
+      kioskEnabled: record.item.kioskEnabled,
       productActive: record.product.active,
       hasDraft: record.draftId !== null,
       hasRecipe: record.activeRecipeId !== null,
@@ -88,6 +96,10 @@ export async function loadPanindaCatalog(
       bindingStatus: record.bindingStatus,
       projectionRole: record.projectionRole,
       stockPolicy: record.item.stockPolicy,
+      purchaseCostState: record.item.purchaseCostState,
+      sellingPriceState: record.item.sellingPriceState,
+      sellable: record.item.sellable,
+      kioskEnabled: record.item.kioskEnabled,
       reviewRequired:
         record.item.classificationReviewRequired ||
         record.bindingReviewRequired,
