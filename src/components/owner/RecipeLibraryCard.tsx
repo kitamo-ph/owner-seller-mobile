@@ -27,14 +27,10 @@ export type RecipeLibraryCardView = {
 };
 
 function costLabel(item: RecipeLibraryCardView) {
-  if (item.costStatus === "actual") return "Actual cost";
-  if (item.costStatus === "estimated") return "Estimated cost";
-  if (item.costStatus === "no_price") return "No price yet";
-  return "Cost incomplete";
-}
-
-function readinessLabel(ready: boolean, subject: string) {
-  return ready ? `Ready for ${subject}` : `Not ready for ${subject}`;
+  if (item.costStatus === "actual") return "Aktwal na cost";
+  if (item.costStatus === "estimated") return "Tantiyang cost";
+  if (item.costStatus === "no_price") return "Walang presyo";
+  return "May kulang sa cost";
 }
 
 export function RecipeLibraryCard({
@@ -64,7 +60,7 @@ export function RecipeLibraryCard({
       {highlighted ? (
         <GabiChip
           icon="checkmark-circle-outline"
-          label="Recipe ready — just published"
+          label="Handa na ang Recipe"
           tone="success"
         />
       ) : null}
@@ -136,31 +132,31 @@ export function RecipeLibraryCard({
           />
         ) : null}
         {item.usesEstimatedInput ? (
-          <GabiChip label="Uses an estimate" tone="warning" />
+          <GabiChip label="May tantiyang sangkap" tone="warning" />
         ) : null}
         {item.missingInformation ? (
-          <GabiChip label="Missing information" tone="danger" />
+          <GabiChip label="May kulang" tone="danger" />
         ) : null}
       </View>
 
       <View style={styles.moneyRow}>
         <View style={styles.metric}>
           <GabiText tone="faint" variant="eyebrow">
-            Unit cost
+            Cost kada unit
           </GabiText>
           <GabiText money variant="cardTitle">
             {item.unitCost === null
-              ? "Not available"
+              ? "Hindi pa makwenta"
               : `${formatPeso(item.unitCost)}/${item.unitLabel}`}
           </GabiText>
         </View>
         <View style={styles.metric}>
           <GabiText tone="faint" variant="eyebrow">
-            Selling price
+            Presyo ng benta
           </GabiText>
           <GabiText money variant="cardTitle">
             {item.sellingPrice === null
-              ? "No price yet"
+              ? "Walang presyo"
               : formatPeso(item.sellingPrice)}
           </GabiText>
         </View>
@@ -171,13 +167,13 @@ export function RecipeLibraryCard({
           tone={item.productionReady ? "success" : "warning"}
           variant="caption"
         >
-          {readinessLabel(item.productionReady, "production")}
+          {item.productionReady ? "Handa sa Production" : "Hindi pa handa sa Production"}
         </GabiText>
         <GabiText
           tone={item.kioskReady ? "success" : "muted"}
           variant="caption"
         >
-          {readinessLabel(item.kioskReady, "Kiosk")}
+          {item.kioskReady ? "Handa sa Benta" : "Hindi pa handa sa Benta"}
         </GabiText>
       </View>
 
@@ -195,7 +191,7 @@ export function RecipeLibraryCard({
             <GabiSoftButton
               compact
               icon="restaurant-outline"
-              label="Produce"
+              label="Mag-production"
               onPress={onProduce}
             />
           </View>

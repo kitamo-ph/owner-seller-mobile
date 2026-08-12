@@ -1457,14 +1457,17 @@ export default function OwnerRecipeEditorScreen() {
     const totalCost = parseOptionalNonNegative(estimateCost);
     const referenceQuantity = parsePositive(estimateReferenceQuantity);
     const quantity = parsePositive(estimateUsageQuantity);
+    if (estimateCost.trim() && totalCost === null) {
+      setMessage("Gumamit ng valid na presyong zero o mas mataas, o iwanang blanko muna.");
+      return;
+    }
     if (
       !estimateName.trim() ||
-      totalCost === null ||
       referenceQuantity === null ||
       quantity === null
     ) {
       setMessage(
-        "Enter the prepared ingredient, estimate, reference quantity, and usage.",
+        "Ilagay ang sangkap, reference quantity, at dami na gagamitin. Optional ang presyo.",
       );
       return;
     }
@@ -1479,6 +1482,47 @@ export default function OwnerRecipeEditorScreen() {
     );
     if (!estimateConversion.ok) {
       setMessage(estimateConversion.message);
+      return;
+    }
+
+    if (totalCost === null) {
+      const line: DraftLine = {
+        id: editingLineId ?? makeRecipeDraftLineId(),
+        businessId: base.draft.businessId,
+        recipeDraftId: base.draft.id,
+        sortOrder: base.lines.length,
+        sourceKind: "custom_cost",
+        catalogItemId: null,
+        childRecipeVersionId: null,
+        childDraftId: null,
+        customName: estimateName.trim(),
+        quantity,
+        unit: estimateUsageUnit,
+        normalizedQuantity: null,
+        normalizedUnit: null,
+        conversionId: null,
+        conversionFactorSnapshot: null,
+        conversionChainJson: null,
+        unitStandardSnapshot: null,
+        role: lineRole,
+        isOptional: lineRequirement === "Optional",
+        costOverride: null,
+        costState: "unknown",
+        costSource: "unknown",
+        costProfileId: null,
+        allocationMode: "none",
+        legacyIngredientLotId: null,
+        notes:
+          estimateNotes.trim() ||
+          `Tantiyang sangkap: reference ${referenceQuantity} ${estimateReferenceUnit}. Presyo hindi pa inilagay.`,
+      };
+      const saved = await runSave(() =>
+        persistExisting(base, replaceOrAppendLine(base.lines, line, editingLineId), 2),
+      );
+      if (!saved) return;
+      if (!(await reconcileReplacement(base, saved, editingLineId))) return;
+      closeIngredientSheet();
+      setSnackbar(`${estimateName.trim()} idinagdag · walang presyo`);
       return;
     }
 
@@ -1532,6 +1576,7 @@ export default function OwnerRecipeEditorScreen() {
     estimateUsageUnit,
     lineRole,
     lineRequirement,
+    persistExisting,
     piecesPerPack,
     portionsPerPiece,
     reconcileReplacement,
@@ -2195,6 +2240,20 @@ export default function OwnerRecipeEditorScreen() {
         setIngredientSheet("estimate");
         return;
       }
+      if (line.sourceKind === "custom_cost" && line.costSource === "unknown") {
+        setEstimateName(resolved?.displayName ?? line.customName ?? "");
+        setEstimateCost("");
+        setEstimateReferenceQuantity(String(line.quantity ?? ""));
+        setEstimateUsageQuantity(String(line.quantity ?? ""));
+        setEstimateNotes(line.notes ?? "");
+        const usage = line.unit?.toLocaleLowerCase() as RecipeFirstUnit;
+        if (usage && RECIPE_FIRST_UNITS.includes(usage)) {
+          setEstimateReferenceUnit(usage);
+          setEstimateUsageUnit(usage);
+        }
+        setIngredientSheet("estimate");
+        return;
+      }
       if (line.sourceKind === "child_recipe_version" && line.childRecipeVersionId) {
         setSelectedPreparedId(null);
         setPreparedUsageQuantity(String(line.quantity ?? ""));
@@ -2526,12 +2585,12 @@ export default function OwnerRecipeEditorScreen() {
         {step === 1 ? (
           <>
             <RecipeFirstStepHeader
-              message="Create the item and its Recipe together. Paninda is not required first."
+              message="Pangalanan ang lulutuin at piliin kung paano ito ibinebenta o ginagamit."
               step={1}
-              title="Basic information"
+              title="Ano ang lulutuin?"
             />
             <GabiCard>
-              <GabiSectionHeader title="What are you creating?" />
+              <GabiSectionHeader title="Anong uri ng Recipe ito?" />
               <RecipeFirstModePicker
                 disabled={Boolean(
                   snapshot && modeFromSnapshot(snapshot) !== "unsure",
@@ -2629,7 +2688,7 @@ export default function OwnerRecipeEditorScreen() {
                   : "Add the preparation inputs now. Yield comes in the next step."
               }
               step={2}
-              title="Ingredients"
+              title="Mga sangkap"
             />
             {snapshot ? (
               <RecipeContextCard
@@ -2727,9 +2786,9 @@ export default function OwnerRecipeEditorScreen() {
         {step === 3 ? (
           <>
             <RecipeFirstStepHeader
-              message="Review every cost and readiness label before marking the Recipe ready."
+              message="Suriin ang dami, cost, at anumang kulang bago markahang handa ang Recipe."
               step={3}
-              title="Review cost"
+              title="Suriin at i-save"
             />
             {snapshot ? (
               <RecipeContextCard
@@ -3754,7 +3813,7 @@ function IngredientModal(props: IngredientModalProps) {
             {props.sheet === "estimate" ? (
               <>
                 <GabiNotice
-                  message="This creates a prepared ingredient with an estimated cost. It is not automatically sellable, produced, or shown in Kiosk."
+                  message="Pwede munang ilagay ang dami kahit wala pang presyo. Mananatiling incomplete ang costing at blocked ang Production hanggang makumpleto ang presyo."
                   tone="warning"
                 />
                 <RecipeFirstField
@@ -3765,7 +3824,8 @@ function IngredientModal(props: IngredientModalProps) {
                 />
                 <RecipeFirstField
                   keyboardType="decimal-pad"
-                  label="Estimated cost"
+                  help="Optional. Iwanang blanko kung hindi pa alam; hindi ito gagawing ₱0."
+                  label="Tantiyang presyo (optional)"
                   onChangeText={props.onChangeEstimateCost}
                   placeholder="Example: 80"
                   value={props.estimateCost}
@@ -3825,7 +3885,7 @@ function IngredientModal(props: IngredientModalProps) {
                 {props.costMeasurement !== "Prepared batch recipe" ? (
                   <GabiPrimaryButton
                     icon="calculator-outline"
-                    label="Add Estimated Ingredient"
+                    label="Idagdag ang tantiyang sangkap"
                     onPress={props.onAddEstimate}
                   />
                 ) : null}

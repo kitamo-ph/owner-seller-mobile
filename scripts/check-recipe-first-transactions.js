@@ -1499,6 +1499,27 @@ async function checkRepositoryCostEvidenceGuards() {
   await assert.doesNotReject(() =>
     validateDraft(unknownDraftLine, 0, "business-1", evidenceDb),
   );
+  await assert.doesNotReject(() =>
+    validateDraft(
+      {
+        ...draftLine,
+        sourceKind: "custom_cost",
+        catalogItemId: null,
+        customName: "Mangga",
+        quantity: 1,
+        unit: "pcs",
+        costOverride: null,
+        costState: "unknown",
+        costSource: "unknown",
+        costProfileId: null,
+        legacyIngredientLotId: null,
+      },
+      0,
+      "business-1",
+      evidenceDb,
+    ),
+    "a countable estimated ingredient remains valid without inventing price evidence",
+  );
   await assert.rejects(
     () =>
       validateDraft(

@@ -21,7 +21,7 @@ import {
   GabiNotice,
   GabiSnackbar,
 } from "@/components/gabi/GabiFeedback";
-import { GabiCard, GabiIconButton } from "@/components/gabi/GabiSurface";
+import { GabiCard, GabiIconButton, GabiSectionHeader } from "@/components/gabi/GabiSurface";
 import { GabiText } from "@/components/gabi/GabiText";
 import {
   RecipeLibraryCard,
@@ -234,20 +234,21 @@ function sectionKey(entry: RecipeFirstLibraryEntry): RecipeLibraryGroup {
 }
 
 const sectionTitles: Record<RecipeLibraryGroup, string> = {
-  all: "Other items",
-  recipes: "Needs Review",
-  prepared: "Prepared Recipes",
-  ingredients: "Ingredients",
-  selling: "Finished Recipes",
-  resale: "Resale Products",
-  drafts: "Drafts",
-  archived: "Archived",
+  all: "Iba pang item",
+  recipes: "May kailangang suriin",
+  prepared: "Tinimplang Recipe",
+  ingredients: "Mga sangkap",
+  selling: "Handang ibenta",
+  resale: "Biniling paninda",
+  drafts: "Mga draft",
+  archived: "Naka-archive",
 };
 
 export default function OwnerRecipesScreen() {
   const params = useLocalSearchParams<{
     publishedItemId?: string | string[];
     group?: string | string[];
+    query?: string | string[];
   }>();
   const publishedItemId = Array.isArray(params.publishedItemId)
     ? params.publishedItemId[0]
@@ -255,6 +256,7 @@ export default function OwnerRecipesScreen() {
   const requestedGroup = Array.isArray(params.group)
     ? params.group[0]
     : params.group;
+  const requestedQuery = Array.isArray(params.query) ? params.query[0] : params.query;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { palette, extended } = useGabiTheme();
@@ -305,6 +307,8 @@ export default function OwnerRecipesScreen() {
                   : "all",
               );
               setSnackbar("Recipe ready — review production setup next");
+            } else if (requestedQuery) {
+              setSearch(requestedQuery);
             }
           }
         })
@@ -322,7 +326,7 @@ export default function OwnerRecipesScreen() {
       return () => {
         active = false;
       };
-    }, [publishedItemId, refresh, requestedGroup]),
+    }, [publishedItemId, refresh, requestedGroup, requestedQuery]),
   );
 
   const filtered = useMemo(() => {
@@ -369,6 +373,13 @@ export default function OwnerRecipesScreen() {
       }))
       .filter((section) => section.items.length > 0);
   }, [filtered, group]);
+  const attentionEntries = useMemo(
+    () => entries.filter((entry) => {
+      const view = cardView(entry);
+      return entry.lifecycle !== "archived" && (view.isDraft || view.missingInformation || view.costStatus === "no_price");
+    }).slice(0, 4),
+    [entries],
+  );
 
   const runAction = useCallback(async (operation: () => Promise<void>) => {
     if (actionLock.current) return;
@@ -550,10 +561,42 @@ export default function OwnerRecipesScreen() {
         <View />
         <AppTopBar
           eyebrow="Tindahan"
-          subtitle="Finished recipes, prepared recipes, drafts, ingredients, and resale products"
-          title="Recipe Book"
+          subtitle="Gumawa, kumpletuhin, at ihanda para sa Production"
+          title="Recipe"
         />
         <TindahanTabs active="recipes" />
+
+        {attentionEntries.length > 0 ? (
+          <GabiCard>
+            <GabiSectionHeader title="Unahin ito" />
+            <View style={styles.attentionList}>
+              {attentionEntries.map((entry) => {
+                const view = cardView(entry);
+                return (
+                  <Pressable
+                    accessibilityLabel={`${entry.name}. ${view.primaryActionLabel}`}
+                    accessibilityRole="button"
+                    key={entry.catalogItemId}
+                    onPress={() => void openEntry(entry)}
+                    style={styles.attentionRow}
+                  >
+                    <View style={[styles.attentionIcon, { backgroundColor: palette.softWarning }]}>
+                      <Ionicons color={palette.warning} name={view.isDraft ? "document-text-outline" : "alert-circle-outline"} size={19} />
+                    </View>
+                    <View style={styles.attentionCopy}>
+                      <GabiText numberOfLines={1} variant="buttonSm">{entry.name}</GabiText>
+                      <GabiText numberOfLines={2} tone="warning" variant="caption">
+                        {view.isDraft ? "Draft pa — ituloy ang Recipe." : view.costStatus === "no_price" ? "May sangkap na walang presyo." : "May kailangang kumpletuhin bago mag-production."}
+                      </GabiText>
+                    </View>
+                    <GabiText tone="primary" variant="buttonSm">{view.isDraft ? "Ituloy" : "Ayusin"}</GabiText>
+                    <Ionicons color={palette.primary} name="chevron-forward" size={16} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </GabiCard>
+        ) : null}
 
         <View
           style={[
@@ -563,9 +606,9 @@ export default function OwnerRecipesScreen() {
         >
           <Ionicons color={palette.mutedText} name="search" size={20} />
           <TextInput
-            accessibilityLabel="Search Recipe Book"
+            accessibilityLabel="Hanapin sa Recipe"
             onChangeText={setSearch}
-            placeholder="Search recipes and items"
+            placeholder="Hanapin ang Recipe o sangkap"
             placeholderTextColor={extended.textFaint}
             style={[styles.searchInput, { color: palette.text }]}
             value={search}
@@ -600,15 +643,15 @@ export default function OwnerRecipesScreen() {
           <GabiCard>
             <GabiEmptyState
               icon="storefront-outline"
-              message="Choose a business from the Owner context to open its Recipe Book."
-              title="No business selected"
+                  message="Pumili muna ng negosyo sa Owner context."
+                  title="Walang napiling negosyo"
             />
           </GabiCard>
         ) : null}
         {loading ? (
           <GabiCard>
             <GabiText tone="muted" variant="body">
-              Loading Recipe Book…
+              Binabasa ang Recipe…
             </GabiText>
           </GabiCard>
         ) : null}
@@ -623,8 +666,8 @@ export default function OwnerRecipesScreen() {
               }
               title={
                 search || group !== "all" || costFilter !== "all"
-                  ? "No matching items"
-                  : "No Recipe Book items yet"
+                  ? "Walang nahanap"
+                  : "Wala pang Recipe"
               }
             />
           </GabiCard>
@@ -713,7 +756,7 @@ export default function OwnerRecipesScreen() {
               <View style={styles.sheetActions}>
                 <GabiPrimaryButton
                   icon="create-outline"
-                  label="Create a new recipe"
+                  label="Gumawa ng bagong Recipe"
                   onPress={() => {
                     setActions(null);
                     router.push("/owner/recipe-editor" as never);
@@ -721,7 +764,7 @@ export default function OwnerRecipesScreen() {
                 />
                 <GabiSoftButton
                   icon="restaurant-outline"
-                  label="Produce from Recipe"
+                  label="Mag-production mula sa Recipe"
                   onPress={() => {
                     setActions(null);
                     router.push("/owner/production");
@@ -833,6 +876,28 @@ export default function OwnerRecipesScreen() {
 }
 
 const styles = StyleSheet.create({
+  attentionList: {
+    gap: spacing.xs,
+  },
+  attentionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 60,
+    paddingVertical: spacing.sm,
+  },
+  attentionIcon: {
+    alignItems: "center",
+    borderRadius: 12,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  attentionCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
   search: {
     alignItems: "center",
     borderRadius: 16,

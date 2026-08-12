@@ -30,25 +30,25 @@ const groups: {
   label: string;
   icon: IoniconName;
 }[] = [
-  { value: "all", label: "All", icon: "apps-outline" },
-  { value: "selling", label: "Finished Recipes", icon: "pricetag-outline" },
-  { value: "prepared", label: "Prepared Recipes", icon: "flask-outline" },
-  { value: "drafts", label: "Drafts", icon: "document-text-outline" },
-  { value: "ingredients", label: "Ingredients", icon: "leaf-outline" },
-  { value: "resale", label: "Resale Products", icon: "basket-outline" },
-  { value: "recipes", label: "Needs Review", icon: "alert-circle-outline" },
-  { value: "archived", label: "Archived", icon: "archive-outline" },
+  { value: "all", label: "Lahat", icon: "apps-outline" },
+  { value: "selling", label: "Handa ibenta", icon: "pricetag-outline" },
+  { value: "prepared", label: "Tinimpla", icon: "flask-outline" },
+  { value: "drafts", label: "Draft", icon: "document-text-outline" },
+  { value: "ingredients", label: "Sangkap", icon: "leaf-outline" },
+  { value: "resale", label: "Biniling paninda", icon: "basket-outline" },
+  { value: "recipes", label: "May kulang", icon: "alert-circle-outline" },
+  { value: "archived", label: "Naka-archive", icon: "archive-outline" },
 ];
 
 const costFilters: {
   value: RecipeLibraryCostFilter;
   label: string;
 }[] = [
-  { value: "all", label: "Any cost" },
-  { value: "actual", label: "Actual" },
-  { value: "estimated", label: "Estimated" },
-  { value: "no_price", label: "No price" },
-  { value: "incomplete", label: "Incomplete" },
+  { value: "all", label: "Lahat ng cost" },
+  { value: "actual", label: "Aktwal" },
+  { value: "estimated", label: "Tantiya" },
+  { value: "no_price", label: "Walang presyo" },
+  { value: "incomplete", label: "May kulang" },
 ];
 
 function FilterButton({
@@ -112,7 +112,7 @@ export function RecipeLibraryFilters({
 }) {
   return (
     <View style={styles.container}>
-      <GabiText variant="buttonSm">Show</GabiText>
+      <GabiText variant="buttonSm">Ipakita</GabiText>
       <ScrollView
         contentContainerStyle={styles.row}
         horizontal
@@ -129,7 +129,7 @@ export function RecipeLibraryFilters({
         ))}
       </ScrollView>
 
-      <GabiText variant="buttonSm">Cost status</GabiText>
+      <GabiText variant="buttonSm">Kalagayan ng cost</GabiText>
       <ScrollView
         contentContainerStyle={styles.row}
         horizontal

@@ -55,7 +55,7 @@ export function RecipeFirstStepHeader({
       <View style={styles.stepTitleRow}>
         <View style={styles.stepTitleCopy}>
           <GabiText tone="primary" variant="eyebrow">
-            Step {step} of 3
+            Hakbang {step} sa 3
           </GabiText>
           <GabiText variant="h1">{title}</GabiText>
         </View>
@@ -90,22 +90,22 @@ const modeOptions: {
 }[] = [
   {
     mode: "finished_per_unit",
-    title: "Finished product sold per piece or serving",
+    title: "Pagkaing ibinebenta kada piraso o serving",
     detail:
-      "For sushi, burgers, drinks, rice meals, and other individually sold food.",
+      "Para sa sushi, burger, inumin, rice meal, at iba pang paisa-isang benta.",
     icon: "fast-food-outline",
   },
   {
     mode: "prepared_batch",
-    title: "Prepared ingredient or base",
+    title: "Tinimplang sangkap o base",
     detail:
-      "For cooked rice, sauce, broth, filling, dough, and other batch preparations.",
+      "Para sa kanin, sauce, sabaw, filling, dough, at ibang batch preparation.",
     icon: "flask-outline",
   },
   {
     mode: "unsure",
-    title: "I am not sure yet",
-    detail: "Save a draft now and choose the final classification later.",
+    title: "Hindi pa ako sigurado",
+    detail: "I-save muna bilang draft at piliin ang final na uri mamaya.",
     icon: "help-circle-outline",
   },
 ];

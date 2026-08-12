@@ -208,9 +208,9 @@ assertOrdered(
   "if (entry.activeVersionId)",
   "Recipe Library grouping must remain classification-first",
 );
-assert.match(recipeLibrary, /prepared: "Prepared Recipes"/);
-assert.match(recipeLibrary, /selling: "Finished Recipes"/);
-assert.match(recipeLibrary, /recipes: "Needs Review"/);
+assert.match(recipeLibrary, /prepared: "Tinimplang Recipe"/);
+assert.match(recipeLibrary, /selling: "Handang ibenta"/);
+assert.match(recipeLibrary, /recipes: "May kailangang suriin"/);
 assertOrdered(
   recipeLibrary.slice(recipeLibrary.indexOf("const order: RecipeLibraryGroup[]")),
   '"selling"',
@@ -224,12 +224,12 @@ assert.match(recipeLibrary, /setSnackbar\("Recipe ready/);
 assert.match(recipeLibrary, /highlighted=\{entry\.catalogItemId === publishedItemId\}/);
 
 const libraryFilters = read("src/components/owner/RecipeLibraryFilters.tsx");
-assert.match(libraryFilters, /label: "Finished Recipes"/);
-assert.match(libraryFilters, /label: "Prepared Recipes"/);
-assert.match(libraryFilters, /label: "Needs Review"/);
+assert.match(libraryFilters, /label: "Handa ibenta"/);
+assert.match(libraryFilters, /label: "Tinimpla"/);
+assert.match(libraryFilters, /label: "May kulang"/);
 
 const recipeCard = read("src/components/owner/RecipeLibraryCard.tsx");
-assert.match(recipeCard, /Recipe ready — just published/);
+assert.match(recipeCard, /Handa na ang Recipe/);
 
 const versioningService = read("src/services/recipeVersioning.ts");
 assert.match(

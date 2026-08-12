@@ -356,9 +356,9 @@ const inventorySource = fs.readFileSync(
 );
 assert.match(
   inventorySource,
-  /Handa na ito\. Piliin ang Ilagay sa Tindahan para maibenta sa Kiosk\./,
+  /presentPanindaEntry\(entry\)\.reason/,
 );
-assert.match(inventorySource, /Needs Setup/);
+assert.match(inventorySource, /May kulang bago maibenta/);
 assert.match(inventorySource, /sectionBanner/);
 assert.match(inventorySource, /borderRadius: 20/);
 
@@ -381,11 +381,19 @@ const recipesSource = fs.readFileSync(
   path.join(workspace, "app/owner/recipes.tsx"),
   "utf8",
 );
-assert.match(recipesSource, /Produce from Recipe/);
+assert.match(recipesSource, /Mag-production mula sa Recipe/);
 assert.match(
   recipesSource,
   /params:\s*\{\s*recipeId:\s*entry\.activeRecipeId/,
 );
+
+// Turn 7: a countable ingredient can be saved without inventing a zero price.
+assert.match(editorSource, /label="Tantiyang presyo \(optional\)"/);
+assert.match(editorSource, /sourceKind: "custom_cost"/);
+assert.match(editorSource, /costState: "unknown"/);
+assert.match(editorSource, /costOverride: null/);
+assert.match(editorSource, /unit: estimateUsageUnit/);
+assert.match(editorSource, /Presyo hindi pa inilagay/);
 
 const plannerSource = fs.readFileSync(
   path.join(workspace, "src/services/productionPlanner.ts"),
