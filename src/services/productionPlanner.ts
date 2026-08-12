@@ -26,6 +26,8 @@ import type {
   RecipeGraphVersion,
 } from "@/domain/recipeGraph";
 import { validateRecipeGraph } from "@/domain/recipeGraph";
+import { makeProductionPlanId } from "@/domain/ids";
+import type { CostState } from "@/domain/costState";
 import { loadOwnerSetupStatus } from "./ownerSetup";
 
 export type NativeProductionReadinessEntry = {
@@ -33,6 +35,7 @@ export type NativeProductionReadinessEntry = {
   versionId: string;
   catalogItemId: string;
   productId: string | null;
+  productBranchId: string | null;
   name: string;
   classification: "finished_product" | "prepared_base";
   expectedOutputQuantity: number;
@@ -166,11 +169,13 @@ export async function loadNativeProductionReadiness(
   await runMigrations(db);
   const owner = await loadOwnerSetupStatus(db);
   if (!owner.activeBusiness) return [];
+  const businessId = owner.activeBusiness.id;
   const rows = await db.getAllAsync<{
     recipe_id: string;
     version_id: string;
     catalog_item_id: string;
     product_id: string | null;
+    product_branch_id: string | null;
     name: string;
     classification: "finished_product" | "prepared_base";
     expected_output_quantity: number;
@@ -183,6 +188,7 @@ export async function loadNativeProductionReadiness(
       SELECT recipe.id AS recipe_id, version.id AS version_id,
         item.id AS catalog_item_id,
         product_projection.id AS product_id,
+        product_projection.branch_id AS product_branch_id,
         version.name_snapshot AS name, item.classification,
         version.expected_output_quantity, version.expected_output_unit,
         version.graph_state, version.cost_state AS version_cost_state,
@@ -228,7 +234,7 @@ export async function loadNativeProductionReadiness(
         AND recipe.deleted_at IS NULL
       ORDER BY version.name_snapshot COLLATE NOCASE ASC, version.id ASC
     `,
-    [owner.activeBusiness.id],
+    [businessId],
   );
 
   return Promise.all(
@@ -242,6 +248,7 @@ export async function loadNativeProductionReadiness(
           versionId: row.version_id,
           catalogItemId: row.catalog_item_id,
           productId: row.product_id,
+          productBranchId: row.product_branch_id,
           name: row.name,
           classification: row.classification,
           expectedOutputQuantity: row.expected_output_quantity,
@@ -274,6 +281,31 @@ export async function loadNativeProductionReadiness(
       if (rootLines.length === 0) {
         missingRequirements.push("Published Recipe has no input lines.");
       }
+      const rootCatalogIds = rootLines.flatMap((line) =>
+        line.sourceKind === "catalog_item" && line.catalogItemId
+          ? [line.catalogItemId]
+          : [],
+      );
+      const simpleCatalogRows = rootCatalogIds.length > 0
+        ? await db.getAllAsync<{ id: string; classification: string }>(
+            `SELECT id, classification FROM catalog_items WHERE business_id = ? AND id IN (${rootCatalogIds.map(() => "?").join(", ")}) AND deleted_at IS NULL`,
+            [businessId, ...rootCatalogIds],
+          )
+        : [];
+      const simpleCatalogClassifications = new Map(
+        simpleCatalogRows.map((item) => [item.id, item.classification]),
+      );
+      const unsupportedSimpleInput = rootLines.some(
+        (line) =>
+          line.sourceKind !== "catalog_item" ||
+          !line.catalogItemId ||
+          simpleCatalogClassifications.get(line.catalogItemId) !== "purchased_ingredient",
+      );
+      if (!nested && unsupportedSimpleInput) {
+        missingRequirements.push(
+          "Simple native Production currently requires Grocery-backed ingredient lines. Complete prepared or estimated inputs as Grocery or nested Recipes first.",
+        );
+      }
       // Producing stock is upstream of selling it. This used to additionally
       // require `products.active = 1`, which conflated "on sale" with
       // "producible" and made every freshly published Recipe unproducible.
@@ -301,13 +333,15 @@ export async function loadNativeProductionReadiness(
         !validation.ok ||
         row.graph_state !== "complete" ||
         rootLines.length === 0 ||
-        missingProductProjection;
+        missingProductProjection ||
+        (!nested && unsupportedSimpleInput);
       const executionBlocked = graphBlocked || costIncomplete;
       return {
         recipeId: row.recipe_id,
         versionId: row.version_id,
         catalogItemId: row.catalog_item_id,
         productId: row.product_id,
+        productBranchId: row.product_branch_id,
         name: row.name,
         classification: row.classification,
         expectedOutputQuantity: row.expected_output_quantity,
@@ -328,6 +362,115 @@ export async function loadNativeProductionReadiness(
         missingRequirements,
       };
     }),
+  );
+}
+
+/**
+ * Builds and persists the exact single-stage native plan used by the Owner UI.
+ * Every positive stock row carries one real Ingredient lot and its current
+ * cost evidence; no compatibility zero or caller-authored Recipe graph enters
+ * the saved plan.
+ */
+export async function createSimpleNativeProductionPlan(
+  input: {
+    recipeId: string;
+    versionId: string;
+    branchId: string;
+    targetQuantity: number;
+    targetUnit: string;
+  },
+  db: RepositoryDatabase = openKitamoDatabase(),
+) {
+  await runMigrations(db);
+  const owner = await loadOwnerSetupStatus(db);
+  if (!owner.activeBusiness) {
+    throw new Error("Pumili muna ng negosyo para sa Production.");
+  }
+  if (!owner.branches.some((branch) => branch.id === input.branchId && branch.active)) {
+    throw new Error("Pumili ng active stall para sa Production.");
+  }
+  if (!Number.isFinite(input.targetQuantity) || input.targetQuantity <= 0) {
+    throw new Error("Production quantity must be greater than zero.");
+  }
+  const readiness = (await loadNativeProductionReadiness(db)).find(
+    (entry) => entry.recipeId === input.recipeId && entry.versionId === input.versionId,
+  );
+  if (
+    !readiness ||
+    readiness.status !== "ready_for_planning" ||
+    readiness.kind !== "finished_per_unit" ||
+    readiness.expectedOutputUnit !== input.targetUnit
+  ) {
+    throw new Error(
+      readiness?.missingRequirements[0] ??
+        "This Recipe is not eligible for simple native Production.",
+    );
+  }
+  if (readiness.productBranchId && readiness.productBranchId !== input.branchId) {
+    throw new Error("Piliin ang stall kung saan naka-bind ang Paninda record ng Recipe.");
+  }
+
+  const lots = await db.getAllAsync<{
+    id: string;
+    catalog_item_id: string;
+    remaining_quantity: number;
+    unit: string;
+    cost_state: CostState;
+    recorded_cost_per_unit: number | null;
+  }>(
+    `
+      SELECT lot.id, binding.catalog_item_id, lot.remaining_quantity,
+        lot.unit, lot.cost_state, lot.recorded_cost_per_unit
+      FROM ingredient_lots lot
+      INNER JOIN legacy_item_bindings binding
+        ON binding.business_id = lot.business_id
+        AND binding.entity_kind = 'ingredient'
+        AND binding.legacy_entity_id = lot.ingredient_id
+        AND binding.binding_status = 'active'
+        AND binding.deleted_at IS NULL
+      WHERE lot.business_id = ?
+        AND lot.remaining_quantity > 0
+        AND lot.status != 'archived'
+        AND lot.deleted_at IS NULL
+      ORDER BY
+        CASE WHEN lot.expiry_date IS NULL THEN 1 ELSE 0 END,
+        lot.expiry_date ASC, lot.purchase_date ASC, lot.created_at ASC, lot.id ASC
+    `,
+    [owner.activeBusiness.id],
+  );
+  const observedAt = new Date().toISOString();
+  return calculateAndSaveProductionPlan(
+    {
+      businessId: owner.activeBusiness.id,
+      branchId: input.branchId,
+      rootRecipeId: input.recipeId,
+      planner: {
+        planId: makeProductionPlanId(),
+        rootVersionId: input.versionId,
+        targetQuantity: input.targetQuantity,
+        targetUnit: input.targetUnit,
+        mode: "prepare_fresh",
+        versions: [],
+        preparedStock: [],
+        rawStock: lots.map((lot) => ({
+          itemId: lot.catalog_item_id,
+          quantity: lot.remaining_quantity,
+          unit: lot.unit,
+          costState: lot.cost_state,
+          authoritativeUnitCost:
+            lot.cost_state === "known" ? lot.recorded_cost_per_unit : null,
+          lotKind: "ingredient" as const,
+          lotId: lot.id,
+          allocationMode: "recommended_fefo" as const,
+          normalizedQuantity: lot.remaining_quantity,
+          normalizedUnit: lot.unit,
+          conversionId: null,
+          conversionFactorSnapshot: 1,
+        })),
+        observedAt,
+      },
+    },
+    db,
   );
 }
 

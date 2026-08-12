@@ -9,6 +9,7 @@ import { GabiEmptyState, GabiNotice, GabiSkeleton } from "@/components/gabi/Gabi
 import { GabiCard, GabiChip, GabiSectionHeader } from "@/components/gabi/GabiSurface";
 import { GabiText } from "@/components/gabi/GabiText";
 import { RecipeMakeableCard } from "@/components/owner/RecipeMakeableCard";
+import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
 import type { ProductionBatchWithNames } from "@/db/repositories";
 import { planProduction } from "@/domain/productionMath";
@@ -16,15 +17,25 @@ import { loadGroceryPoolSnapshot, type GroceryPoolSnapshot } from "@/services/gr
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
 import { listRecentProduction, recordProduction, type ProductionResult } from "@/services/production";
 import {
+  createSimpleNativeProductionPlan,
   loadNativeProductionReadiness,
   type NativeProductionReadinessEntry,
 } from "@/services/productionPlanner";
+import {
+  executeSimpleNativeProductionPlan,
+  type SimpleNativeProductionResult,
+} from "@/services/nativeProductionExecutor";
 import { buildCostingLines, loadRecipesOverview, type RecipesOverview } from "@/services/recipes";
 import { radius } from "@/theme/radius";
 import { spacing } from "@/theme/spacing";
 import { useGabiTheme } from "@/theme/useGabiTheme";
 import { getFriendlyErrorMessage, getUserSafeErrorMessage, logDevError } from "@/utils/errors";
 import { numbersOnlyMessage, parseRequiredNumber } from "@/utils/numberInput";
+
+type ReadyNativePlan = Extract<
+  Awaited<ReturnType<typeof createSimpleNativeProductionPlan>>,
+  { ok: true }
+>;
 
 export default function OwnerProductionScreen() {
   const { recipeId: requestedRecipeId } = useLocalSearchParams<{ recipeId?: string }>();
@@ -44,6 +55,11 @@ export default function OwnerProductionScreen() {
 
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+  const [selectedNativeRecipeId, setSelectedNativeRecipeId] = useState<string | null>(null);
+  const [nativeQuantity, setNativeQuantity] = useState("");
+  const [nativePlan, setNativePlan] = useState<ReadyNativePlan | null>(null);
+  const [nativeLastResult, setNativeLastResult] = useState<SimpleNativeProductionResult | null>(null);
+  const [nativeReviewVisible, setNativeReviewVisible] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -89,6 +105,11 @@ export default function OwnerProductionScreen() {
     setSelectedRecipeId((current) => {
       if (requestedRecipeId && selectableRecipes.some((item) => item.recipe.id === requestedRecipeId)) return requestedRecipeId;
       if (current && selectableRecipes.some((item) => item.recipe.id === current)) return current;
+      return null;
+    });
+    setSelectedNativeRecipeId((current) => {
+      if (requestedRecipeId && nextNativeReadiness.some((item) => item.recipeId === requestedRecipeId)) return requestedRecipeId;
+      if (current && nextNativeReadiness.some((item) => item.recipeId === current)) return current;
       return null;
     });
   }, [requestedRecipeId]);
@@ -149,6 +170,12 @@ export default function OwnerProductionScreen() {
     [overview?.items],
   );
   const selectedBranch = branches.find((branch) => branch.id === selectedBranchId) ?? null;
+  const selectedNativeEntry = nativeReadiness.find((entry) => entry.recipeId === selectedNativeRecipeId) ?? null;
+  const nativeBranches = selectedNativeEntry?.productBranchId
+    ? branches.filter((branch) => branch.id === selectedNativeEntry.productBranchId)
+    : branches;
+  const selectedNativeBranch = nativeBranches.find((branch) => branch.id === selectedBranchId) ?? null;
+  const parsedNativeQuantity = parseRequiredNumber(nativeQuantity, 0);
   const selectedItem = activeRecipes.find((item) => item.recipe.id === selectedRecipeId) ?? null;
   const selectedProduct = status?.products.find((product) => product.id === selectedItem?.recipe.outputProductId) ?? null;
   const lotMap = useMemo(() => new Map((grocery?.lots ?? []).map((lot) => [lot.id, lot])), [grocery?.lots]);
@@ -257,9 +284,92 @@ export default function OwnerProductionScreen() {
     }
   }
 
+  async function planNativeProduction() {
+    if (!selectedNativeEntry || !selectedBranchId) {
+      setMessage("Piliin muna ang Recipe at stall para sa Production.");
+      setMessageIsError(true);
+      return;
+    }
+    if (parsedNativeQuantity === "invalid" || parsedNativeQuantity <= 0) {
+      setMessage("Ilagay kung ilang piraso ang ipo-produce.");
+      setMessageIsError(true);
+      return;
+    }
+    if (selectedNativeEntry.status !== "ready_for_planning" || selectedNativeEntry.kind !== "finished_per_unit") {
+      setMessage(selectedNativeEntry.missingRequirements[0] ?? "Hindi pa handa ang Recipe sa simple native Production.");
+      setMessageIsError(true);
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await createSimpleNativeProductionPlan({
+        recipeId: selectedNativeEntry.recipeId,
+        versionId: selectedNativeEntry.versionId,
+        branchId: selectedBranchId,
+        targetQuantity: parsedNativeQuantity,
+        targetUnit: selectedNativeEntry.expectedOutputUnit,
+      });
+      if (!result.ok) {
+        setMessage(result.error.message);
+        setMessageIsError(true);
+        return;
+      }
+      setNativePlan(result);
+      if (
+        result.saved.plan.status !== "ready" ||
+        !result.calculation.costComplete ||
+        result.calculation.expectedCost === null
+      ) {
+        setMessage(
+          result.calculation.missingCostCount > 0
+            ? "May sangkap na walang presyo. Hindi gagawing ₱0 ang Production cost."
+            : "Kulang ang exact Grocery stock para sa daming ito.",
+        );
+        setMessageIsError(true);
+        return;
+      }
+      setNativeReviewVisible(true);
+      setMessageIsError(false);
+    } catch (error) {
+      logDevError("OwnerProduction.planNative", error);
+      setMessage(getUserSafeErrorMessage(error, "Hindi makagawa ng exact Production plan."));
+      setMessageIsError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveNativeProduction() {
+    if (!nativePlan || saving || saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
+    try {
+      const result = await executeSimpleNativeProductionPlan(nativePlan.saved.plan.id);
+      setNativeLastResult(result);
+      setLastBranchId(selectedBranchId);
+      setNativeReviewVisible(false);
+      setSuccessVisible(true);
+      setNativeQuantity("");
+      setNativePlan(null);
+      setMessage(null);
+      setMessageIsError(false);
+      await refresh();
+    } catch (error) {
+      logDevError("OwnerProduction.executeNative", error);
+      setNativeReviewVisible(false);
+      setMessage(getUserSafeErrorMessage(error, "Hindi ma-save ang native Production."));
+      setMessageIsError(true);
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
+    }
+  }
+
   function closeSuccess() {
     setSuccessVisible(false);
     setLastResult(null);
+    setNativeLastResult(null);
   }
 
   function openKioskAfterProduction() {
@@ -275,9 +385,11 @@ export default function OwnerProductionScreen() {
       <ScreenScroll bottomNav>
         <AppTopBar
           backHref="/owner/inventory"
-          subtitle="Eksaktong lot deduction at cost snapshot"
-          title="Niluto / Production"
+          eyebrow="Tindahan"
+          subtitle="Pumili ng Recipe, dami, at stall"
+          title="Production"
         />
+        <TindahanTabs active="production" />
 
         {loadError ? (
           <>
@@ -339,17 +451,19 @@ export default function OwnerProductionScreen() {
 
         {ready && hasBusiness && nativeReadiness.length > 0 ? (
           <>
-            <GabiSectionHeader title="Native Recipe production readiness" />
-            <GabiNotice
-              message="This is definition-only, read-only planning context. It validates published Recipe identity, graph, and cost evidence without calculating stock allocations or entering the protected legacy production transaction. Reviewing it does not reserve, deduct, or add stock."
-              title="Definition-only · no inventory mutation"
-              tone="owner"
-            />
+            <GabiSectionHeader title="Anong Recipe ang ipo-produce?" />
             <View style={styles.selectionList}>
               {orderedNativeReadiness.map((entry) => (
                 <NativeProductionReadinessCard
                   entry={entry}
                   key={entry.versionId}
+                  onSelect={() => {
+                    setSelectedNativeRecipeId(entry.recipeId);
+                    if (entry.productBranchId) setSelectedBranchId(entry.productBranchId);
+                    setNativeQuantity("");
+                    setNativePlan(null);
+                    setMessage(null);
+                  }}
                   onOpenRecipe={() =>
                     router.push({
                       pathname: "/owner/recipes",
@@ -363,9 +477,88 @@ export default function OwnerProductionScreen() {
                     })
                   }
                   requested={entry.recipeId === requestedRecipeId}
+                  selected={entry.recipeId === selectedNativeRecipeId}
                 />
               ))}
             </View>
+
+            {selectedNativeEntry ? (
+              <>
+                <GabiSectionHeader title="Saan mapupunta ang naluto?" />
+                <View style={styles.selectionList}>
+                  {nativeBranches.map((branch) => (
+                    <SelectionRow
+                      description={branch.location ?? "Local stall"}
+                      icon="storefront-outline"
+                      key={branch.id}
+                      onPress={() => {
+                        setSelectedBranchId(branch.id);
+                        setNativePlan(null);
+                        setMessage(null);
+                      }}
+                      selected={branch.id === selectedBranchId}
+                      title={branch.branchName}
+                    />
+                  ))}
+                </View>
+
+                {selectedNativeEntry.status === "ready_for_planning" && selectedNativeEntry.kind === "finished_per_unit" ? (
+                  <>
+                    <GabiSectionHeader title="Ilang piraso ang ipo-produce?" />
+                    <GabiCard raised style={styles.quantityCard}>
+                      <TextInput
+                        accessibilityLabel={`Production quantity in ${selectedNativeEntry.expectedOutputUnit}`}
+                        editable={!saving}
+                        keyboardType="decimal-pad"
+                        onChangeText={(value) => {
+                          setNativeQuantity(value);
+                          setNativePlan(null);
+                          setMessage(null);
+                        }}
+                        placeholder="Halimbawa 30"
+                        placeholderTextColor={extended.textFaint}
+                        selectTextOnFocus
+                        style={[styles.quantityInput, { color: palette.primary }]}
+                        value={nativeQuantity}
+                      />
+                      <GabiText tone="faint" variant="buttonSm">{selectedNativeEntry.expectedOutputUnit}</GabiText>
+                    </GabiCard>
+                    <View style={styles.quickRow}>
+                      {[1, 10, 30].map((value) => (
+                        <QuickQuantity key={value} label={String(value)} onPress={() => setNativeQuantity(String(value))} />
+                      ))}
+                    </View>
+                    {message ? <GabiNotice message={message} tone={messageIsError ? "danger" : "success"} /> : null}
+                    {nativePlan && nativePlan.calculation.rawRequirements.some((item) => item.missingQuantity > 0) ? (
+                      <GabiCard>
+                        {nativePlan.calculation.rawRequirements.filter((item) => item.missingQuantity > 0).map((item) => (
+                          <GabiNotice
+                            key={`${item.itemId}:${item.unit}`}
+                            message={`Kailangan ${formatQuantity(item.quantity)} ${item.unit}; kulang ng ${formatQuantity(item.missingQuantity)} ${item.unit}.`}
+                            title={`Kulang ang ${item.label}`}
+                            tone="danger"
+                          />
+                        ))}
+                        <GabiSoftButton icon="basket-outline" label="Buksan ang Grocery" onPress={() => router.push("/owner/grocery")} />
+                      </GabiCard>
+                    ) : null}
+                    <GabiPrimaryButton
+                      disabled={saving || !selectedNativeBranch || parsedNativeQuantity === "invalid" || parsedNativeQuantity <= 0}
+                      icon="calculator-outline"
+                      label={saving ? "Kinukuwenta..." : "Suriin ang gagamiting stock"}
+                      loading={saving}
+                      onPress={() => void planNativeProduction()}
+                    />
+                  </>
+                ) : (
+                  <GabiNotice
+                    message={selectedNativeEntry.missingRequirements[0] ?? "Nested at prepared Recipe execution ay hindi pa suportado ng simple native executor."}
+                    title="Hindi pa puwedeng i-produce"
+                    tone="danger"
+                  />
+                )}
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -617,6 +810,46 @@ export default function OwnerProductionScreen() {
         ) : null}
       </ScreenScroll>
 
+      <Modal animationType="fade" onRequestClose={() => !saving && setNativeReviewVisible(false)} transparent visible={nativeReviewVisible}>
+        <View style={[styles.scrim, { backgroundColor: extended.scrim }]}>
+          <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
+            <GabiText variant="h1">Suriin bago i-save</GabiText>
+            {nativePlan && selectedNativeEntry && selectedNativeBranch ? (
+              <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+                <View style={[styles.reviewSummary, { backgroundColor: palette.softPrimary }]}>
+                  <GabiText money tone="primary" variant="heroPeso">{formatQuantity(nativePlan.calculation.targetQuantity)}</GabiText>
+                  <View style={styles.reviewCopy}>
+                    <GabiText variant="buttonSm">{nativePlan.calculation.targetUnit} · {selectedNativeEntry.name}</GabiText>
+                    <GabiText tone="muted" variant="caption">{selectedNativeBranch.branchName} · exact native plan</GabiText>
+                  </View>
+                </View>
+                <GabiText tone="faint" variant="eyebrow">Babawasin sa Grocery</GabiText>
+                {nativePlan.calculation.rawRequirements.map((requirement) => (
+                  <View key={`${requirement.itemId}:${requirement.unit}`} style={[styles.deductionRow, { borderBottomColor: palette.border }]}>
+                    <View style={styles.deductionCopy}>
+                      <GabiText variant="buttonSm">{requirement.label}</GabiText>
+                      <GabiText tone="muted" variant="caption">Exact FEFO/FIFO lot allocation</GabiText>
+                    </View>
+                    <GabiText tone="danger" variant="buttonSm">−{formatQuantity(requirement.quantity)} {requirement.unit}</GabiText>
+                  </View>
+                ))}
+                <View style={[styles.costBar, { backgroundColor: palette.kioskHeader }]}>
+                  <View style={styles.costBarCopy}>
+                    <GabiText tone="inverse" variant="caption">Kabuuang Production cost</GabiText>
+                    <GabiText money tone="inverse" variant="heroPeso">{formatPeso(nativePlan.calculation.expectedCost as number)}</GabiText>
+                  </View>
+                  <GabiChip label="Handa" tone="success" />
+                </View>
+                <GabiPrimaryButton icon="save-outline" label="Tama — i-save ang Production" loading={saving} onPress={() => void saveNativeProduction()} />
+                <GabiSoftButton disabled={saving} label="Bumalik" onPress={() => setNativeReviewVisible(false)} />
+                <GabiNotice message="Isang SQLite transaction ang exact lot deductions, production batch, Paninda lot, stock projection, movements, at cost snapshot." tone="owner" />
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       <Modal animationType="fade" onRequestClose={() => !saving && setReviewVisible(false)} transparent visible={reviewVisible}>
         <View style={[styles.scrim, { backgroundColor: extended.scrim }]}>
           <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
@@ -681,7 +914,31 @@ export default function OwnerProductionScreen() {
 
       <Modal animationType="slide" onRequestClose={closeSuccess} visible={successVisible}>
         <View style={[styles.successScreen, { backgroundColor: palette.background, paddingTop: insets.top + spacing.xl, paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
-          {lastResult ? (
+          {nativeLastResult ? (
+            <>
+              <View style={[styles.successIcon, { backgroundColor: palette.softSuccess }]}>
+                <Ionicons color={palette.success} name="checkmark" size={48} />
+              </View>
+              <GabiText tone="success" variant="h2">Naitala ang Production!</GabiText>
+              <GabiText money style={styles.successAmount} variant="displayPeso">
+                +{formatQuantity(nativeLastResult.outputQuantity)} {nativeLastResult.outputUnit}
+              </GabiText>
+              <GabiText style={styles.successCenter} variant="h1">{selectedNativeEntry?.name ?? "Native Recipe"}</GabiText>
+              <GabiText style={styles.successCenter} tone="muted" variant="body">
+                Nadagdag sa Paninda ang exact product lot · Gastos {formatPeso(nativeLastResult.totalCost)}
+              </GabiText>
+              <View style={styles.successActions}>
+                <GabiPrimaryButton icon="storefront-outline" label="Benta na — buksan ang Kiosk" onPress={openKioskAfterProduction} />
+                <GabiSoftButton icon="cube-outline" label="Tingnan sa Paninda" onPress={() => {
+                  setSuccessVisible(false);
+                  setNativeLastResult(null);
+                  router.replace("/owner/inventory");
+                }} />
+                <GabiSoftButton icon="refresh" label="Mag-production ulit" onPress={closeSuccess} />
+              </View>
+              <GabiNotice message="Naka-snapshot ang cost at exact ingredient lots. Ito ang gagamiting COGS kapag naibenta." tone="success" />
+            </>
+          ) : lastResult ? (
             <>
               <View style={[styles.successIcon, { backgroundColor: palette.softSuccess }]}>
                 <Ionicons color={palette.success} name="checkmark" size={48} />
@@ -718,19 +975,23 @@ export default function OwnerProductionScreen() {
 function NativeProductionReadinessCard({
   entry,
   onOpenRecipe,
+  onSelect,
   requested,
+  selected,
 }: {
   entry: NativeProductionReadinessEntry;
   onOpenRecipe: () => void;
+  onSelect: () => void;
   requested: boolean;
+  selected: boolean;
 }) {
   const { palette } = useGabiTheme();
   const statusLabel =
     entry.status === "blocked"
-      ? "Blocked"
+      ? "May kulang"
       : entry.status === "staged_execution_deferred"
-        ? "Staged definition"
-        : "Definition only";
+        ? "Nested"
+        : "Handa";
   const statusTone =
     entry.status === "blocked"
       ? "danger"
@@ -748,7 +1009,7 @@ function NativeProductionReadinessCard({
     <GabiCard
       raised
       style={
-        requested
+        requested || selected
           ? { borderColor: palette.primary, borderWidth: 2 }
           : undefined
       }
@@ -756,7 +1017,7 @@ function NativeProductionReadinessCard({
       {requested ? (
         <GabiChip
           icon="navigate-circle-outline"
-          label="Requested from Paninda"
+          label="Galing sa Paninda"
           tone="primary"
         />
       ) : null}
@@ -772,12 +1033,12 @@ function NativeProductionReadinessCard({
 
       {entry.status === "staged_execution_deferred" ? (
         <GabiNotice
-          message="Preparation plan ready; staged production will be enabled in the next production phase."
+          message="May nested o prepared Recipe ito. Hindi ito papatakbuhin sa simple single-stage executor."
           tone="warning"
         />
       ) : entry.status === "ready_for_planning" ? (
         <GabiNotice
-          message="The published definition is eligible for a future read-only stock plan. Stock allocation has not been calculated here, and native stock execution remains intentionally disabled."
+          message="Handa para sa exact Grocery-lot plan at atomic native execution."
           tone="success"
         />
       ) : null}
@@ -790,12 +1051,18 @@ function NativeProductionReadinessCard({
         />
       ))}
 
-      <GabiSoftButton
-        compact
-        icon="book-outline"
-        label="Buksan ang Recipe Book"
-        onPress={onOpenRecipe}
-      />
+      <View style={styles.buttonRow}>
+        <View style={styles.buttonGrow}>
+          {entry.status === "ready_for_planning" ? (
+            <GabiPrimaryButton compact icon="checkmark-circle-outline" label={selected ? "Napili" : "Piliin"} onPress={onSelect} />
+          ) : (
+            <GabiSoftButton compact icon="alert-circle-outline" label={selected ? "Napili" : "Tingnan ang kulang"} onPress={onSelect} />
+          )}
+        </View>
+        <View style={styles.buttonGrow}>
+          <GabiSoftButton compact icon="book-outline" label="Buksan ang Recipe" onPress={onOpenRecipe} />
+        </View>
+      </View>
     </GabiCard>
   );
 }

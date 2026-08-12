@@ -282,7 +282,9 @@ async function resolveLotBackedOutputProduct(input: {
   if ((input.branchId ?? null) !== (product.branch_id ?? null)) {
     throw new Error("Plan branch does not match the Product projection branch.");
   }
-  if (product.unit_type !== input.expectedOutputUnit) {
+  const normalizedProductUnit = product.unit_type === "piece" ? "pcs" : product.unit_type;
+  const normalizedRecipeUnit = input.expectedOutputUnit === "piece" ? "pcs" : input.expectedOutputUnit;
+  if (normalizedProductUnit !== normalizedRecipeUnit) {
     throw new Error("Product stock unit does not match the Recipe output unit.");
   }
 
@@ -538,15 +540,14 @@ async function executeInsideTransaction(
     );
   }
   if (
-    !approximatelyEqual(
-      version.expected_output_quantity,
-      stage.expected_output_quantity,
-    ) ||
+    !Number.isFinite(version.expected_output_quantity) ||
+    version.expected_output_quantity <= 0 ||
+    !approximatelyEqual(stage.expected_output_quantity, plan.targetQuantity) ||
     version.expected_output_unit !== stage.expected_output_unit ||
     version.expected_output_unit !== plan.targetUnit
   ) {
     throw new Error(
-      "Plan output quantity/unit no longer matches the pinned Recipe version.",
+      "Plan output target/unit no longer matches its pinned Recipe calculation.",
     );
   }
 
@@ -842,7 +843,7 @@ async function executeInsideTransaction(
       productionBatchId: batchId,
       originDate: timestamp.slice(0, 10),
       quantity: outputQuantity,
-      unit: stage.expected_output_unit,
+      unit: product.unit_type,
       recordedTotalCost: totalCost,
       recordedCostPerUnit: costPerOutput,
       costState: "known",

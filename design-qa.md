@@ -474,3 +474,57 @@ Automated gates:
 Remaining visual issues: none at P0, P1, or P2.
 
 final result: passed
+
+## Turn 7: Tindahan Product Completion Pass
+
+Reference sources:
+
+- `/tmp/kitamo-turn7.W9DiDj/turn7-board-full.png`, rendered from `KitaMo Tindahan.dc.html`, Turn 7 sections 7a-7p
+- `kitamo-shared.css` and `handoff/kitamo-tokens.json` from the approved Turn 7 package
+
+Android evidence:
+
+- `/tmp/kitamo-turn7-tindahan-paninda-2.png`
+- `/tmp/kitamo-turn7-grocery-final.png`
+- `/tmp/kitamo-turn7-recipe-final.png`
+- `/tmp/kitamo-turn7-production-final-2.png`
+
+Test target:
+
+- Android API 28 low-end emulator
+- 1080 x 1920 captured viewport
+- Expo Go with local Metro port reversed through ADB
+- existing seeded demo business and stall data
+
+Compared states:
+
+- Paninda operational landing, summaries, attention-first next actions, and four-area workspace navigation
+- Grocery value summary, real missing-cost Recipe impact, preserved lots, and purchase action
+- Recipe Book search, purpose and cost filters, visible incomplete states, and creation action
+- Production stall selection, native Recipe selection, known per-piece cost, and batch-output presentation
+
+Verified:
+
+- the Turn 7 violet/off-white visual language, rounded surfaces, icon treatment, active-stall context, and large action hierarchy match the supplied reference direction
+- Paninda, Grocery, Recipe, and Production remain one understandable workspace instead of a new deep navigation structure
+- attention cards explain actual next actions; unknown costs are never presented as zero
+- Grocery keeps distinct lot evidence and exposes `Dagdag bili` without flattening cost history
+- Recipe keeps prepared bases visually distinct and surfaces cost state and blocking work before Production
+- Production shows only the real native Recipe path as executable, selects an actual stall, previews persisted cost/output facts, and sends successful output into authoritative Product stock
+- a naturally countable estimated ingredient remains valid in `pcs`; missing estimated price persists as unknown and blocks Production until resolved
+- no per-stall listing toggle is fabricated because the current lifecycle model supports business/catalog listing scope rather than a safe branch-listing model
+- no schema, migration, package, identity, dependency, signing, or AAB change was introduced for the Turn 7 pass
+- source capture and implementation screenshots were reviewed together; no P0, P1, or P2 visual mismatch remained in the primary four-area journey
+
+Environment observation:
+
+- the API 35 16 KB emulator's Pixel Launcher became unresponsive before app inspection, so visual QA moved to the stable API 28 low-end emulator; the first Expo load also required the expected ADB reverse for local Metro, after which the application rendered and navigated normally
+
+Design adaptations:
+
+- no product or ingredient photography is shown because the local data model has no authoritative media source
+- no per-stall listing controls were added because the existing supported lifecycle is not stall-scoped
+- incomplete-cost Production follows the protected executor and offers the fixing path instead of the mockup's permissive record action
+- Production uses existing Recipe output and Product unit compatibility, including the guarded `pcs` to `piece` finished-stock projection
+
+final result: passed

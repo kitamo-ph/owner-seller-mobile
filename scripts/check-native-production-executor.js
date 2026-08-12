@@ -736,8 +736,13 @@ async function run() {
   const migrations = loadMigrations();
   assert.equal(
     migrations.at(-1)?.id,
-    "017_native_production_execution",
-    "latest migration must be native production execution",
+    "018_guided_onboarding",
+    "native production migration must remain present before the append-only onboarding migration",
+  );
+  assert.equal(
+    migrations.some((migration) => migration.id === "017_native_production_execution"),
+    true,
+    "native production execution migration must remain registered",
   );
   const { executeSimpleNativeProductionPlan } = loadExecutorModules();
 
@@ -893,6 +898,27 @@ async function run() {
       10,
     );
     console.log("idempotent retry: passed");
+  }
+
+  // Native Recipe `pcs` maps only at the existing Product projection boundary;
+  // the authoritative Product lot keeps its protected `piece` stock unit.
+  {
+    const { db } = await createDatabase(migrations);
+    const { planId } = await seedSimpleFinishedPlan(db, {
+      planId: "plan-piece-projection",
+      stageId: "stage-piece-projection",
+    });
+    await db.runAsync(
+      `UPDATE products SET unit_type = 'piece' WHERE id = 'product-bread'`,
+    );
+    const result = await executeSimpleNativeProductionPlan(planId, db);
+    const productLot = await db.getFirstAsync(
+      `SELECT unit FROM product_stock_lots WHERE id = ?`,
+      [result.productStockLotId],
+    );
+    assert.equal(result.outputUnit, "pcs");
+    assert.equal(productLot.unit, "piece");
+    console.log("Recipe pcs to Product piece projection: passed");
   }
 
   // 3. STALE RECIPE VERSION

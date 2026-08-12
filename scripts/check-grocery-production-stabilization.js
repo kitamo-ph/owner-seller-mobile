@@ -383,14 +383,19 @@ if (nativeReader.includes("product_projection.active = 1")) {
 }
 assertIncludes(
   productionUi,
-  "Preparation plan ready; staged production will be enabled in the next production phase.",
-  "definition-only nested Production explanation",
+  "May nested o prepared Recipe ito. Hindi ito papatakbuhin sa simple single-stage executor.",
+  "nested Production fail-closed explanation",
 );
-assertIncludes(productionUi, "Native Recipe production readiness", "separate native Production section");
+assertIncludes(productionUi, "Anong Recipe ang ipo-produce?", "separate native Production section");
 assertIncludes(
   productionUi,
-  "Definition-only · no inventory mutation",
-  "definition-only native planning label",
+  "createSimpleNativeProductionPlan",
+  "native planner execution boundary",
+);
+assertIncludes(
+  productionUi,
+  "executeSimpleNativeProductionPlan",
+  "native executor execution boundary",
 );
 assertIncludes(
   productionUi,
@@ -404,7 +409,7 @@ assertIncludes(
 );
 assertIncludes(
   productionUi,
-  'label="Requested from Paninda"',
+  'label="Galing sa Paninda"',
   "requested native Recipe visible highlight",
 );
 assertIncludes(
@@ -429,7 +434,7 @@ assertIncludes(
   'boundary.versioning_state !== "legacy_compat"',
   "native Recipe fail-closed service guard",
 );
-console.log("native Production readiness is listed without a mutation path: passed");
+console.log("native Production uses the protected planner/executor while nested shapes remain blocked: passed");
 
 const databasePath = path.join(
   os.tmpdir(),
