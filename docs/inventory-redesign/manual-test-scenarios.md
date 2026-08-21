@@ -10,6 +10,9 @@
 These scenarios describe future verification. No checkbox or expected result
 below is evidence that a scenario has already run.
 
+The current end-to-end physical-device launch gate is
+[Owner Launch Journey — Physical Android Device Test](../qa/owner-launch-journey-device-test.md).
+
 ## Execution record template
 
 Before executing any scenario, record:
