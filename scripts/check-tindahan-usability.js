@@ -56,8 +56,10 @@ const {
   RECIPE_FIRST_UNITS,
 } = require(path.join(outDir, "recipeFirst.js"));
 const {
+  resolveKnownSellingPrice,
   resolvePanindaActionPolicy,
   resolvePanindaSection,
+  resolveProductionSuccessContinuation,
 } = require(path.join(outDir, "catalogItems.js"));
 const {
   buildPanindaActionDescriptors,
@@ -361,12 +363,92 @@ assert.match(
 assert.match(inventorySource, /May kulang bago maibenta/);
 assert.match(inventorySource, /sectionBanner/);
 assert.match(inventorySource, /borderRadius: 20/);
+assert.match(inventorySource, /sellingPrice === null \? "Walang presyo"/);
+assert.doesNotMatch(
+  inventorySource.slice(
+    inventorySource.indexOf("function InventoryProductRow"),
+    inventorySource.indexOf("function ProductActionSheet"),
+  ),
+  /\{formatPeso\(product\.price\)\}/,
+);
+
+const productionSource = fs.readFileSync(
+  path.join(workspace, "app/owner/production.tsx"),
+  "utf8",
+);
+assert.match(productionSource, /loadCatalogReadiness\(result\.outputCatalogItemId/);
+assert.match(productionSource, /resolveProductionSuccessContinuation/);
+assert.match(productionSource, /"Ilagay sa Tindahan"/);
+assert.match(productionSource, /"Benta na — buksan ang Kiosk"/);
+assert.doesNotMatch(
+  productionSource,
+  /listInventoryCatalogItemForSale/,
+  "Production must not list a Product without the explicit Paninda action",
+);
 
 // Defect 6 branch (a): native Recipe routes to Produce, not manual cook
 const recipeActions = resolvePanindaActionPolicy(policyBase);
 assert.equal(recipeActions.produceFromRecipe, true);
 assert.equal(recipeActions.manualCompatibilityStockIn, false);
 assert.equal(recipeActions.listForSale, true);
+
+// Production success derives its CTA from authoritative Paninda policy and
+// CatalogReadiness results for the exact produced Product.
+const productionIdentity = {
+  producedCatalogItemId: "catalog-finished",
+  producedProductId: "product-finished",
+  panindaCatalogItemId: "catalog-finished",
+  panindaProductId: "product-finished",
+  readinessProductId: "product-finished",
+};
+assert.equal(
+  resolveProductionSuccessContinuation({
+    ...productionIdentity,
+    availableInKiosk: false,
+    listForSale: true,
+  }),
+  "list_for_sale",
+  "an unlisted produced Product continues to explicit listing",
+);
+assert.equal(
+  resolveProductionSuccessContinuation({
+    ...productionIdentity,
+    availableInKiosk: true,
+    listForSale: false,
+  }),
+  "open_kiosk",
+  "a listed and eligible produced Product may continue to Kiosk",
+);
+assert.equal(
+  resolveProductionSuccessContinuation({
+    ...productionIdentity,
+    availableInKiosk: true,
+    listForSale: true,
+  }),
+  "open_paninda",
+  "contradictory authoritative states fail closed",
+);
+assert.equal(
+  resolveProductionSuccessContinuation({
+    ...productionIdentity,
+    readinessProductId: "different-product",
+    availableInKiosk: true,
+    listForSale: false,
+  }),
+  "open_paninda",
+  "a mismatched Product binding never exposes Kiosk",
+);
+
+assert.equal(
+  resolveKnownSellingPrice({ sellingPriceState: "unknown", legacyPrice: 0 }),
+  null,
+  "unknown selling price never presents the legacy zero scalar",
+);
+assert.equal(
+  resolveKnownSellingPrice({ sellingPriceState: "known", legacyPrice: 120 }),
+  120,
+  "known positive selling price remains visible",
+);
 
 const descriptors = buildPanindaActionDescriptors({
   actions: recipeActions,

@@ -21,7 +21,10 @@ import { GabiText } from "@/components/gabi/GabiText";
 import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { createProduct, updateProduct } from "@/db/repositories";
-import type { PanindaSection } from "@/domain/catalogItems";
+import {
+  resolveKnownSellingPrice,
+  type PanindaSection,
+} from "@/domain/catalogItems";
 import {
   buildPanindaActionDescriptors,
   buildPanindaActionSheetLayout,
@@ -1773,6 +1776,10 @@ function InventoryProductRow({
   const product = entry.product;
   const { palette, extended } = useGabiTheme();
   const presentation = presentPanindaEntry(entry);
+  const sellingPrice = resolveKnownSellingPrice({
+    sellingPriceState: entry.sellingPriceState,
+    legacyPrice: product.price,
+  });
   const outOfStock = product.stockQty <= 0;
   const lowStock = !outOfStock && product.stockQty <= product.lowStockThreshold;
   const bundleLabel = hasBundlePricing(product)
@@ -1835,8 +1842,8 @@ function InventoryProductRow({
           )}
         </Pressable>
         <View style={styles.productTrailing}>
-          <GabiText money tone="primary" variant="metricValue">
-            {formatPeso(product.price)}
+          <GabiText money={sellingPrice !== null} tone="primary" variant="metricValue">
+            {sellingPrice === null ? "Walang presyo" : formatPeso(sellingPrice)}
           </GabiText>
           {entry.purchaseCostState === "known" ? (
             <GabiText tone="faint" variant="caption">Puhunan {formatPeso(product.cost)}</GabiText>

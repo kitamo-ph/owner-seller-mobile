@@ -1,5 +1,6 @@
 import {
   type CostEvidence,
+  type CostState,
   validateCostEvidence,
 } from "./costState";
 
@@ -64,6 +65,52 @@ export type PanindaActionPolicy = {
   restoreFromArchive: boolean;
   requestPermanentDelete: boolean;
 };
+
+export type ProductionSuccessContinuation =
+  | "open_kiosk"
+  | "list_for_sale"
+  | "open_paninda";
+
+/**
+ * Chooses the post-Production action from existing authoritative decisions.
+ * It deliberately does not reproduce listing or Kiosk eligibility rules:
+ * callers supply the Paninda action policy and CatalogReadiness result.
+ */
+export function resolveProductionSuccessContinuation(input: {
+  producedCatalogItemId: string;
+  producedProductId: string;
+  panindaCatalogItemId: string | null;
+  panindaProductId: string | null;
+  readinessProductId: string | null;
+  availableInKiosk: boolean;
+  listForSale: boolean;
+}): ProductionSuccessContinuation {
+  const exactProductResolved =
+    input.panindaCatalogItemId === input.producedCatalogItemId &&
+    input.panindaProductId === input.producedProductId &&
+    input.readinessProductId === input.producedProductId;
+
+  if (!exactProductResolved) return "open_paninda";
+
+  // These authoritative results cannot both describe the same valid state.
+  // Fail closed instead of guessing which one is stale or contradictory.
+  if (input.availableInKiosk && input.listForSale) return "open_paninda";
+  if (input.availableInKiosk) return "open_kiosk";
+  if (input.listForSale) return "list_for_sale";
+  return "open_paninda";
+}
+
+/** Returns only an authoritative, positive selling price for presentation. */
+export function resolveKnownSellingPrice(input: {
+  sellingPriceState: CostState;
+  legacyPrice: number;
+}): number | null {
+  return input.sellingPriceState === "known" &&
+    Number.isFinite(input.legacyPrice) &&
+    input.legacyPrice > 0
+    ? input.legacyPrice
+    : null;
+}
 
 /** Classifications the owner may put on sale from Paninda. */
 export const LISTABLE_CLASSIFICATIONS: readonly CatalogClassification[] = [

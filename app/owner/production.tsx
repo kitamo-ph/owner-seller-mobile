@@ -12,7 +12,15 @@ import { RecipeMakeableCard } from "@/components/owner/RecipeMakeableCard";
 import { TindahanTabs } from "@/components/owner/TindahanTabs";
 import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
 import type { ProductionBatchWithNames } from "@/db/repositories";
+import {
+  resolveProductionSuccessContinuation,
+  type ProductionSuccessContinuation,
+} from "@/domain/catalogItems";
 import { planProduction } from "@/domain/productionMath";
+import {
+  loadCatalogReadiness,
+  loadPanindaCatalog,
+} from "@/services/catalogItems";
 import { loadGroceryPoolSnapshot, type GroceryPoolSnapshot } from "@/services/groceryPool";
 import { loadOwnerSetupStatus, type OwnerSetupStatus } from "@/services/ownerSetup";
 import { listRecentProduction, recordProduction, type ProductionResult } from "@/services/production";
@@ -59,6 +67,8 @@ export default function OwnerProductionScreen() {
   const [nativeQuantity, setNativeQuantity] = useState("");
   const [nativePlan, setNativePlan] = useState<ReadyNativePlan | null>(null);
   const [nativeLastResult, setNativeLastResult] = useState<SimpleNativeProductionResult | null>(null);
+  const [nativeSuccessContinuation, setNativeSuccessContinuation] =
+    useState<ProductionSuccessContinuation>("open_paninda");
   const [nativeReviewVisible, setNativeReviewVisible] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
@@ -346,7 +356,36 @@ export default function OwnerProductionScreen() {
     setSaving(true);
     try {
       const result = await executeSimpleNativeProductionPlan(nativePlan.saved.plan.id);
+      let continuation: ProductionSuccessContinuation = "open_paninda";
+      try {
+        const businessId = status?.activeBusiness?.id;
+        if (businessId) {
+          const [catalog, readiness] = await Promise.all([
+            loadPanindaCatalog(businessId),
+            loadCatalogReadiness(result.outputCatalogItemId, selectedBranchId),
+          ]);
+          const entry = catalog.find(
+            (candidate) =>
+              candidate.catalogItemId === result.outputCatalogItemId,
+          );
+          continuation = resolveProductionSuccessContinuation({
+            producedCatalogItemId: result.outputCatalogItemId,
+            producedProductId: result.outputProductId,
+            panindaCatalogItemId: entry?.catalogItemId ?? null,
+            panindaProductId: entry?.product.id ?? null,
+            readinessProductId: readiness?.productId ?? null,
+            availableInKiosk: readiness?.readiness.availableInKiosk ?? false,
+            listForSale: entry?.actions.listForSale ?? false,
+          });
+        }
+      } catch (continuationError) {
+        logDevError(
+          "OwnerProduction.resolveNativeSuccessContinuation",
+          continuationError,
+        );
+      }
       setNativeLastResult(result);
+      setNativeSuccessContinuation(continuation);
       setLastBranchId(selectedBranchId);
       setNativeReviewVisible(false);
       setSuccessVisible(true);
@@ -370,6 +409,7 @@ export default function OwnerProductionScreen() {
     setSuccessVisible(false);
     setLastResult(null);
     setNativeLastResult(null);
+    setNativeSuccessContinuation("open_paninda");
   }
 
   function openKioskAfterProduction() {
@@ -378,6 +418,21 @@ export default function OwnerProductionScreen() {
     setLastResult(null);
     if (branchId) router.replace({ pathname: "/kiosk", params: { branchId } });
     else router.replace("/kiosk");
+  }
+
+  function openNativeSuccessContinuation() {
+    const result = nativeLastResult;
+    if (!result) return;
+    if (nativeSuccessContinuation === "open_kiosk") {
+      openKioskAfterProduction();
+      return;
+    }
+    setSuccessVisible(false);
+    setNativeLastResult(null);
+    router.replace({
+      pathname: "/owner/product-detail",
+      params: { catalogItemId: result.outputCatalogItemId },
+    });
   }
 
   return (
@@ -928,14 +983,35 @@ export default function OwnerProductionScreen() {
                 Nadagdag sa Paninda ang exact product lot · Gastos {formatPeso(nativeLastResult.totalCost)}
               </GabiText>
               <View style={styles.successActions}>
-                <GabiPrimaryButton icon="storefront-outline" label="Benta na — buksan ang Kiosk" onPress={openKioskAfterProduction} />
-                <GabiSoftButton icon="cube-outline" label="Tingnan sa Paninda" onPress={() => {
-                  setSuccessVisible(false);
-                  setNativeLastResult(null);
-                  router.replace("/owner/inventory");
-                }} />
+                <GabiPrimaryButton
+                  icon={nativeSuccessContinuation === "open_paninda" ? "cube-outline" : "storefront-outline"}
+                  label={
+                    nativeSuccessContinuation === "open_kiosk"
+                      ? "Benta na — buksan ang Kiosk"
+                      : nativeSuccessContinuation === "list_for_sale"
+                        ? "Ilagay sa Tindahan"
+                        : "Tingnan sa Paninda"
+                  }
+                  onPress={openNativeSuccessContinuation}
+                />
+                {nativeSuccessContinuation !== "open_paninda" ? (
+                  <GabiSoftButton icon="cube-outline" label="Tingnan sa Paninda" onPress={() => {
+                    setSuccessVisible(false);
+                    setNativeLastResult(null);
+                    router.replace({
+                      pathname: "/owner/product-detail",
+                      params: { catalogItemId: nativeLastResult.outputCatalogItemId },
+                    });
+                  }} />
+                ) : null}
                 <GabiSoftButton icon="refresh" label="Mag-production ulit" onPress={closeSuccess} />
               </View>
+              {nativeSuccessContinuation === "open_paninda" ? (
+                <GabiNotice
+                  message="Hindi pa kumpirmadong available ito sa Kiosk. Suriin ang listing at setup sa Paninda."
+                  tone="warning"
+                />
+              ) : null}
               <GabiNotice message="Naka-snapshot ang cost at exact ingredient lots. Ito ang gagamiting COGS kapag naibenta." tone="success" />
             </>
           ) : lastResult ? (
