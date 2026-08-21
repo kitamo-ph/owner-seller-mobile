@@ -11,7 +11,11 @@ import { GabiText } from "@/components/gabi/GabiText";
 import { AppTopBar, formatPeso, formatQuantity, ScreenScroll } from "@/components/ui/KitaMoUI";
 import { listProductStockLots, type ProductionBatchWithNames } from "@/db/repositories";
 import { presentPanindaEntry } from "@/domain/tindahanPresentation";
-import { loadPanindaCatalog, type PanindaCatalogEntry } from "@/services/catalogItems";
+import {
+  loadCatalogReadiness,
+  loadPanindaCatalog,
+  type PanindaCatalogEntry,
+} from "@/services/catalogItems";
 import { listInventoryCatalogItemForSale } from "@/services/itemLifecycle";
 import { loadOwnerSetupStatus } from "@/services/ownerSetup";
 import { listRecentProduction } from "@/services/production";
@@ -28,6 +32,7 @@ export default function OwnerProductDetailScreen() {
   const [entry, setEntry] = useState<PanindaCatalogEntry | null>(null);
   const [batches, setBatches] = useState<ProductionBatchWithNames[]>([]);
   const [lotCount, setLotCount] = useState(0);
+  const [kioskBranchId, setKioskBranchId] = useState<string | null>(null);
   const [price, setPrice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,6 +44,7 @@ export default function OwnerProductDetailScreen() {
       const status = await loadOwnerSetupStatus();
       if (!status.activeBusiness || !catalogItemId) {
         setEntry(null);
+        setKioskBranchId(null);
         return;
       }
       const catalog = await loadPanindaCatalog(status.activeBusiness.id);
@@ -46,12 +52,25 @@ export default function OwnerProductDetailScreen() {
       setEntry(found);
       setPrice(found && found.product.price > 0 ? String(found.product.price) : "");
       if (found) {
+        const readiness = await loadCatalogReadiness(
+          found.catalogItemId,
+          status.activeBranch?.id ?? null,
+        );
+        setKioskBranchId(
+          status.activeBranch &&
+            readiness?.productId === found.product.id &&
+            readiness.readiness.availableInKiosk
+            ? status.activeBranch.id
+            : null,
+        );
         const [recent, lots] = await Promise.all([
           listRecentProduction(50),
           listProductStockLots(found.product.id),
         ]);
         setBatches(recent.filter((batch) => batch.outputProductId === found.product.id));
         setLotCount(lots.filter((lot) => lot.status === "active" && lot.remainingQuantity > 0).length);
+      } else {
+        setKioskBranchId(null);
       }
     } catch (error) {
       logDevError("OwnerProductDetail.refresh", error);
@@ -136,7 +155,18 @@ export default function OwnerProductDetailScreen() {
           ) : null}
 
           <View style={styles.actions}>
-            {entry.activeRecipeId ? <GabiPrimaryButton icon="flame-outline" label="Mag-production" onPress={() => router.push({ pathname: "/owner/production", params: { recipeId: entry.activeRecipeId ?? "" } })} /> : null}
+            {kioskBranchId ? (
+              <GabiPrimaryButton
+                icon="storefront-outline"
+                label="Benta na — buksan ang Kiosk"
+                onPress={() => router.push({ pathname: "/kiosk", params: { branchId: kioskBranchId } })}
+              />
+            ) : entry.activeRecipeId ? (
+              <GabiPrimaryButton icon="flame-outline" label="Mag-production" onPress={() => router.push({ pathname: "/owner/production", params: { recipeId: entry.activeRecipeId ?? "" } })} />
+            ) : null}
+            {kioskBranchId && entry.activeRecipeId ? (
+              <GabiSoftButton icon="flame-outline" label="Mag-production pa" onPress={() => router.push({ pathname: "/owner/production", params: { recipeId: entry.activeRecipeId ?? "" } })} />
+            ) : null}
             {entry.activeRecipeId || entry.draftId ? <GabiSoftButton icon="book-outline" label="Buksan ang Recipe" onPress={() => {
               if (entry.draftId) router.push({ pathname: "/owner/recipe-editor", params: { draftId: entry.draftId } });
               else router.push({ pathname: "/owner/recipe-detail", params: { recipeId: entry.activeRecipeId ?? "" } });

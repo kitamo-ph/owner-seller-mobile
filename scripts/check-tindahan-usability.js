@@ -386,6 +386,21 @@ assert.doesNotMatch(
   "Production must not list a Product without the explicit Paninda action",
 );
 
+const productDetailSource = fs.readFileSync(
+  path.join(workspace, "app/owner/product-detail.tsx"),
+  "utf8",
+);
+assert.match(productDetailSource, /loadCatalogReadiness/);
+assert.match(productDetailSource, /readiness\.readiness\.availableInKiosk/);
+assert.match(productDetailSource, /label="Benta na — buksan ang Kiosk"/);
+
+const checkoutSource = fs.readFileSync(
+  path.join(workspace, "app/kiosk/checkout.tsx"),
+  "utf8",
+);
+assert.match(checkoutSource, /label="Bagong benta"/);
+assert.match(checkoutSource, /label="Owner Home \/ Kita"/);
+
 // Defect 6 branch (a): native Recipe routes to Produce, not manual cook
 const recipeActions = resolvePanindaActionPolicy(policyBase);
 assert.equal(recipeActions.produceFromRecipe, true);

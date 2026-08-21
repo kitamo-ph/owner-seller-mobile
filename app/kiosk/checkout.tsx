@@ -208,6 +208,7 @@ export default function KioskCheckoutScreen() {
         />
         <GabiPrimaryButton icon="add" label="Bagong benta" onPress={() => router.replace("/kiosk/sell")} />
         <GabiSoftButton icon="receipt-outline" label="Tingnan ang Orders" onPress={() => router.replace("/kiosk/orders")} />
+        <GabiSoftButton icon="home-outline" label="Owner Home / Kita" onPress={() => router.replace("/owner")} />
         {!messageIsError && message ? <GabiSnackbar message={message} onDismiss={() => setMessage(null)} /> : null}
       </ScreenScroll>
     );
