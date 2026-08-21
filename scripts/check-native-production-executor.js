@@ -144,7 +144,7 @@ function loadExecutorModules() {
       throw new Error(`Unexpected executor import: ${request}`);
     },
   );
-  return executor;
+  return { executor, productStockLots };
 }
 
 function sqlLiteral(value) {
@@ -744,7 +744,17 @@ async function run() {
     true,
     "native production execution migration must remain registered",
   );
-  const { executeSimpleNativeProductionPlan } = loadExecutorModules();
+  const { executor, productStockLots } = loadExecutorModules();
+  const { executeSimpleNativeProductionPlan } = executor;
+  const kioskSalesSource = fs.readFileSync(
+    path.join(workspace, "src/services/kioskSales.ts"),
+    "utf8",
+  );
+  assert.match(
+    kioskSalesSource,
+    /eligibleItem\?\.stockPolicy === "product_lots"[\s\S]*?deductAvailableProductStockLotsWithScalarProjection/,
+    "Kiosk checkout must route lot-backed Products through exact lot deduction",
+  );
 
   // 1. HAPPY PATH + 2. IDEMPOTENT RETRY
   {
@@ -773,6 +783,7 @@ async function run() {
     assert.equal(batch.output_quantity, 10);
     assert.equal(batch.output_unit, "pcs");
     assert.equal(batch.total_batch_cost, 12);
+
     assert.equal(batch.actual_total_cost, 12);
     assert.equal(batch.cost_state, "known");
 
@@ -898,6 +909,35 @@ async function run() {
       10,
     );
     console.log("idempotent retry: passed");
+
+    let deductions = null;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      deductions =
+        await productStockLots.deductAvailableProductStockLotsWithScalarProjection(
+          {
+            businessId: BUSINESS,
+            productId: first.outputProductId,
+            quantity: 1,
+            movementType: "stock_out_sale",
+            movementReason: "Golden journey checkout",
+          },
+          txn,
+        );
+    });
+    assert.deepEqual(deductions, [
+      { lotId: first.productStockLotId, quantity: 1 },
+    ]);
+    const postSaleStock = await db.getFirstAsync(
+      `SELECT product.stock_qty AS scalar_quantity,
+        lot.remaining_quantity AS lot_quantity
+       FROM products product
+       INNER JOIN product_stock_lots lot ON lot.product_id = product.id
+       WHERE product.id = ? AND lot.id = ?`,
+      [first.outputProductId, first.productStockLotId],
+    );
+    assert.equal(postSaleStock.scalar_quantity, 9);
+    assert.equal(postSaleStock.lot_quantity, 9);
+    console.log("exact Product-lot checkout deduction: passed");
   }
 
   // Native Recipe `pcs` maps only at the existing Product projection boundary;

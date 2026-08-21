@@ -687,16 +687,18 @@ export type ProductLotDeduction = {
   quantity: number;
 };
 
-export async function deductProductStockLotsWithScalarProjection(
-  input: {
-    businessId: string;
-    productId: string;
-    deductions: ProductLotDeduction[];
-    movementType: string;
-    movementReason: string;
-    linkedSaleId?: string | null;
-  },
-  db?: RepositoryDatabase,
+type DeductProductStockLotsInput = {
+  businessId: string;
+  productId: string;
+  deductions: ProductLotDeduction[];
+  movementType: string;
+  movementReason: string;
+  linkedSaleId?: string | null;
+};
+
+async function applyProductStockLotDeductions(
+  input: DeductProductStockLotsInput,
+  txn: RepositoryDatabase,
 ) {
   if (input.deductions.length === 0) {
     throw new Error("At least one Product-lot deduction is required.");
@@ -715,36 +717,34 @@ export async function deductProductStockLotsWithScalarProjection(
     total += deduction.quantity;
   }
 
-  const database = getRepositoryDatabase(db);
-  await database.withExclusiveTransactionAsync(async (txn) => {
-    const timestamp = nowIso();
-    const { product, lots } = await readProductAndLots(
-      input.productId,
-      input.businessId,
-      txn,
-    );
-    const catalogItemId = await requireLotTrackedProductBinding(
-      input.productId,
-      input.businessId,
-      txn,
-    );
-    if (lots.some((lot) => lot.catalog_item_id !== catalogItemId)) {
-      throw new Error("Product lots contain contradictory catalog bindings.");
-    }
-    if (lots.some((lot) => lot.unit !== product.unit_type)) {
-      throw new Error("Product lots contain contradictory stock units.");
-    }
-    const before = reconciliationFromRows(product.stock_qty, lots);
-    if (!before.canAllocate) {
-      throw new Error(`Product stock reconciliation blocked: ${before.status}.`);
-    }
-    if (product.stock_qty + INVENTORY_QUANTITY_TOLERANCE < total) {
-      throw new Error("Insufficient Product scalar stock.");
-    }
+  const timestamp = nowIso();
+  const { product, lots } = await readProductAndLots(
+    input.productId,
+    input.businessId,
+    txn,
+  );
+  const catalogItemId = await requireLotTrackedProductBinding(
+    input.productId,
+    input.businessId,
+    txn,
+  );
+  if (lots.some((lot) => lot.catalog_item_id !== catalogItemId)) {
+    throw new Error("Product lots contain contradictory catalog bindings.");
+  }
+  if (lots.some((lot) => lot.unit !== product.unit_type)) {
+    throw new Error("Product lots contain contradictory stock units.");
+  }
+  const before = reconciliationFromRows(product.stock_qty, lots);
+  if (!before.canAllocate) {
+    throw new Error(`Product stock reconciliation blocked: ${before.status}.`);
+  }
+  if (product.stock_qty + INVENTORY_QUANTITY_TOLERANCE < total) {
+    throw new Error("Insufficient Product scalar stock.");
+  }
 
-    for (const deduction of input.deductions) {
-      const result = await txn.runAsync(
-        `
+  for (const deduction of input.deductions) {
+    const result = await txn.runAsync(
+      `
           UPDATE product_stock_lots
           SET remaining_quantity = remaining_quantity - ?,
             status = CASE
@@ -755,67 +755,132 @@ export async function deductProductStockLotsWithScalarProjection(
           WHERE id = ? AND product_id = ? AND business_id = ?
             AND status = 'active' AND deleted_at IS NULL
             AND remaining_quantity + ? >= ?
-        `,
-        [
-          deduction.quantity,
-          deduction.quantity,
-          INVENTORY_QUANTITY_TOLERANCE,
-          timestamp,
-          deduction.lotId,
-          input.productId,
-          input.businessId,
-          INVENTORY_QUANTITY_TOLERANCE,
-          deduction.quantity,
-        ],
-      );
-      if (result.changes !== 1) {
-        throw new Error("Product lot changed or became insufficient.");
-      }
+      `,
+      [
+        deduction.quantity,
+        deduction.quantity,
+        INVENTORY_QUANTITY_TOLERANCE,
+        timestamp,
+        deduction.lotId,
+        input.productId,
+        input.businessId,
+        INVENTORY_QUANTITY_TOLERANCE,
+        deduction.quantity,
+      ],
+    );
+    if (result.changes !== 1) {
+      throw new Error("Product lot changed or became insufficient.");
     }
+  }
 
-    const scalarResult = await txn.runAsync(
-      `
+  const scalarResult = await txn.runAsync(
+    `
         UPDATE products
         SET stock_qty = stock_qty - ?, updated_at = ?, sync_status = 'local'
         WHERE id = ? AND business_id = ? AND deleted_at IS NULL
           AND ABS(stock_qty - ?) <= ?
           AND stock_qty + ? >= ?
       `,
-      [
-        total,
-        timestamp,
-        input.productId,
-        input.businessId,
-        product.stock_qty,
-        INVENTORY_QUANTITY_TOLERANCE,
-        INVENTORY_QUANTITY_TOLERANCE,
-        total,
-      ],
-    );
-    if (scalarResult.changes !== 1) {
-      throw new Error("Product scalar changed or became insufficient.");
-    }
+    [
+      total,
+      timestamp,
+      input.productId,
+      input.businessId,
+      product.stock_qty,
+      INVENTORY_QUANTITY_TOLERANCE,
+      INVENTORY_QUANTITY_TOLERANCE,
+      total,
+    ],
+  );
+  if (scalarResult.changes !== 1) {
+    throw new Error("Product scalar changed or became insufficient.");
+  }
 
-    await txn.runAsync(
-      `
+  await txn.runAsync(
+    `
         INSERT INTO inventory_movements (
           id, business_id, branch_id, product_id, movement_type, quantity,
           reason, linked_sale_id, unit_cost, total_cost, created_at, updated_at,
           sync_status, deleted_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'local', NULL)
       `,
-      [
-        makeMovementId(),
-        input.businessId,
-        product.branch_id,
-        input.productId,
-        input.movementType,
-        -total,
-        input.movementReason,
-        input.linkedSaleId ?? null,
-        timestamp,
-        timestamp,
-      ],
+    [
+      makeMovementId(),
+      input.businessId,
+      product.branch_id,
+      input.productId,
+      input.movementType,
+      -total,
+      input.movementReason,
+      input.linkedSaleId ?? null,
+      timestamp,
+      timestamp,
+    ],
+  );
+}
+
+export async function deductProductStockLotsWithScalarProjection(
+  input: DeductProductStockLotsInput,
+  db?: RepositoryDatabase,
+) {
+  const database = getRepositoryDatabase(db);
+  await database.withExclusiveTransactionAsync((txn) =>
+    applyProductStockLotDeductions(input, txn),
+  );
+}
+
+/**
+ * Allocates a sale or other scalar quantity across the canonical oldest-first
+ * Product-lot order, then applies lot, scalar, and movement writes together.
+ */
+export async function deductAvailableProductStockLotsWithScalarProjection(
+  input: Omit<DeductProductStockLotsInput, "deductions"> & {
+    quantity: number;
+  },
+  db?: RepositoryDatabase,
+): Promise<ProductLotDeduction[]> {
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+    throw new Error("Product-lot deduction quantity must be positive.");
+  }
+  const database = getRepositoryDatabase(db);
+  const apply = async (txn: RepositoryDatabase) => {
+    const lots = await listProductStockLots(input.productId, txn);
+    let remaining = input.quantity;
+    const deductions: ProductLotDeduction[] = [];
+    for (const lot of lots) {
+      if (
+        lot.businessId !== input.businessId ||
+        lot.status !== "active" ||
+        lot.remainingQuantity <= INVENTORY_QUANTITY_TOLERANCE
+      ) {
+        continue;
+      }
+      const quantity = Math.min(lot.remainingQuantity, remaining);
+      deductions.push({ lotId: lot.id, quantity });
+      remaining -= quantity;
+      if (remaining <= INVENTORY_QUANTITY_TOLERANCE) break;
+    }
+    if (remaining > INVENTORY_QUANTITY_TOLERANCE) {
+      throw new Error("Insufficient Product-lot stock.");
+    }
+    await applyProductStockLotDeductions(
+      {
+        businessId: input.businessId,
+        productId: input.productId,
+        deductions,
+        movementType: input.movementType,
+        movementReason: input.movementReason,
+        linkedSaleId: input.linkedSaleId,
+      },
+      txn,
     );
+    return deductions;
+  };
+  if (db) return apply(database);
+  let result: ProductLotDeduction[] | null = null;
+  await database.withExclusiveTransactionAsync(async (txn) => {
+    result = await apply(txn);
   });
+  if (!result) throw new Error("Product-lot deduction did not complete.");
+  return result;
 }

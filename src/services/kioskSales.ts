@@ -2,6 +2,7 @@ import { openKitamoDatabase } from "@/db/client";
 import { runMigrations } from "@/db/migrations";
 import type { LocalDataCounts } from "@/db/schema";
 import {
+  deductAvailableProductStockLotsWithScalarProjection,
   getAverageProducedCostByProduct,
   listIngredientLotsForBusiness,
   listKioskEligibleCatalogProducts,
@@ -366,6 +367,9 @@ export async function completeKioskSale(
     const eligibleProductIds = new Set(
       eligibleAtCheckout.map((item) => item.productId),
     );
+    const eligibleByProductId = new Map(
+      eligibleAtCheckout.map((item) => [item.productId, item]),
+    );
     const unavailableItem = input.cartItems.find(
       (item) => !eligibleProductIds.has(item.productId),
     );
@@ -409,19 +413,34 @@ export async function completeKioskSale(
       }
 
       const cogs = cogsByIndex[itemIndex];
+      const eligibleItem = eligibleByProductId.get(item.productId);
 
       if (!cogs.cookedToOrder) {
-        const updateResult = await txn.runAsync(
-          `
-            UPDATE products
-            SET stock_qty = stock_qty - ?, updated_at = ?, sync_status = ?
-            WHERE id = ? AND business_id = ? AND deleted_at IS NULL AND stock_qty >= ?
-          `,
-          [item.quantity, timestamp, "local", item.productId, activeBusiness.id, item.quantity],
-        );
+        if (eligibleItem?.stockPolicy === "product_lots") {
+          await deductAvailableProductStockLotsWithScalarProjection(
+            {
+              businessId: activeBusiness.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              movementType: "stock_out_sale",
+              movementReason: `Kiosk sale ${transactionNo}`,
+              linkedSaleId: saleId,
+            },
+            txn,
+          );
+        } else {
+          const updateResult = await txn.runAsync(
+            `
+              UPDATE products
+              SET stock_qty = stock_qty - ?, updated_at = ?, sync_status = ?
+              WHERE id = ? AND business_id = ? AND deleted_at IS NULL AND stock_qty >= ?
+            `,
+            [item.quantity, timestamp, "local", item.productId, activeBusiness.id, item.quantity],
+          );
 
-        if (updateResult.changes !== 1) {
-          throw new Error(`${item.name} does not have enough stock for this sale.`);
+          if (updateResult.changes !== 1) {
+            throw new Error(`${item.name} does not have enough stock for this sale.`);
+          }
         }
       }
 
@@ -460,30 +479,35 @@ export async function completeKioskSale(
         ],
       );
 
-      await txn.runAsync(
-        `
-          INSERT INTO inventory_movements (
-            id, business_id, branch_id, product_id, movement_type, quantity, reason,
-            linked_sale_id, unit_cost, total_cost, created_at, updated_at, sync_status, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          makeMovementId(),
-          activeBusiness.id,
-          activeBranch.id,
-          item.productId,
-          "stock_out_sale",
-          item.quantity,
-          `Kiosk sale ${transactionNo}`,
-          saleId,
-          cogs.cogsPerUnit,
-          cogs.cogsTotal,
-          timestamp,
-          timestamp,
-          "local",
-          null,
-        ],
-      );
+      if (
+        cogs.cookedToOrder ||
+        eligibleItem?.stockPolicy !== "product_lots"
+      ) {
+        await txn.runAsync(
+          `
+            INSERT INTO inventory_movements (
+              id, business_id, branch_id, product_id, movement_type, quantity, reason,
+              linked_sale_id, unit_cost, total_cost, created_at, updated_at, sync_status, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            makeMovementId(),
+            activeBusiness.id,
+            activeBranch.id,
+            item.productId,
+            "stock_out_sale",
+            item.quantity,
+            `Kiosk sale ${transactionNo}`,
+            saleId,
+            cogs.cogsPerUnit,
+            cogs.cogsTotal,
+            timestamp,
+            timestamp,
+            "local",
+            null,
+          ],
+        );
+      }
 
       if (cogs.orderPlan) {
         for (const deduction of cogs.orderPlan.deductions) {
